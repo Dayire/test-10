@@ -1,0 +1,970 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kafka in Motion</title>
+<meta name="description" content="An animated, step-by-step explanation of how Apache Kafka moves events from producers through topics and partitions to consumers.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f3f5f8;
+    --surface: #ffffff;
+    --surface-2: #edf0f4;
+    --ink: #161b22;
+    --muted: #5f6b7a;
+    --line: #d7dde6;
+    --accent: #0f766e;
+    --accent-ink: #ffffff;
+    --accent-soft: #d5f0eb;
+    --danger: #c2410c;
+    --key-a: #e08a00;
+    --key-b: #2f6fed;
+    --key-c: #1f9d55;
+    --key-d: #d6336c;
+    --shadow: 0 1px 2px rgba(22, 27, 34, .06), 0 8px 24px -12px rgba(22, 27, 34, .18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0e1218;
+      --surface: #151a22;
+      --surface-2: #1c222c;
+      --ink: #e7ebf0;
+      --muted: #97a2b0;
+      --line: #2a323e;
+      --accent: #2fc4b2;
+      --accent-ink: #06201c;
+      --accent-soft: #123b36;
+      --danger: #fb923c;
+      --key-a: #f5a524;
+      --key-b: #5b8def;
+      --key-c: #3ccf7a;
+      --key-d: #f06292;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px -12px rgba(0, 0, 0, .6);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e1218;
+    --surface: #151a22;
+    --surface-2: #1c222c;
+    --ink: #e7ebf0;
+    --muted: #97a2b0;
+    --line: #2a323e;
+    --accent: #2fc4b2;
+    --accent-ink: #06201c;
+    --accent-soft: #123b36;
+    --danger: #fb923c;
+    --key-a: #f5a524;
+    --key-b: #5b8def;
+    --key-c: #3ccf7a;
+    --key-d: #f06292;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px -12px rgba(0, 0, 0, .6);
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    padding-block: 20px 32px;
+    padding-inline: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  .app { max-width: 1000px; margin: 0 auto; display: grid; gap: 14px; }
+
+  .top { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .top h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin: 0; line-height: 1.2; }
+  .top .lede { margin: 0; color: var(--muted); font-size: 14px; max-width: 60ch; text-wrap: balance; }
+
+  .stage-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  canvas#stage { display: block; width: 100%; aspect-ratio: 960 / 480; max-width: 100%; }
+
+  .controls {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px 18px; flex-wrap: wrap;
+  }
+  .group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .group-label {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+    margin-right: 2px;
+  }
+
+  button {
+    font: inherit; color: inherit; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    height: 34px; padding: 0 12px; font-size: 13px; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background-color .15s, border-color .15s, opacity .15s;
+  }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button:focus-visible, .pill:focus-visible, .seg button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  button svg { width: 14px; height: 14px; fill: currentColor; }
+
+  .transport { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .transport button { border: 0; border-radius: 0; height: 36px; }
+  .transport button + button { border-left: 1px solid var(--line); }
+  .transport button.play { background: var(--accent); color: var(--accent-ink); padding: 0 16px; min-width: 96px; justify-content: center; }
+  .transport button.play:hover:not(:disabled) { filter: brightness(1.06); }
+
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .seg button { border: 0; border-radius: 0; height: 32px; padding: 0 11px; font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--ink); font-weight: 600; }
+
+  .steps { display: flex; gap: 6px; flex-wrap: wrap; list-style: none; margin: 0; padding: 0; }
+  .pill {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px; height: 28px; padding: 0 10px 0 8px; border-radius: 999px;
+    background: transparent; border: 1px solid var(--line); color: var(--muted);
+  }
+  .pill .n { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface-2); font-size: 10px; color: var(--muted); }
+  .pill[aria-current="step"] { background: var(--accent-soft); border-color: transparent; color: var(--ink); }
+  .pill[aria-current="step"] .n { background: var(--accent); color: var(--accent-ink); }
+  .pill.done { color: var(--ink); }
+  .pill.done .n { background: var(--ink); color: var(--surface); }
+
+  .caption {
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px;
+    padding: 14px 18px 16px; min-height: 108px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  }
+  .caption .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 600;
+  }
+  .caption h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; text-wrap: balance; }
+  .caption p { margin: 2px 0 0; max-width: 72ch; color: var(--ink); }
+  .caption p code {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .92em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px;
+  }
+
+  .hints {
+    display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px;
+  }
+  .hints kbd {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+    padding: 1px 6px; background: var(--surface); color: var(--ink);
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 14px; }
+    .top h1 { font-size: 19px; }
+    .transport button.play { min-width: 0; padding: 0 12px; }
+    .transport button.play .label { display: none; }
+    .hints { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+  }
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="top">
+    <h1>Kafka in Motion</h1>
+    <p class="lede">How events travel from producers, through topics and partitions, to consumers. Step through it, or press play.</p>
+  </header>
+
+  <section class="stage-card">
+    <canvas id="stage" role="img" aria-label="Animated diagram: producers on the left send events into a Kafka topic with three partitions in the middle; consumer groups on the right read them."></canvas>
+  </section>
+
+  <section class="caption" aria-live="polite">
+    <div class="eyebrow" id="cap-eyebrow">Step 1 of 8</div>
+    <h2 id="cap-title">Producers send events</h2>
+    <p id="cap-text"></p>
+  </section>
+
+  <div class="controls">
+    <div class="group">
+      <div class="transport" role="group" aria-label="Playback">
+        <button id="btn-prev" title="Previous step (Left arrow)" aria-label="Previous step">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2h2v12H4zM13 2v12L6.5 8z"/></svg>
+        </button>
+        <button id="btn-play" class="play" title="Play through all steps (Space)" aria-label="Play">
+          <svg id="ico-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2v12L13.5 8z"/></svg>
+          <svg id="ico-pause" viewBox="0 0 16 16" aria-hidden="true" hidden><path d="M3 2h3.5v12H3zM9.5 2H13v12H9.5z"/></svg>
+          <span class="label" id="play-label">Play</span>
+        </button>
+        <button id="btn-next" title="Next step (Right arrow)" aria-label="Next step">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 2h2v12h-2zM3 2v12L9.5 8z"/></svg>
+        </button>
+      </div>
+      <div class="seg" role="group" aria-label="Speed" id="speed">
+        <button data-speed="0.5" aria-pressed="false">0.5×</button>
+        <button data-speed="1" aria-pressed="true">1×</button>
+        <button data-speed="2" aria-pressed="false">2×</button>
+      </div>
+      <button id="btn-restart" title="Restart from step 1 (R)">Restart</button>
+    </div>
+    <div class="group" role="group" aria-label="Try it">
+      <span class="group-label">Try it</span>
+      <button id="btn-send" title="Send one event from a producer (E)">Send event</button>
+      <button id="btn-add" title="Add a consumer to the billing group">+ Consumer</button>
+      <button id="btn-remove" title="Remove a consumer from the billing group">− Consumer</button>
+      <button id="btn-broker" title="Take broker 2 offline">Fail broker 2</button>
+    </div>
+  </div>
+
+  <ol class="steps" id="steps" aria-label="Steps"></ol>
+
+  <footer class="hints">
+    <span><kbd>Space</kbd> play / pause</span>
+    <span><kbd>←</kbd> <kbd>→</kbd> steps</span>
+    <span><kbd>E</kbd> send event</span>
+    <span><kbd>R</kbd> restart</span>
+    <span>Click a producer on the diagram to send an event.</span>
+  </footer>
+</main>
+
+<script>
+(() => {
+'use strict';
+
+// ---------------------------------------------------------------- model
+const W = 960, H = 480;
+const NP = 3;                       // partitions in the topic
+const SLOTS = 11, SLOT = 34;        // visible cells per partition log
+const KEYS = [
+  { name: 'Ana',  letter: 'A' },
+  { name: 'Ben',  letter: 'B' },
+  { name: 'Cleo', letter: 'C' },
+  { name: 'Dev',  letter: 'D' },
+];
+const keyIndex = name => KEYS.findIndex(k => k.name === name);
+const partitionFor = name => keyIndex(name) % NP;   // "hash(key) mod partitions"
+const PRODUCERS = [{ name: 'Web shop' }, { name: 'Mobile app' }];
+const GROUP_DEFS = [
+  { id: 'billing',   style: 'ink' },
+  { id: 'analytics', style: 'accent' },
+];
+const MAX_CONSUMERS = 4;
+
+const PRODUCE_FLIGHT = 800;   // ms, producer -> partition
+const READ_FLIGHT = 520;      // ms, partition -> consumer
+const READ_GAP = 220;         // ms a consumer rests between reads
+const HOLD = 1400;            // ms a step lingers after its last action
+
+function freshState() {
+  return {
+    step: 0, stepT: 0, fired: 0, seq: 0,
+    parts: Array.from({ length: NP }, (_, i) => ({ events: [], leader: i, replicas: [i, (i + 1) % NP] })),
+    producers: PRODUCERS.map(p => ({ ...p, shown: false, a: 0, pulse: -1e9 })),
+    groups: GROUP_DEFS.map(g => ({ ...g, shown: false, a: 0, consumers: [], offsets: [0, 0, 0], h: 0 })),
+    brokers: [0, 1, 2].map(() => ({ alive: true, a: 1 })),
+    clusterShown: false, clusterA: 0,
+    split: 0, splitA: 0,
+    offsetsShown: false, offsetsA: 0,
+    legendShown: false, legendA: 0,
+    brokersShown: false, brokersA: 0,
+    tokens: [], flashes: [],
+    manualProducer: 0, manualKey: 0,
+  };
+}
+
+// ---------------------------------------------------------------- steps
+const STEPS = [
+  {
+    short: 'Producers', title: 'Producers send events',
+    text: 'Applications that create data are producers. Each time something happens, like a customer placing an order, the producer sends an event to Kafka. Events are filed under a named topic; this one is called <code>orders</code>.',
+    actions: [
+      { at: 0,    do: 'showProducer', i: 0 },
+      { at: 300,  do: 'showCluster' },
+      { at: 900,  do: 'produce', p: 0, key: 'Ana' },
+      { at: 1700, do: 'showProducer', i: 1 },
+      { at: 2100, do: 'produce', p: 1, key: 'Ben' },
+      { at: 3000, do: 'produce', p: 0, key: 'Cleo' },
+    ],
+  },
+  {
+    short: 'Partitions', title: 'A topic is split into partitions',
+    text: 'Behind the scenes a topic is divided into partitions, so the work can spread over several machines. Every event carries a key, here the customer. Events with the same key always land in the same partition, which keeps one customer’s orders in order.',
+    actions: [
+      { at: 0,    do: 'split' },
+      { at: 400,  do: 'showLegend' },
+      { at: 1600, do: 'produce', p: 1, key: 'Ana' },
+      { at: 2500, do: 'produce', p: 0, key: 'Dev' },
+      { at: 3400, do: 'produce', p: 1, key: 'Cleo' },
+      { at: 4300, do: 'produce', p: 0, key: 'Ben' },
+    ],
+  },
+  {
+    short: 'Offsets', title: 'Each partition is an append-only log',
+    text: 'New events are always added at the end, never inserted in the middle or changed afterwards. Every position in a partition has a number, the offset. Offsets are how Kafka and its consumers refer to a place in the log.',
+    actions: [
+      { at: 0,    do: 'showOffsets' },
+      { at: 1000, do: 'produce', p: 0, key: 'Ana' },
+      { at: 1900, do: 'produce', p: 1, key: 'Dev' },
+      { at: 2800, do: 'produce', p: 0, key: 'Cleo' },
+    ],
+  },
+  {
+    short: 'Consumers', title: 'Consumers read the log',
+    text: 'A consumer subscribes to a topic and reads events in order, partition by partition. The marker under each partition is its offset: the next event it will read. After a restart it simply continues from there. Reading removes nothing from the log.',
+    actions: [
+      { at: 0, do: 'showGroup', g: 0 },
+    ],
+  },
+  {
+    short: 'Groups', title: 'Consumer groups share the work',
+    text: 'Consumers that use the same group name split the partitions between them: each partition is read by exactly one consumer in the group. Add a consumer and Kafka rebalances. More consumers than partitions? The extra one waits idle.',
+    actions: [
+      { at: 0,    do: 'addConsumer', g: 0 },
+      { at: 1800, do: 'produce', p: 0, key: 'Ben' },
+      { at: 2500, do: 'produce', p: 1, key: 'Cleo' },
+      { at: 3200, do: 'produce', p: 0, key: 'Ana' },
+      { at: 3900, do: 'produce', p: 1, key: 'Dev' },
+    ],
+  },
+  {
+    short: 'Retention', title: 'Many readers, one log',
+    text: 'Because reading deletes nothing, another team can read the same events independently. A new group starts wherever it likes, here from the very beginning, and keeps its own offsets. Kafka keeps events for a configured retention period, for example seven days.',
+    actions: [
+      { at: 0,    do: 'showGroup', g: 1 },
+      { at: 3200, do: 'produce', p: 1, key: 'Ana' },
+    ],
+  },
+  {
+    short: 'Brokers', title: 'Brokers keep copies of every partition',
+    text: 'Kafka runs as a cluster of servers called brokers. Each partition has a leader on one broker and copies on others. When a broker fails, a copy takes over as leader and producers and consumers carry on. Nothing is lost.',
+    actions: [
+      { at: 0,    do: 'showBrokers' },
+      { at: 2600, do: 'brokerDown', b: 1 },
+      { at: 4200, do: 'produce', p: 0, key: 'Ben' },
+      { at: 5000, do: 'produce', p: 1, key: 'Ana' },
+    ],
+  },
+  {
+    short: 'Recap', title: 'That is Kafka',
+    text: 'Producers append events to partitioned topics. Consumers read them in order at their own pace, alone or as a group, and the log stays in place for everyone else. Now try it yourself: send events, add or remove consumers, fail a broker, and watch the offsets move.',
+    actions: [
+      { at: 0, do: 'brokerUp', b: 1 },
+    ],
+  },
+];
+
+// ---------------------------------------------------------------- engine
+let S = freshState();
+let now = 0;                 // animation clock in ms, scaled by speed, always runs
+let speed = 1;
+let playing = false;         // the step script advances only while playing
+let autoAdvance = false;     // keep going to the next step when one completes
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const part = p => S.parts[p];
+const landedCount = p => { const ev = part(p).events; let n = 0; while (n < ev.length && ev[n].landed) n++; return n; };
+const lag = (g, p) => Math.max(0, landedCount(p) - g.offsets[p]);
+const totalLag = () => S.groups.reduce((t, g) => g.shown ? t + [0, 1, 2].reduce((u, p) => u + (g.consumers.some(c => c.assigned.includes(p)) ? lag(g, p) : 0), 0) : t, 0);
+
+function rebalance(g) {
+  // Kafka's range assignment: consecutive partitions per consumer; the first few get one extra.
+  const n = g.consumers.length;
+  if (!n) return;
+  const base = Math.floor(NP / n), extra = NP % n;
+  let p = 0;
+  g.consumers.forEach((c, i) => {
+    const count = base + (i < extra ? 1 : 0);
+    const next = [];
+    for (let k = 0; k < count; k++) next.push(p++);
+    if (next.join() !== c.assigned.join()) c.flash = now;
+    c.assigned = next;
+  });
+}
+
+function addConsumer(gi, instant) {
+  const g = S.groups[gi];
+  if (g.consumers.length >= MAX_CONSUMERS) return;
+  g.shown = true;
+  g.consumers.push({ name: g.id + '-' + (g.consumers.length + 1), a: instant ? 1 : 0, assigned: [], reads: 0, nextReadAt: 0, busy: false, flash: -1e9, rr: 0 });
+  rebalance(g);
+}
+
+function removeConsumer(gi) {
+  const g = S.groups[gi];
+  if (g.consumers.length <= 1) return;
+  const c = g.consumers.pop();
+  // Events it had fetched but not finished are handed back to the group (re-delivered after the rebalance).
+  S.tokens = S.tokens.filter(t => {
+    if (t.kind === 'consume' && t.consumer === c) { g.offsets[t.p] = Math.min(g.offsets[t.p], t.off); return false; }
+    return true;
+  });
+  rebalance(g);
+}
+
+function startProduce(pi, key, instant) {
+  const p = partitionFor(key);
+  const prod = S.producers[pi];
+  prod.shown = true; S.clusterShown = true;
+  const P = part(p);
+  const ev = { key, p, off: P.events.length, seq: S.seq++, landed: false };
+  P.events.push(ev);
+  if (instant) { ev.landed = true; return; }
+  prod.pulse = now;
+  S.tokens.push({
+    kind: 'produce', ev, p, t0: now, dur: PRODUCE_FLIGHT,
+    from: () => producerAnchor(pi), to: () => slotCenter(ev),
+    done: () => { ev.landed = true; flash(slotCenter(ev), ev.key); },
+  });
+}
+
+function startConsume(g, c, p) {
+  const off = g.offsets[p];
+  const ev = part(p).events[off];
+  g.offsets[p] = off + 1;
+  c.busy = true;
+  S.tokens.push({
+    kind: 'consume', ev, p, off, consumer: c, t0: now, dur: READ_FLIGHT,
+    from: () => slotCenter(ev), to: () => consumerAnchor(g, c),
+    done: () => { c.busy = false; c.reads++; c.flash = now; c.nextReadAt = now + READ_GAP; },
+  });
+}
+
+function autoConsume() {
+  for (const g of S.groups) {
+    if (!g.shown) continue;
+    for (const c of g.consumers) {
+      if (c.busy || now < c.nextReadAt || c.a < 0.6) continue;
+      const cand = c.assigned.filter(p => brokerFor(p).alive && lag(g, p) > 0);
+      if (!cand.length) continue;
+      startConsume(g, c, cand[c.rr++ % cand.length]);
+    }
+  }
+}
+
+const brokerFor = p => S.brokers[part(p).leader];
+
+function brokerDown(b) {
+  const br = S.brokers[b];
+  if (!br.alive) return;
+  br.alive = false;
+  for (const P of S.parts) {
+    if (P.leader !== b) continue;
+    const alt = P.replicas.find(r => r !== b && S.brokers[r].alive);
+    if (alt !== undefined) { P.leader = alt; P.leaderFlash = now; }
+  }
+}
+function brokerUp(b) { S.brokers[b].alive = true; }
+
+function flash(pt, key) { if (!REDUCED) S.flashes.push({ x: pt.x, y: pt.y, t0: now, key }); }
+
+function applyAction(a, instant) {
+  switch (a.do) {
+    case 'showProducer': S.producers[a.i].shown = true; if (instant) S.producers[a.i].a = 1; break;
+    case 'showCluster':  S.clusterShown = true; if (instant) S.clusterA = 1; break;
+    case 'produce':      startProduce(a.p, a.key, instant); break;
+    case 'split':        S.split = 1; if (instant) S.splitA = 1; break;
+    case 'showLegend':   S.legendShown = true; if (instant) S.legendA = 1; break;
+    case 'showOffsets':  S.offsetsShown = true; if (instant) S.offsetsA = 1; break;
+    case 'showGroup':    { const g = S.groups[a.g]; g.shown = true; if (instant) g.a = 1; if (!g.consumers.length) addConsumer(a.g, instant); break; }
+    case 'addConsumer':  addConsumer(a.g, instant); break;
+    case 'showBrokers':  S.brokersShown = true; if (instant) S.brokersA = 1; break;
+    case 'brokerDown':   brokerDown(a.b); if (instant) S.brokers[a.b].a = 0.4; break;
+    case 'brokerUp':     brokerUp(a.b); if (instant) S.brokers[a.b].a = 1; break;
+  }
+}
+
+// Finish the current step instantly: fire what is left, land every token, let consumers catch up.
+function finalizeStep() {
+  const st = STEPS[S.step];
+  while (S.fired < st.actions.length) applyAction(st.actions[S.fired++], true);
+  for (const t of S.tokens) t.done();
+  S.tokens = [];
+  for (const g of S.groups) {
+    if (!g.shown) continue;
+    for (const c of g.consumers) {
+      c.busy = false; c.nextReadAt = 0;
+      for (const p of c.assigned) { const l = lag(g, p); if (l > 0) { c.reads += l; g.offsets[p] = landedCount(p); } }
+    }
+  }
+  S.stepT = st.actions.length ? st.actions[st.actions.length - 1].at + HOLD : HOLD;
+  snapVisuals();
+}
+
+function enterStep(k) { S.step = k; S.stepT = 0; S.fired = 0; renderCaption(); }
+
+function stepDone() {
+  const st = STEPS[S.step];
+  const lastAt = st.actions.length ? st.actions[st.actions.length - 1].at : 0;
+  return S.fired >= st.actions.length && S.stepT >= lastAt + HOLD && S.tokens.length === 0 && totalLag() === 0;
+}
+
+// Rebuild deterministically: replay every earlier step instantly, then let step k animate.
+function gotoStep(k) {
+  S = freshState();
+  for (let i = 0; i < k; i++) { enterStep(i); finalizeStep(); }
+  enterStep(k);
+  snapVisuals();
+  playing = true;
+}
+
+function play() {
+  if (stepDone()) {
+    if (S.step >= STEPS.length - 1) { gotoStep(0); }
+    else { finalizeStep(); enterStep(S.step + 1); }
+  }
+  playing = true; autoAdvance = true;
+}
+function pause() { playing = false; autoAdvance = false; }
+function next() {
+  if (S.step >= STEPS.length - 1) return;
+  finalizeStep(); enterStep(S.step + 1); playing = true;
+}
+function prev() { if (S.step > 0) gotoStep(S.step - 1); }
+
+// One tick of simulated time.
+function tick(dt) {
+  now += dt;
+  if (playing) {
+    const st = STEPS[S.step];
+    S.stepT += dt;
+    while (S.fired < st.actions.length && st.actions[S.fired].at <= S.stepT) applyAction(st.actions[S.fired++], false);
+    if (stepDone()) {
+      if (autoAdvance && S.step < STEPS.length - 1) { enterStep(S.step + 1); }
+      else { playing = false; autoAdvance = false; }
+    }
+  }
+  autoConsume();
+  const keep = [];
+  for (const t of S.tokens) { if (now - t.t0 >= t.dur) t.done(); else keep.push(t); }
+  S.tokens = keep;
+  S.flashes = S.flashes.filter(f => now - f.t0 < 600);
+  easeVisuals(dt);
+}
+
+// Visual values drift toward their logical targets (exponential ease).
+function ease(v, target, dt, tau) { return v + (target - v) * (1 - Math.exp(-dt / tau)); }
+function easeVisuals(dt) {
+  S.clusterA = ease(S.clusterA, S.clusterShown ? 1 : 0, dt, 180);
+  S.splitA   = ease(S.splitA, S.split, dt, 260);
+  S.offsetsA = ease(S.offsetsA, S.offsetsShown ? 1 : 0, dt, 200);
+  S.legendA  = ease(S.legendA, S.legendShown ? 1 : 0, dt, 200);
+  S.brokersA = ease(S.brokersA, S.brokersShown ? 1 : 0, dt, 260);
+  for (const p of S.producers) p.a = ease(p.a, p.shown ? 1 : 0, dt, 180);
+  for (const b of S.brokers) b.a = ease(b.a, b.alive ? 1 : 0.4, dt, 220);
+  for (const g of S.groups) {
+    g.a = ease(g.a, g.shown ? 1 : 0, dt, 200);
+    g.h = ease(g.h, groupHeight(g), dt, 160);
+    for (const c of g.consumers) c.a = ease(c.a, 1, dt, 180);
+  }
+}
+function snapVisuals() {
+  S.clusterA = S.clusterShown ? 1 : 0; S.splitA = S.split; S.offsetsA = S.offsetsShown ? 1 : 0;
+  S.legendA = S.legendShown ? 1 : 0; S.brokersA = S.brokersShown ? 1 : 0;
+  for (const p of S.producers) p.a = p.shown ? 1 : 0;
+  for (const b of S.brokers) b.a = b.alive ? 1 : 0.4;
+  for (const g of S.groups) { g.a = g.shown ? 1 : 0; g.h = groupHeight(g); for (const c of g.consumers) c.a = 1; }
+  S.flashes = [];
+}
+
+// ---------------------------------------------------------------- geometry
+const G = {
+  prod: { x: 20, w: 150, h: 52, ys: [176, 256] },
+  legend: { x: 22, y: 334 },
+  cluster: { x: 200, y: 20, w: 490, hSingle: 196, hShort: 292, hTall: 460 },
+  labelX: 214, logX: 300, logW: SLOTS * SLOT, rowH: 44, rowY: [96, 162, 228],
+  brokers: { y: 314, h: 126, x: 214, w: 146, gap: 12 },
+  cons: { x: 720, w: 220, top: 56, header: 30, chipH: 40, chipGap: 6, pad: 10 },
+};
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const windowStart = p => Math.max(0, part(p).events.length - SLOTS);
+const topicWindowStart = () => Math.max(0, S.seq - SLOTS);
+const rowCenterY = p => lerp(150, G.rowY[p], S.splitA);
+const groupHeight = g => G.cons.header + g.consumers.length * (G.cons.chipH + G.cons.chipGap) - G.cons.chipGap + G.cons.pad + 4;
+const groupTop = gi => gi === 0 ? G.cons.top : G.cons.top + S.groups[0].h + 16;
+function chipRect(gi, ci) {
+  return { x: G.cons.x + G.cons.pad, y: groupTop(gi) + G.cons.header + ci * (G.cons.chipH + G.cons.chipGap), w: G.cons.w - 2 * G.cons.pad, h: G.cons.chipH };
+}
+function consumerAnchor(g, c) {
+  const r = chipRect(S.groups.indexOf(g), g.consumers.indexOf(c));
+  return { x: r.x, y: r.y + r.h / 2 };
+}
+const producerAnchor = pi => ({ x: G.prod.x + G.prod.w, y: G.prod.ys[pi] });
+function slotCenter(ev) {
+  const xPart = G.logX + (clamp(ev.off - windowStart(ev.p), -1, SLOTS) + 0.5) * SLOT;
+  const xTopic = G.logX + (clamp(ev.seq - topicWindowStart(), -1, SLOTS) + 0.5) * SLOT;
+  return { x: lerp(xTopic, xPart, S.splitA), y: rowCenterY(ev.p) - 3 };
+}
+
+// ---------------------------------------------------------------- drawing
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+const MONO = '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+const SANS = '"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+const T = {};
+function readTheme() {
+  const cs = getComputedStyle(document.documentElement);
+  const g = n => cs.getPropertyValue(n).trim();
+  Object.assign(T, { surface: g('--surface'), surface2: g('--surface-2'), ink: g('--ink'), muted: g('--muted'), line: g('--line'),
+    accent: g('--accent'), accentSoft: g('--accent-soft'), danger: g('--danger'), keys: [g('--key-a'), g('--key-b'), g('--key-c'), g('--key-d')] });
+}
+const keyColor = name => T.keys[keyIndex(name)];
+let scale = 1, hoverProducer = -1;
+
+function resize() {
+  const cssW = canvas.clientWidth || W;
+  const dpr = window.devicePixelRatio || 1;
+  scale = cssW / W;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssW * H / W * dpr);
+}
+
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r); ctx.closePath();
+}
+function box(x, y, w, h, r, fill, stroke, lw = 1) {
+  rr(x, y, w, h, r);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
+}
+function text(str, x, y, o = {}) {
+  ctx.font = o.font || `400 13px ${SANS}`;
+  ctx.fillStyle = o.color || T.ink;
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = o.baseline || 'alphabetic';
+  if (o.spacing) ctx.letterSpacing = o.spacing;
+  ctx.fillText(str, x, y);
+  if (o.spacing) ctx.letterSpacing = '0px';
+}
+function withAlpha(a, fn) { if (a <= 0.005) return; const prev = ctx.globalAlpha; ctx.globalAlpha = prev * clamp(a, 0, 1); fn(); ctx.globalAlpha = prev; }
+function dot(key, x, y, r = 10) {
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = keyColor(key); ctx.fill();
+  text(KEYS[keyIndex(key)].letter, x, y + 0.5, { font: `600 ${Math.round(r * 1.05)}px ${MONO}`, color: '#fff', align: 'center', baseline: 'middle' });
+}
+const easeInOut = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+function bezier(a, b, t) {
+  const mx = (a.x + b.x) / 2;
+  const u = 1 - t;
+  return { x: u * u * u * a.x + 3 * u * u * t * mx + 3 * u * t * t * mx + t * t * t * b.x,
+           y: u * u * u * a.y + 3 * u * u * t * a.y + 3 * u * t * t * b.y + t * t * t * b.y };
+}
+function wire(a, b) {
+  const mx = (a.x + b.x) / 2;
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.bezierCurveTo(mx, a.y, mx, b.y, b.x, b.y); ctx.stroke();
+}
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  drawCluster(); drawLines(); drawRows(); drawMarkers(); drawGroups(); drawProducers(); drawBrokers(); drawTokens(); drawFlashes(); drawLegend();
+}
+
+function drawCluster() {
+  withAlpha(S.clusterA, () => {
+    const c = G.cluster, h = lerp(lerp(c.hSingle, c.hShort, S.splitA), c.hTall, S.brokersA);
+    box(c.x, c.y, c.w, h, 14, T.surface2, T.line);
+    text('Kafka cluster', G.labelX, c.y + 28, { font: `600 14px ${SANS}` });
+    const chipX = G.labelX + ctx.measureText('Kafka cluster').width + 10;
+    box(chipX, c.y + 14, 98, 20, 10, T.surface, T.line);
+    text('topic · orders', chipX + 49, c.y + 24.5, { font: `500 11px ${MONO}`, color: T.muted, align: 'center', baseline: 'middle' });
+  });
+}
+
+function drawRows() {
+  withAlpha(S.clusterA, () => {
+    const single = S.splitA < 0.002;
+    const rows = single ? [1] : [0, 1, 2];
+    for (const p of rows) {
+      const y = rowCenterY(p), top = y - G.rowH / 2;
+      box(G.logX, top, G.logW, G.rowH, 8, T.surface, T.line);
+      ctx.strokeStyle = T.line; ctx.lineWidth = 1; ctx.globalAlpha *= 0.7;
+      for (let i = 1; i < SLOTS; i++) { const x = G.logX + i * SLOT; ctx.beginPath(); ctx.moveTo(x, top + 6); ctx.lineTo(x, top + G.rowH - 6); ctx.stroke(); }
+      ctx.globalAlpha /= 0.7;
+      withAlpha(S.offsetsA, () => {
+        const ws = windowStart(p);
+        for (let i = 0; i < SLOTS; i++) text(String(ws + i), G.logX + (i + 0.5) * SLOT, top + G.rowH - 5, { font: `500 9.5px ${MONO}`, color: T.muted, align: 'center' });
+        if (ws > 0) text('…', G.logX - 8, y + 4, { font: `500 12px ${MONO}`, color: T.muted, align: 'center' });
+      });
+      // labels
+      const labelY = y + 4 - 6 * S.brokersA;
+      if (p === 1) withAlpha(1 - S.splitA, () => text('orders', G.labelX, y + 4, { font: `500 12.5px ${MONO}` }));
+      withAlpha(S.splitA, () => {
+        text('Partition ' + p, G.labelX, labelY, { font: `500 12.5px ${MONO}` });
+        withAlpha(S.brokersA, () => {
+          const P = part(p), fresh = now - (P.leaderFlash || -1e9) < 900;
+          text('on broker ' + (P.leader + 1), G.labelX, y + 16, { font: `500 10.5px ${MONO}`, color: fresh ? T.accent : T.muted });
+        });
+      });
+    }
+    // events
+    for (let p = 0; p < NP; p++) {
+      const ev = part(p).events;
+      for (let k = Math.max(0, windowStart(p) - 1); k < ev.length; k++) {
+        if (!ev[k].landed) continue;
+        const c = slotCenter(ev[k]);
+        if (c.x < G.logX + 6) continue;
+        dot(ev[k].key, c.x, c.y);
+      }
+    }
+  });
+}
+
+function drawMarkers() {
+  for (const g of S.groups) {
+    if (g.a < 0.01) continue;
+    withAlpha(g.a * S.splitA, () => {
+      for (let p = 0; p < NP; p++) {
+        const xi = clamp(g.offsets[p] - windowStart(p), 0, SLOTS);
+        const x = G.logX + xi * SLOT, y = rowCenterY(p) + G.rowH / 2 + 3 + (g.style === 'accent' ? 9 : 0);
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 5, y + 7); ctx.lineTo(x + 5, y + 7); ctx.closePath();
+        ctx.fillStyle = g.style === 'accent' ? T.accent : T.ink; ctx.fill();
+      }
+    });
+  }
+}
+
+function drawLines() {
+  for (const g of S.groups) {
+    if (g.a < 0.01) continue;
+    const gi = S.groups.indexOf(g);
+    g.consumers.forEach((c, ci) => {
+      const r = chipRect(gi, ci);
+      for (const p of c.assigned) {
+        withAlpha(g.a * c.a * (g.style === 'accent' ? 0.7 : 0.35), () => {
+          ctx.strokeStyle = g.style === 'accent' ? T.accent : T.ink; ctx.lineWidth = 1.5;
+          ctx.setLineDash(g.style === 'accent' ? [4, 4] : []);
+          wire({ x: G.logX + G.logW, y: rowCenterY(p) }, { x: r.x, y: r.y + r.h / 2 });
+          ctx.setLineDash([]);
+        });
+      }
+    });
+  }
+}
+
+function drawGroups() {
+  S.groups.forEach((g, gi) => {
+    if (g.a < 0.01) return;
+    withAlpha(g.a, () => {
+      const top = groupTop(gi), x = G.cons.x;
+      box(x, top, G.cons.w, g.h, 12, T.surface2, T.line);
+      const mx = x + 18, my = top + 15;
+      ctx.beginPath(); ctx.moveTo(mx, my - 4); ctx.lineTo(mx - 5, my + 3); ctx.lineTo(mx + 5, my + 3); ctx.closePath();
+      ctx.fillStyle = g.style === 'accent' ? T.accent : T.ink; ctx.fill();
+      text(g.id, x + 30, top + 20, { font: `600 13.5px ${SANS}` });
+      text('consumer group', x + G.cons.w - 12, top + 19.5, { font: `500 10.5px ${MONO}`, color: T.muted, align: 'right' });
+      g.consumers.forEach((c, ci) => {
+        const r = chipRect(gi, ci), fresh = now - c.flash < 350, idle = c.assigned.length === 0;
+        withAlpha(c.a, () => {
+          const dx = 10 * (1 - c.a);
+          box(r.x + dx, r.y, r.w, r.h, 8, T.surface, fresh ? T.accent : T.line, fresh ? 1.5 : 1);
+          text(c.name, r.x + dx + 10, r.y + 17, { font: `500 12px ${MONO}` });
+          const sub = idle ? 'idle · nothing assigned' : 'reads ' + c.assigned.map(p => 'P' + p).join(' ');
+          text(sub, r.x + dx + 10, r.y + 31, { font: `400 10.5px ${MONO}`, color: T.muted });
+          if (c.reads > 0) text(c.reads + ' read', r.x + dx + r.w - 10, r.y + 17, { font: `500 10.5px ${MONO}`, color: T.muted, align: 'right' });
+        });
+      });
+    });
+  });
+}
+
+function drawProducers() {
+  S.producers.forEach((p, i) => {
+    if (p.a < 0.01) return;
+    withAlpha(p.a, () => {
+      const y = G.prod.ys[i] + 8 * (1 - p.a), x = G.prod.x;
+      box(x, y - G.prod.h / 2, G.prod.w, G.prod.h, 10, T.surface, hoverProducer === i ? T.muted : T.line, hoverProducer === i ? 1.5 : 1);
+      text(p.name, x + 16, y - 2, { font: `600 13.5px ${SANS}` });
+      text('producer', x + 16, y + 14, { font: `500 10.5px ${MONO}`, color: T.muted });
+      const age = now - p.pulse;
+      if (age < 500 && !REDUCED) withAlpha(1 - age / 500, () => {
+        ctx.beginPath(); ctx.arc(x + G.prod.w, y, 4 + age / 500 * 16, 0, Math.PI * 2); ctx.strokeStyle = T.accent; ctx.lineWidth = 2; ctx.stroke();
+      });
+    });
+  });
+}
+
+function drawBrokers() {
+  withAlpha(S.brokersA, () => {
+    const B = G.brokers, dy = 12 * (1 - S.brokersA);
+    S.brokers.forEach((b, i) => {
+      const x = B.x + i * (B.w + B.gap), y = B.y + dy;
+      withAlpha(b.a, () => {
+        box(x, y, B.w, B.h, 10, T.surface, b.alive ? T.line : T.danger);
+        text('Broker ' + (i + 1), x + 12, y + 22, { font: `600 13px ${SANS}` });
+        text(b.alive ? 'online' : 'offline', x + B.w - 12, y + 21.5, { font: `500 10.5px ${MONO}`, color: b.alive ? T.muted : T.danger, align: 'right' });
+        let row = 0;
+        S.parts.forEach((P, p) => {
+          const leader = P.leader === i, copy = P.replicas.includes(i);
+          if (!leader && !copy) return;
+          const cy = y + 38 + row++ * 28, fresh = leader && now - (P.leaderFlash || -1e9) < 900;
+          box(x + 12, cy, B.w - 24, 22, 6, leader ? (fresh ? T.accentSoft : T.surface2) : null, leader ? (fresh ? T.accent : null) : T.line);
+          text('P' + p + (leader ? ' · leader' : ' · copy'), x + 22, cy + 15, { font: `${leader ? 600 : 400} 11px ${MONO}`, color: leader ? T.ink : T.muted });
+        });
+      });
+    });
+  });
+}
+
+function drawTokens() {
+  for (const t of S.tokens) {
+    const e = easeInOut(clamp((now - t.t0) / t.dur, 0, 1));
+    const pt = bezier(t.from(), t.to(), e);
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.28)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
+    dot(t.ev.key, pt.x, pt.y, 10.5);
+    ctx.restore();
+  }
+}
+function drawFlashes() {
+  for (const f of S.flashes) {
+    const k = (now - f.t0) / 600;
+    withAlpha((1 - k) * 0.8, () => { ctx.beginPath(); ctx.arc(f.x, f.y, 10 + k * 14, 0, Math.PI * 2); ctx.strokeStyle = keyColor(f.key); ctx.lineWidth = 2; ctx.stroke(); });
+  }
+}
+function drawLegend() {
+  withAlpha(S.legendA, () => {
+    const L = G.legend;
+    text('KEY = CUSTOMER', L.x, L.y, { font: `500 10px ${MONO}`, color: T.muted, spacing: '1px' });
+    KEYS.forEach((k, i) => {
+      const y = L.y + 22 + i * 21;
+      dot(k.name, L.x + 8, y, 7.5);
+      text(k.name, L.x + 24, y + 4, { font: `500 12.5px ${SANS}` });
+      withAlpha(S.splitA, () => text('→ Partition ' + partitionFor(k.name), L.x + 66, y + 4, { font: `400 10.5px ${MONO}`, color: T.muted }));
+    });
+  });
+  withAlpha(S.producers[0].a, () => text('Click a producer to send an event', G.prod.x + 2, 452, { font: `400 11.5px ${SANS}`, color: T.muted }));
+}
+
+// ---------------------------------------------------------------- page wiring
+const $ = id => document.getElementById(id);
+const els = { prev: $('btn-prev'), play: $('btn-play'), next: $('btn-next'), restart: $('btn-restart'), send: $('btn-send'),
+  add: $('btn-add'), remove: $('btn-remove'), broker: $('btn-broker'), steps: $('steps'), playLabel: $('play-label'),
+  icoPlay: $('ico-play'), icoPause: $('ico-pause'), eyebrow: $('cap-eyebrow'), title: $('cap-title'), text: $('cap-text') };
+
+STEPS.forEach((st, i) => {
+  const li = document.createElement('li');
+  const b = document.createElement('button');
+  b.className = 'pill'; b.type = 'button'; b.id = 'pill-' + i;
+  b.innerHTML = `<span class="n">${i + 1}</span>${st.short}`;
+  b.title = st.title;
+  b.addEventListener('click', () => { gotoStep(i); });
+  li.appendChild(b); els.steps.appendChild(li);
+});
+const pills = [...els.steps.querySelectorAll('.pill')];
+
+function renderCaption() {
+  const st = STEPS[S.step];
+  els.eyebrow.textContent = `Step ${S.step + 1} of ${STEPS.length}`;
+  els.title.textContent = st.title;
+  els.text.innerHTML = st.text;
+  pills.forEach((p, i) => {
+    if (i === S.step) p.setAttribute('aria-current', 'step'); else p.removeAttribute('aria-current');
+    p.classList.toggle('done', i < S.step);
+  });
+}
+
+const last = {};
+function setIf(key, apply, value) { if (last[key] !== value) { last[key] = value; apply(value); } }
+function updateButtons() {
+  const billing = S.groups[0], atEnd = S.step >= STEPS.length - 1;
+  setIf('prev', v => els.prev.disabled = v, S.step === 0);
+  setIf('next', v => els.next.disabled = v, atEnd);
+  setIf('add', v => els.add.disabled = v, !billing.shown || billing.consumers.length >= MAX_CONSUMERS);
+  setIf('remove', v => els.remove.disabled = v, !billing.shown || billing.consumers.length <= 1);
+  setIf('broker', v => els.broker.disabled = v, !S.brokersShown);
+  setIf('brokerLabel', v => { els.broker.textContent = v; els.broker.title = v === 'Fail broker 2' ? 'Take broker 2 offline' : 'Bring broker 2 back online'; },
+    S.brokers[1].alive ? 'Fail broker 2' : 'Restore broker 2');
+  const mode = playing ? 'pause' : (atEnd && stepDone() ? 'replay' : 'play');
+  setIf('play', v => {
+    els.icoPlay.hidden = v === 'pause'; els.icoPause.hidden = v !== 'pause';
+    els.playLabel.textContent = v === 'pause' ? 'Pause' : v === 'replay' ? 'Replay' : 'Play';
+    els.play.setAttribute('aria-label', v === 'pause' ? 'Pause' : v === 'replay' ? 'Replay from the start' : 'Play through all steps');
+  }, mode);
+}
+
+function sendEvent(pi) {
+  const i = pi ?? (S.manualProducer++ % PRODUCERS.length);
+  startProduce(i, KEYS[S.manualKey++ % KEYS.length].name, false);
+}
+
+els.play.addEventListener('click', () => { if (playing) pause(); else play(); });
+els.prev.addEventListener('click', prev);
+els.next.addEventListener('click', next);
+els.restart.addEventListener('click', () => { gotoStep(0); autoAdvance = false; });
+els.send.addEventListener('click', () => sendEvent());
+els.add.addEventListener('click', () => addConsumer(0, false));
+els.remove.addEventListener('click', () => removeConsumer(0));
+els.broker.addEventListener('click', () => { if (S.brokers[1].alive) brokerDown(1); else brokerUp(1); });
+$('speed').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  speed = parseFloat(b.dataset.speed);
+  $('speed').querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+}));
+
+document.addEventListener('keydown', e => {
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  const onControl = /^(BUTTON|INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+  switch (e.key) {
+    case ' ': if (onControl) return; e.preventDefault(); if (playing) pause(); else play(); break;
+    case 'ArrowRight': e.preventDefault(); next(); break;
+    case 'ArrowLeft': e.preventDefault(); prev(); break;
+    case 'e': case 'E': sendEvent(); break;
+    case 'r': case 'R': gotoStep(0); autoAdvance = false; break;
+  }
+});
+
+function canvasPoint(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+}
+function producerAt(pt) {
+  return S.producers.findIndex((p, i) => p.a > 0.5 && pt.x >= G.prod.x && pt.x <= G.prod.x + G.prod.w && Math.abs(pt.y - G.prod.ys[i]) <= G.prod.h / 2);
+}
+canvas.addEventListener('mousemove', e => { hoverProducer = producerAt(canvasPoint(e)); canvas.style.cursor = hoverProducer >= 0 ? 'pointer' : 'default'; });
+canvas.addEventListener('mouseleave', () => { hoverProducer = -1; });
+canvas.addEventListener('click', e => { const i = producerAt(canvasPoint(e)); if (i >= 0) sendEvent(i); });
+
+// ---------------------------------------------------------------- boot
+readTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
+new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
+new ResizeObserver(resize).observe(canvas);
+resize();
+if (document.fonts && document.fonts.load) {
+  Promise.all([document.fonts.load(`500 12px ${MONO}`), document.fonts.load(`600 13px ${SANS}`)]).catch(() => {});
+}
+
+gotoStep(0);
+playing = false;                       // step 1 starts on its own after a beat
+setTimeout(() => { playing = true; }, 350);
+
+let lastTs = 0;
+function frame(ts) {
+  const dt = Math.min(50, lastTs ? ts - lastTs : 16) * speed;
+  lastTs = ts;
+  tick(dt);
+  draw();
+  updateButtons();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
