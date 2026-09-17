@@ -1,0 +1,55 @@
+"""Demo 07 — matplotlib (Agg) with Computer Modern mathtext. The rocket equation, and why two stages beat one."""
+import sys; sys.path.insert(0, '..')
+import numpy as np, matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from common import *
+plt.rcParams.update({'mathtext.fontset': 'cm', 'font.family': 'DejaVu Sans', 'text.color': 'white'})
+h = lambda c: '#%02x%02x%02x' % c
+VE = 3.0; R = np.linspace(1, 20, 400); DV = VE * np.log(R)
+fig = plt.figure(figsize=(12.8, 7.2), dpi=100, facecolor='black')
+ax = fig.add_axes([0.10, 0.21, 0.62, 0.52], facecolor='black')
+for s in ('top', 'right'): ax.spines[s].set_visible(False)
+for s in ('left', 'bottom'): ax.spines[s].set_color(h(GREY)); ax.spines[s].set_linewidth(1.4)
+ax.tick_params(colors=h(GREY), labelsize=13, length=5)
+ax.set_xlim(1, 20); ax.set_ylim(0, 11.5); ax.set_xticks([1, 5, 10, 15, 20]); ax.set_yticks([0, 3, 6, 9])
+ax.set_xlabel(r'mass ratio  $m_0 / m_f$', color=h(GREY), fontsize=16, labelpad=8)
+ax.set_ylabel(r'$\Delta v$  (km/s)', color=h(GREY), fontsize=16, labelpad=8)
+title = fig.text(0.5, 0.945, 'THE ROCKET EQUATION', ha='center', color=h(TEAL), fontsize=15, alpha=0)
+eq = fig.text(0.41, 0.845, r'$\Delta v \;=\; v_e \,\ln\!\left(\dfrac{m_0}{m_f}\right)$', ha='center', va='center', fontsize=30, alpha=0)
+eq_note = fig.text(0.41, 0.775, r'$v_e \approx 3$ km/s for kerosene–oxygen', ha='center', color=h(GREY), fontsize=14, alpha=0)
+(curve,) = ax.plot([], [], color=h(YELLOW), lw=3.2)
+dot = ax.plot([], [], 'o', color=h(YELLOW), ms=10)[0]
+dot_lbl = ax.text(0, 0, '', color=h(YELLOW), fontsize=15, ha='left', va='bottom')
+orbit_line = ax.axhline(9.4, color=h(RED), lw=1.6, ls='--', alpha=0)
+orbit_lbl = ax.text(1.4, 9.62, 'orbit needs 9.4 km/s', color=h(RED), fontsize=14, alpha=0)
+flat_lbl = ax.text(13.5, 5.3, 'log growth:\ndoubling the propellant\ndoes not double the speed', color=h(GREY), fontsize=13, ha='center', alpha=0)
+# staged rocket: a stacked bar to the right of the plot
+bx = fig.add_axes([0.78, 0.21, 0.14, 0.52], facecolor='black'); bx.set_xlim(0, 1); bx.set_ylim(0, 11.5); bx.axis('off')
+b1 = bx.bar(0.5, 0, width=0.55, color=h(BLUE)); b2 = bx.bar(0.5, 0, width=0.55, bottom=0, color=h(YELLOW))
+bx.axhline(9.4, color=h(RED), lw=1.6, ls='--', alpha=0)
+ax.set_xlim(1, 20.5)
+b_lbl = bx.text(0.5, 11.0, 'two stages', ha='center', color='white', fontsize=15, alpha=0)
+b1_lbl = bx.text(0.5, 2.0, 'stage 1\n4.1', ha='center', va='center', color='black', fontsize=13, alpha=0)
+b2_lbl = bx.text(0.5, 7.3, 'stage 2\n6.5', ha='center', va='center', color='black', fontsize=13, alpha=0)
+cap = fig.text(0.5, 0.06, '', ha='center', fontsize=19, color='white')
+DV1, DV2 = VE * np.log(549 / 138), VE * np.log(122 / 14)
+enc = Encoder('out.mp4')
+for i in range(N):
+    t = i / FPS
+    title.set_alpha(smooth(seg(t, 0, .5))); eq.set_alpha(smooth(seg(t, .2, .9))); eq_note.set_alpha(smooth(seg(t, .6, 1.2)))
+    k = smooth(seg(t, 1.1, 3.0)); n = max(1, int(k * len(R)))
+    curve.set_data(R[:n], DV[:n])
+    if k > 0:
+        dot.set_data([R[n - 1]], [DV[n - 1]]); right = R[n - 1] > 13; dot_lbl.set_ha('right' if right else 'left'); dot_lbl.set_position((R[n - 1] + (-.4 if right else .3), DV[n - 1] + (-1.6 if right else .25)))
+        dot_lbl.set_text(f'{R[n-1]:.0f}× → {DV[n-1]:.1f} km/s')
+    oa = smooth(seg(t, 2.4, 3.0)); orbit_line.set_alpha(oa); orbit_lbl.set_alpha(oa)
+    flat_lbl.set_alpha(smooth(seg(t, 3.0, 3.6)) * .9)
+    sb = smooth(seg(t, 3.5, 4.1)); s2 = smooth(seg(t, 4.0, 4.6))
+    b1[0].set_height(DV1 * sb); b2[0].set_y(DV1 * sb); b2[0].set_height(DV2 * s2)
+    bx.lines[0].set_alpha(oa); b_lbl.set_alpha(sb); b1_lbl.set_alpha(sb if sb > .7 else 0); b2_lbl.set_alpha(s2 if s2 > .8 else 0)
+    if t < 3.4: cap.set_text('One stage: the curve flattens out before orbit.'); cap.set_alpha(smooth(seg(t, 2.9, 3.4)))
+    else: cap.set_text('Drop the empty tank, start the equation again: two small logs beat one big one.'); cap.set_alpha(smooth(seg(t, 3.6, 4.1)))
+    fig.canvas.draw()
+    enc.write(np.asarray(fig.canvas.buffer_rgba())[..., :3])
+enc.close(); print('demo 07 done')

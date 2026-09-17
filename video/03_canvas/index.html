@@ -1,0 +1,73 @@
+<!doctype html><meta charset="utf-8"><title>03 canvas — combustion</title>
+<style>
+@font-face{font-family:STIXi;src:url(file:///usr/local/lib/python3.11/dist-packages/matplotlib/mpl-data/fonts/ttf/STIXGeneralItalic.ttf)}
+@font-face{font-family:STIX;src:url(file:///usr/local/lib/python3.11/dist-packages/matplotlib/mpl-data/fonts/ttf/STIXGeneral.ttf)}
+html,body{margin:0;background:#000}canvas{display:block}
+</style>
+<canvas id="c" width="1280" height="720"></canvas>
+<script>
+// Demo 03 — HTML Canvas 2D in headless Chromium. Combustion: cold propellant mist → ignition → 3,300 °C gas.
+const W = 1280, H = 720, cv = document.getElementById('c'), g = cv.getContext('2d');
+const BLUE = '#58C4DD', YELLOW = '#FFFF00', RED = '#FC6255', TEAL = '#5CD0B3', WHITE = '#fff', GREY = '#888', ORANGE = '#FF862F';
+const smooth = t => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
+const seg = (t, a, b) => Math.min(1, Math.max(0, (t - a) / (b - a)));
+let seed = 7; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+// chamber: rounded box in the centre; injector plate along the top
+const CH = { x: 340, y: 150, w: 600, h: 330 };
+const IGN_T = 1.7, IGN_X = CH.x + CH.w / 2, IGN_Y = CH.y + CH.h * .45;
+const P = [];                                    // molecules
+for (let i = 0; i < 260; i++) P.push({ kind: i % 3 === 0 ? 'fuel' : 'ox', born: rnd() * 1.5, x: CH.x + 40 + rnd() * (CH.w - 80), y: CH.y + 14, vx: (rnd() - .5) * 60, vy: 120 + rnd() * 120, burnt: 0, r: i % 3 === 0 ? 5 : 4 });
+let last = 0, front = 0;
+function step(dt, t) {
+  if (t > IGN_T) front = Math.min(1200, front + dt * 520);   // reaction front radius grows
+  for (const p of P) {
+    if (t < p.born) continue;
+    if (!p.burnt && t > IGN_T && Math.hypot(p.x - IGN_X, p.y - IGN_Y) < front) {   // burn: heat = speed
+      p.burnt = t; const a = rnd() * 6.283, s = 520 + rnd() * 320; p.vx = Math.cos(a) * s; p.vy = Math.sin(a) * s;
+    }
+    if (!p.burnt) { p.vy += 60 * dt; }                          // cold mist drifts down from the injector
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.x < CH.x + 8) { p.x = CH.x + 8; p.vx = Math.abs(p.vx); } if (p.x > CH.x + CH.w - 8) { p.x = CH.x + CH.w - 8; p.vx = -Math.abs(p.vx); }
+    if (p.y < CH.y + 8) { p.y = CH.y + 8; p.vy = Math.abs(p.vy); } if (p.y > CH.y + CH.h - 8) { p.y = CH.y + CH.h - 8; p.vy = -Math.abs(p.vy) * (p.burnt ? 1 : .35); }
+  }
+}
+function text(s, x, y, size, col, font = 'DejaVu Sans', align = 'center', alpha = 1) {
+  g.globalAlpha = alpha; g.fillStyle = col; g.font = `${size}px "${font}"`; g.textAlign = align; g.textBaseline = 'middle'; g.fillText(s, x, y); g.globalAlpha = 1;
+}
+window.render = function (t) {
+  const sub = 4, dt = (t - last) / sub; for (let i = 0; i < sub; i++) step(dt, last + dt * (i + 1)); last = t;
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  const heat = smooth(seg(t, IGN_T, IGN_T + 1.6));
+  // glow behind the chamber
+  if (heat > 0) { const gr = g.createRadialGradient(IGN_X, IGN_Y, 10, IGN_X, IGN_Y, 420); gr.addColorStop(0, `rgba(255,140,60,${.55 * heat})`); gr.addColorStop(.6, `rgba(252,98,85,${.18 * heat})`); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
+  // chamber walls + injector plate
+  g.lineWidth = 3; g.strokeStyle = GREY; g.beginPath(); g.roundRect(CH.x, CH.y, CH.w, CH.h, 18); g.stroke();
+  g.fillStyle = '#444'; g.fillRect(CH.x + 20, CH.y - 6, CH.w - 40, 12);
+  for (let i = 0; i < 14; i++) { const x = CH.x + 50 + i * (CH.w - 100) / 13; g.fillStyle = i % 2 ? BLUE : YELLOW; g.globalAlpha = .9; g.fillRect(x - 3, CH.y - 4, 6, 8); g.globalAlpha = 1; }
+  // molecules
+  for (const p of P) {
+    if (t < p.born) continue;
+    let col = p.kind === 'fuel' ? YELLOW : BLUE, r = p.r;
+    if (p.burnt) { const a = Math.min(1, (t - p.burnt) * 3); col = a < .5 ? WHITE : (p.kind === 'fuel' ? ORANGE : RED); r = p.r * (1 + .6 * a); g.shadowColor = col; g.shadowBlur = 14 * a; }
+    g.fillStyle = col; g.beginPath(); g.arc(p.x, p.y, r, 0, 6.283); g.fill(); g.shadowBlur = 0;
+    if (p.kind === 'ox' && !p.burnt) { g.beginPath(); g.arc(p.x + 7, p.y, r, 0, 6.283); g.fill(); }   // O₂ is a pair
+  }
+  // spark flash
+  const fl = 1 - seg(t, IGN_T, IGN_T + .25); if (t > IGN_T && fl > 0) { g.fillStyle = `rgba(255,255,255,${fl * .9})`; g.beginPath(); g.arc(IGN_X, IGN_Y, 30 + 200 * (1 - fl), 0, 6.283); g.fill(); }
+  // gauges on the right: temperature and pressure climb with the burn
+  const T = 20 + 3280 * heat, pbar = 1 + 96 * heat;
+  const gx = 1040, gy0 = 470, gh = 300;
+  g.fillStyle = '#222'; g.fillRect(gx, gy0 - gh, 26, gh);
+  const grd = g.createLinearGradient(0, gy0, 0, gy0 - gh); grd.addColorStop(0, BLUE); grd.addColorStop(.5, YELLOW); grd.addColorStop(1, RED);
+  g.fillStyle = grd; g.fillRect(gx, gy0 - gh * heat, 26, gh * heat);
+  text(`${Math.round(T).toLocaleString('en-US')} °C`, gx + 13, gy0 + 28, 26, heat > .5 ? RED : BLUE, 'STIX');
+  text(`${Math.round(pbar)} bar`, gx + 13, gy0 + 60, 22, GREY, 'STIX');
+  text('T', gx + 13, gy0 - gh - 24, 26, WHITE, 'STIXi');
+  // captions
+  text('COMBUSTION', 640, 70, 20, TEAL, 'DejaVu Sans', 'center', smooth(seg(t, 0, .6)));
+  text('kerosene', CH.x - 18, CH.y + 40, 24, YELLOW, 'STIXi', 'right', smooth(seg(t, .3, .9)));
+  text('oxygen', CH.x - 18, CH.y + 76, 24, BLUE, 'STIXi', 'right', smooth(seg(t, .5, 1.1)));
+  if (t < IGN_T + .4) text('Two cold liquids, sprayed into a mist', 640, 640, 26, WHITE, 'DejaVu Sans', 'center', smooth(seg(t, .4, 1)) * (1 - seg(t, IGN_T, IGN_T + .4)));
+  else text('A spark — and heat becomes motion: 3,300 °C, 100 bar', 640, 640, 26, WHITE, 'DejaVu Sans', 'center', smooth(seg(t, IGN_T + .4, IGN_T + 1)));
+};
+</script>
