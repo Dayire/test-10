@@ -1,0 +1,1058 @@
+<title>Ignition Sequence</title>
+<meta name="description" content="An animated, step-by-step explanation of how a rocket works — from combustion to orbit.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* ---------- tokens: dark-first (launch night), light = clean-room blueprint ---------- */
+:root{
+  --bg:#070b14; --bg2:#0c1220; --surface:#111a2c; --surface2:#16213a; --line:#223050; --line2:#2e3f66;
+  --ink:#e9edf6; --muted:#92a0b8; --faint:#5b6a86;
+  --accent:#ff8a3d; --hot:#ffd166; --white-hot:#fff6e0;
+  --lox:#5ad1ff; --fuel:#f2c14e; --ok:#5be0a3;
+  --metal:#c3cbdc; --metal2:#7b88a3; --metal3:#3c4a68; --skin:#1b2540;
+  --sky-top:#070b14; --sky-bot:#1a2440; --horizon:#2c3a5e; --ground:#0b0f1a;
+  --earth:#1f6fd1; --earth2:#0b2f6b; --land:#3f9a5a; --atmo:#7fc7ff;
+  --shadow:0 20px 60px rgba(0,0,0,.45);
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f2f4f8; --bg2:#e7ebf3; --surface:#ffffff; --surface2:#f6f8fc; --line:#d5dbe7; --line2:#b9c3d6;
+    --ink:#121a2b; --muted:#5a6680; --faint:#8a95ad;
+    --accent:#e2591b; --hot:#f5a623; --white-hot:#fff3d6;
+    --lox:#0d8fd6; --fuel:#b8860b; --ok:#1b9e6a;
+    --metal:#dfe5ef; --metal2:#9aa6bd; --metal3:#6b7892; --skin:#eef1f7;
+    --sky-top:#cfe3ff; --sky-bot:#eef5ff; --horizon:#b9d2f5; --ground:#d7dde8;
+    --earth:#2f86e6; --earth2:#1854a8; --land:#4caf6a; --atmo:#a9dcff;
+    --shadow:0 20px 60px rgba(20,30,60,.15);
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f2f4f8; --bg2:#e7ebf3; --surface:#ffffff; --surface2:#f6f8fc; --line:#d5dbe7; --line2:#b9c3d6;
+  --ink:#121a2b; --muted:#5a6680; --faint:#8a95ad;
+  --accent:#e2591b; --hot:#f5a623; --white-hot:#fff3d6;
+  --lox:#0d8fd6; --fuel:#b8860b; --ok:#1b9e6a;
+  --metal:#dfe5ef; --metal2:#9aa6bd; --metal3:#6b7892; --skin:#eef1f7;
+  --sky-top:#cfe3ff; --sky-bot:#eef5ff; --horizon:#b9d2f5; --ground:#d7dde8;
+  --earth:#2f86e6; --earth2:#1854a8; --land:#4caf6a; --atmo:#a9dcff;
+  --shadow:0 20px 60px rgba(20,30,60,.15);
+  color-scheme:light;
+}
+
+/* ---------- base ---------- */
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:16px; line-height:1.55; -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:"Chakra Petch","IBM Plex Sans",ui-sans-serif,system-ui,sans-serif; text-wrap:balance; margin:0; line-height:1.08}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-variant-numeric:tabular-nums}
+button{font:inherit; color:inherit}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+/* ---------- layout: sticky stage + scrolling story ---------- */
+.app{display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); min-height:100%}
+.stage{
+  position:sticky; top:env(safe-area-inset-top,0px); height:100vh; height:100dvh;
+  overflow:hidden; background:linear-gradient(180deg,var(--sky-top) 0%,var(--sky-bot) 78%,var(--horizon) 100%);
+  transition:background 1.2s ease;
+}
+.stage[data-env="flight"]{background:linear-gradient(180deg,#02040a 0%,var(--sky-top) 60%,var(--sky-bot) 100%)}
+.stage[data-env="space"]{background:radial-gradient(120% 90% at 50% 110%,#0a1a3a 0%,#03060f 55%,#000 100%)}
+.stage canvas,.stage svg{position:absolute; inset:0; width:100%; height:100%}
+.stage svg{transition:opacity .35s ease}
+.stage.fading svg{opacity:0}
+
+/* HUD over the stage */
+.hud{position:absolute; left:0; right:0; bottom:0; padding:14px clamp(14px,2.5vw,26px) calc(14px + env(safe-area-inset-bottom,0px)); display:flex; flex-wrap:wrap; gap:10px 14px; align-items:end; justify-content:space-between; pointer-events:none}
+.hud>*{pointer-events:auto}
+.readouts{display:flex; gap:8px; flex-wrap:wrap}
+.readout{background:color-mix(in srgb,var(--surface) 78%,transparent); backdrop-filter:blur(8px); border:1px solid var(--line); border-radius:6px; padding:6px 10px; min-width:96px}
+.readout .k{display:block; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted)}
+.readout .v{display:block; font-size:16px; font-weight:500; color:var(--ink)}
+.readout .v em{font-style:normal; color:var(--muted); font-size:12px; margin-left:2px}
+
+.tour{display:flex; gap:6px; align-items:center; background:color-mix(in srgb,var(--surface) 78%,transparent); backdrop-filter:blur(8px); border:1px solid var(--line); border-radius:999px; padding:6px}
+.tour button{border:0; background:transparent; border-radius:999px; padding:6px 10px; cursor:pointer; font-size:13px; font-weight:500; color:var(--ink); display:inline-flex; align-items:center; gap:6px}
+.tour button:hover{background:var(--surface2)}
+.tour button.play{background:var(--accent); color:#0b0f1a}
+.tour .dots{display:flex; gap:5px; padding:0 4px}
+.tour .dots button{width:22px; height:22px; padding:0; border-radius:50%; display:grid; place-items:center}
+.tour .dots button span{width:7px; height:7px; border-radius:50%; background:var(--faint); display:block; transition:transform .25s,background .25s}
+.tour .dots button[aria-current="true"] span{background:var(--accent); transform:scale(1.5)}
+
+.eyebrow-stage{position:absolute; top:calc(14px + env(safe-area-inset-top,0px)); left:clamp(14px,2.5vw,26px); font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); display:flex; gap:10px; align-items:center; background:color-mix(in srgb,var(--surface) 70%,transparent); padding:4px 8px; border-radius:4px; backdrop-filter:blur(6px)}
+.eyebrow-stage b{color:var(--accent); font-weight:500}
+
+/* ---------- story column ---------- */
+.story{padding:0 clamp(16px,4vw,56px); border-left:1px solid var(--line); background:var(--bg)}
+.intro{padding-block:clamp(48px,10vh,120px) 24px; max-width:60ch}
+.intro .eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); margin-bottom:14px}
+.intro h1{font-size:clamp(38px,5.2vw,64px); font-weight:700; letter-spacing:-.01em}
+.intro h1 span{color:var(--muted); font-weight:500}
+.intro p{font-size:18px; color:var(--muted); margin:18px 0 0; max-width:52ch}
+.intro .hint{margin-top:22px; font-size:13px; color:var(--faint); display:flex; gap:10px; align-items:center}
+.intro .hint svg{width:16px; height:16px; animation:bob 1.8s ease-in-out infinite}
+@keyframes bob{50%{transform:translateY(4px)}}
+
+.chapter{min-height:100vh; min-height:100dvh; display:flex; align-items:center; padding-block:12vh; scroll-margin-top:0}
+.chapter>div{max-width:60ch; width:100%}
+.chapter .num{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; letter-spacing:.16em; color:var(--muted); display:flex; align-items:center; gap:10px; margin-bottom:12px}
+.chapter .num::after{content:""; height:1px; flex:1; background:var(--line)}
+.chapter h2{font-size:clamp(28px,3.2vw,40px); font-weight:600}
+.chapter h2 em{font-style:normal; color:var(--accent)}
+.chapter p{color:var(--muted); margin:14px 0 0; font-size:16.5px}
+.chapter p strong{color:var(--ink); font-weight:600}
+.chapter .law{margin:18px 0 0; padding:14px 16px; border-left:3px solid var(--accent); background:var(--surface); border-radius:0 8px 8px 0; color:var(--ink); font-size:15.5px}
+.chapter .law .mono{color:var(--accent)}
+
+/* equations */
+.eq{margin:18px 0 0; padding:16px 18px; background:var(--surface); border:1px solid var(--line); border-radius:10px; overflow-x:auto}
+.eq .formula{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:clamp(17px,2vw,21px); color:var(--ink); white-space:nowrap}
+.eq .formula i{font-style:normal; color:var(--accent)}
+.eq .formula sub{font-size:.65em}
+.eq .legend{margin:10px 0 0; display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:13px; color:var(--muted)}
+.eq .legend b{font-family:"IBM Plex Mono",ui-monospace,monospace; font-weight:500; color:var(--ink)}
+
+/* controls */
+.ctl{margin:18px 0 0; padding:14px 16px; background:var(--surface); border:1px solid var(--line); border-radius:10px; display:grid; gap:12px}
+.ctl label{display:grid; gap:6px; font-size:13px; color:var(--muted)}
+.ctl label .row{display:flex; justify-content:space-between; align-items:baseline}
+.ctl label .row output{font-family:"IBM Plex Mono",ui-monospace,monospace; color:var(--ink); font-size:14px; font-variant-numeric:tabular-nums}
+input[type=range]{width:100%; accent-color:var(--accent); margin:0; height:24px}
+.ctl .btns{display:flex; gap:8px; flex-wrap:wrap}
+.btn{border:1px solid var(--line2); background:var(--surface2); color:var(--ink); border-radius:8px; padding:9px 14px; cursor:pointer; font-size:14px; font-weight:500; display:inline-flex; align-items:center; gap:8px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:#0b0f1a}
+.btn:disabled{opacity:.5; cursor:default}
+
+/* mass bars */
+.bars{display:grid; gap:8px; margin-top:4px}
+.bar{display:grid; grid-template-columns:96px 1fr 72px; gap:10px; align-items:center; font-size:13px; color:var(--muted)}
+.bar .track{height:14px; background:var(--bg2); border-radius:4px; overflow:hidden; display:flex}
+.bar .track i{display:block; height:100%; transition:width .5s cubic-bezier(.2,.8,.2,1)}
+.bar .track .lox{background:var(--lox)} .bar .track .fu{background:var(--fuel)} .bar .track .dry{background:var(--metal2)} .bar .track .pay{background:var(--ok)}
+.bar .val{font-family:"IBM Plex Mono",ui-monospace,monospace; color:var(--ink); text-align:right; font-variant-numeric:tabular-nums}
+.key{display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:4px}
+.key i{display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px}
+
+.stat-row{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:18px}
+.stat{padding:12px 14px; background:var(--surface); border:1px solid var(--line); border-radius:10px}
+.stat .k{font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted)}
+.stat .v{font-family:"Chakra Petch","IBM Plex Sans",sans-serif; font-size:24px; font-weight:600; margin-top:4px; font-variant-numeric:tabular-nums}
+.stat .v small{font-size:13px; color:var(--muted); font-weight:500; font-family:"IBM Plex Sans",sans-serif}
+
+.outro{padding-block:24px clamp(60px,12vh,140px); max-width:60ch; color:var(--muted); font-size:14px; border-top:1px solid var(--line)}
+.outro p{margin:12px 0 0}
+
+/* ---------- SVG styling via tokens ---------- */
+.skin{fill:var(--skin); stroke:var(--metal2); stroke-width:1.2}
+.skin-hi{fill:var(--metal); opacity:.35}
+.frame{fill:none; stroke:var(--metal2); stroke-width:.8}
+.tank{stroke-width:.8; opacity:.95}
+.tank.lox{fill:var(--lox); stroke:var(--lox)} .tank.fu{fill:var(--fuel); stroke:var(--fuel)}
+.tank-wall{fill:none; stroke:var(--metal); stroke-width:1; opacity:.8}
+.label{font-family:"IBM Plex Mono",ui-monospace,monospace; fill:var(--ink); font-size:11px; letter-spacing:.06em}
+.label.dim{fill:var(--muted)}
+.leader{stroke:var(--muted); stroke-width:.8; fill:none; stroke-dasharray:2 2}
+.dot{fill:var(--accent)}
+.pad{fill:var(--ground)} .pad-line{stroke:var(--metal3); stroke-width:1; fill:none}
+.tower{fill:var(--metal3); stroke:var(--metal2); stroke-width:.6}
+.nozzle{fill:var(--metal3); stroke:var(--metal); stroke-width:.9}
+.nozzle-in{fill:var(--metal2); opacity:.55}
+.pipe.lox{stroke:var(--lox)} .pipe.fu{stroke:var(--fuel)} .pipe{fill:none; stroke-width:1.6; stroke-linecap:round}
+.pipe.flow{stroke-dasharray:3 3; animation:flow 1s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-12}}
+.pump{fill:var(--metal3); stroke:var(--metal); stroke-width:.6}
+.chamber{fill:var(--surface2); stroke:var(--metal); stroke-width:.7}
+.arrow{fill:none; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round}
+.arrow.up{stroke:var(--ok)} .arrow.down{stroke:var(--accent)} .arrow.g{stroke:var(--muted)}
+.arrow-head{fill:var(--ok)} .arrow-head.down{fill:var(--accent)} .arrow-head.g{fill:var(--muted)}
+.fade{transition:opacity .6s ease}
+.hidden-g{opacity:0; pointer-events:none}
+.orbit-path{fill:none; stroke:var(--muted); stroke-width:1.4; stroke-dasharray:4 5}
+.traj{fill:none; stroke:var(--accent); stroke-width:2}
+.earth{fill:url(#earthGrad)} .atmo{fill:url(#atmoGrad)}
+.star{fill:var(--ink)}
+.ann{font-family:"IBM Plex Sans",sans-serif; fill:var(--muted); font-size:11px}
+
+@media (prefers-reduced-motion: reduce){
+  .pipe.flow{animation:none}
+  .intro .hint svg{animation:none}
+  .stage svg{transition:none}
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 900px){
+  .app{grid-template-columns:1fr}
+  .stage{height:48vh; height:48dvh; z-index:2; box-shadow:var(--shadow)}
+  .story{border-left:0; border-top:1px solid var(--line)}
+  .chapter{min-height:auto; padding-block:64px 24px; align-items:flex-start}
+  .intro{padding-block:36px 8px}
+  .hud{flex-direction:column; align-items:stretch; gap:6px; padding:8px 10px calc(8px + env(safe-area-inset-bottom,0px))}
+  .readouts{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px}
+  .readout{min-width:0; padding:4px 7px; border-radius:5px}
+  .readout .k{font-size:8.5px; letter-spacing:.08em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .readout .v{font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .tour{align-self:flex-start}
+  .tag{font-size:10.5px; padding:2px 6px}
+  .tag small{display:none}
+  .stat-row{grid-template-columns:1fr 1fr}
+  .eyebrow-stage{display:none}
+}
+@media (max-width: 480px){
+  .tour .dots{display:none}
+  .bar{grid-template-columns:72px 1fr 64px}
+}
+</style>
+<style>
+/* floating labels: SVG leader lines in world space, HTML text in screen space */
+.tags{position:absolute; inset:0; pointer-events:none; overflow:hidden}
+.tag{position:absolute; transform:translate(-50%,-50%); font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; letter-spacing:.04em; color:var(--ink); background:color-mix(in srgb,var(--surface) 82%,transparent); border:1px solid var(--line); border-radius:4px; padding:3px 7px; white-space:nowrap; opacity:0; transition:opacity .45s ease; backdrop-filter:blur(6px)}
+.tag.show{opacity:1}
+.tag small{display:block; font-family:"IBM Plex Sans",sans-serif; color:var(--muted); font-size:10.5px; letter-spacing:0}
+.tag.l{transform:translate(-100%,-50%)} .tag.r{transform:translate(0,-50%)}
+.tag.lox{border-color:var(--lox)} .tag.fu{border-color:var(--fuel)} .tag.hot{border-color:var(--accent)}
+.stars{opacity:0; transition:opacity 1.2s ease}
+.stage[data-env="flight"] .stars{opacity:.55}
+.stage[data-env="space"] .stars{opacity:1}
+</style>
+
+<div class="app">
+<!-- ============================ STAGE ============================ -->
+<div class="stage" id="stage" data-env="pad">
+  <canvas class="stars" id="stars"></canvas>
+  <svg id="scene" viewBox="-300 -800 600 900" preserveAspectRatio="xMidYMid meet" aria-label="Animated rocket diagram">
+    <defs>
+      <linearGradient id="plumeGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" style="stop-color:var(--white-hot)" stop-opacity="1"/>
+        <stop offset=".18" style="stop-color:var(--hot)" stop-opacity=".95"/>
+        <stop offset=".5" style="stop-color:var(--accent)" stop-opacity=".7"/>
+        <stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/>
+      </linearGradient>
+      <radialGradient id="glowGrad" cx=".5" cy=".5" r=".5">
+        <stop offset="0" style="stop-color:var(--white-hot)" stop-opacity=".95"/>
+        <stop offset=".6" style="stop-color:var(--hot)" stop-opacity=".55"/>
+        <stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="earthGrad" cx=".38" cy=".35" r=".75">
+        <stop offset="0" style="stop-color:var(--earth)"/>
+        <stop offset="1" style="stop-color:var(--earth2)"/>
+      </radialGradient>
+      <radialGradient id="atmoGrad" cx=".5" cy=".5" r=".5">
+        <stop offset=".86" style="stop-color:var(--atmo)" stop-opacity="0"/>
+        <stop offset=".93" style="stop-color:var(--atmo)" stop-opacity=".35"/>
+        <stop offset="1" style="stop-color:var(--atmo)" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="cloudGrad" cx=".5" cy=".5" r=".5">
+        <stop offset="0" style="stop-color:var(--metal)" stop-opacity=".8"/>
+        <stop offset="1" style="stop-color:var(--metal)" stop-opacity="0"/>
+      </radialGradient>
+      <filter id="fire" x="-60%" y="-20%" width="220%" height="150%" color-interpolation-filters="sRGB">
+        <feTurbulence id="turbA" type="fractalNoise" baseFrequency="0.02 0.06" numOctaves="2" seed="1" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+        <feGaussianBlur stdDeviation="1.2"/>
+      </filter>
+      <filter id="fireSmall" x="-60%" y="-20%" width="220%" height="150%" color-interpolation-filters="sRGB">
+        <feTurbulence id="turbB" type="fractalNoise" baseFrequency="0.12 0.25" numOctaves="2" seed="1" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="2.2" xChannelSelector="R" yChannelSelector="G"/>
+        <feGaussianBlur stdDeviation=".25"/>
+      </filter>
+      <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
+      <filter id="softSm" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.5"/></filter>
+      <clipPath id="clipLox1"><rect x="-15" y="-425" width="30" height="225" rx="7"/></clipPath>
+      <clipPath id="clipFu1"><rect x="-15" y="-190" width="30" height="138" rx="7"/></clipPath>
+      <clipPath id="clipLox2"><rect x="-15" y="-614" width="30" height="54" rx="7"/></clipPath>
+      <clipPath id="clipFu2"><rect x="-15" y="-556" width="30" height="50" rx="7"/></clipPath>
+      <clipPath id="clipGround"><rect id="clipGroundRect" x="-300" y="-2" width="600" height="16"/></clipPath>
+      <clipPath id="clipEarth"><circle cx="3000" cy="0" r="300"/></clipPath>
+      <marker id="mUp" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrow-head"/></marker>
+      <marker id="mDown" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrow-head down"/></marker>
+      <marker id="mG" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrow-head g"/></marker>
+    </defs>
+
+    <g id="world">
+      <!-- ---------- launch pad ---------- -->
+      <g id="padWorld" class="fade">
+        <rect class="pad" x="-2000" y="0" width="4000" height="400"/>
+        <line class="pad-line" x1="-2000" y1="0" x2="2000" y2="0"/>
+        <rect class="pad" x="-60" y="0" width="120" height="14" style="fill:var(--metal3)"/>
+        <!-- hold-down mount -->
+        <path class="tower" d="M-30 0 L-30 -34 L-20 -34 L-20 -40 L20 -40 L20 -34 L30 -34 L30 0 Z"/>
+        <!-- strongback / tower -->
+        <g class="tower">
+          <rect x="-46" y="-600" width="10" height="600"/>
+          <path d="M-46 -560 L-36 -540 M-46 -520 L-36 -500 M-46 -480 L-36 -460 M-46 -440 L-36 -420 M-46 -400 L-36 -380 M-46 -360 L-36 -340 M-46 -320 L-36 -300 M-46 -280 L-36 -260 M-46 -240 L-36 -220 M-46 -200 L-36 -180 M-46 -160 L-36 -140 M-46 -120 L-36 -100 M-46 -80 L-36 -60" style="fill:none;stroke:var(--metal2);stroke-width:.6"/>
+          <rect x="-36" y="-596" width="16" height="4"/>
+          <rect x="-36" y="-450" width="16" height="4"/>
+        </g>
+        <!-- exhaust steam cloud -->
+        <g id="groundCloud" filter="url(#soft)" style="opacity:0">
+          <ellipse cx="-40" cy="-6" rx="60" ry="22" fill="url(#cloudGrad)"/>
+          <ellipse cx="50" cy="-8" rx="70" ry="26" fill="url(#cloudGrad)"/>
+          <ellipse cx="0" cy="-4" rx="50" ry="20" fill="url(#cloudGrad)"/>
+        </g>
+      </g>
+
+      <!-- ---------- the rocket ---------- -->
+      <g id="rocket">
+        <!-- ===== first stage (with interstage & engines) ===== -->
+        <g id="s1">
+          <g id="plumeClip"><g id="plumeMain" style="opacity:0">
+            <path id="plumeMainPath" filter="url(#fire)" fill="url(#plumeGrad)" d="M-16 -2 L16 -2 C 22 40 18 120 0 220 C -18 120 -22 40 -16 -2 Z"/>
+            <g id="diamondsMain">
+              <ellipse cx="0" cy="26" rx="4" ry="9" style="fill:var(--white-hot)" opacity=".9"/>
+              <ellipse cx="0" cy="62" rx="3.5" ry="9" style="fill:var(--white-hot)" opacity=".65"/>
+              <ellipse cx="0" cy="98" rx="3" ry="8" style="fill:var(--white-hot)" opacity=".4"/>
+              <ellipse cx="0" cy="132" rx="2.5" ry="7" style="fill:var(--white-hot)" opacity=".22"/>
+            </g>
+          </g></g>
+          <!-- interstage (composite, black) -->
+          <rect x="-18" y="-500" width="36" height="60" style="fill:var(--metal3);stroke:var(--metal2);stroke-width:1"/>
+          <rect x="-14" y="-500" width="5" height="60" class="skin-hi" style="opacity:.15"/>
+          <!-- grid fins (stowed) -->
+          <rect x="-22.5" y="-500" width="4.5" height="28" style="fill:var(--metal3);stroke:var(--metal2);stroke-width:.8"/>
+          <rect x="18" y="-500" width="4.5" height="28" style="fill:var(--metal3);stroke:var(--metal2);stroke-width:.8"/>
+          <!-- body -->
+          <rect x="-18" y="-440" width="36" height="400" class="skin"/>
+          <rect x="-14" y="-440" width="5" height="400" class="skin-hi"/>
+          <!-- tanks (x-ray) -->
+          <rect class="tank-wall" x="-15" y="-425" width="30" height="225" rx="7"/>
+          <rect id="lox1" class="tank lox" x="-15" y="-425" width="30" height="225" clip-path="url(#clipLox1)"/>
+          <rect class="tank-wall" x="-15" y="-190" width="30" height="138" rx="7"/>
+          <rect id="fu1" class="tank fu" x="-15" y="-190" width="30" height="138" clip-path="url(#clipFu1)"/>
+          <!-- common feed lines: LOX runs down outside the fuel tank -->
+          <path class="pipe lox" d="M15 -205 L17 -200 L17 -52" style="stroke-width:1.2;opacity:.85"/>
+          <path class="pipe fu" d="M-3 -54 L-3 -50" style="stroke-width:1.2;opacity:.85"/>
+          <!-- thrust structure -->
+          <rect x="-18" y="-52" width="36" height="12" style="fill:var(--metal3);stroke:var(--metal2);stroke-width:.8"/>
+          <!-- landing legs (stowed) -->
+          <path d="M-18 -46 L-21 -46 L-18 -215 Z M18 -46 L21 -46 L18 -215 Z" style="fill:var(--metal3);stroke:var(--metal2);stroke-width:.6"/>
+          <!-- engines: side view of the octaweb -->
+          <g id="engineSide" class="fade">
+            <path class="nozzle" transform="translate(-13 0)" d="M-2.2 -40 C-2.2 -30 -4.4 -18 -4.6 -3 L4.6 -3 C4.4 -18 2.2 -30 2.2 -40 Z" style="opacity:.8"/>
+            <path class="nozzle" transform="translate(13 0)" d="M-2.2 -40 C-2.2 -30 -4.4 -18 -4.6 -3 L4.6 -3 C4.4 -18 2.2 -30 2.2 -40 Z" style="opacity:.8"/>
+            <path class="nozzle" transform="translate(-8 0)" d="M-2.4 -40 C-2.4 -30 -4.6 -18 -4.8 -2 L4.8 -2 C4.6 -18 2.4 -30 2.4 -40 Z"/>
+            <path class="nozzle" transform="translate(8 0)" d="M-2.4 -40 C-2.4 -30 -4.6 -18 -4.8 -2 L4.8 -2 C4.6 -18 2.4 -30 2.4 -40 Z"/>
+            <path class="nozzle" d="M-2.4 -40 C-2.4 -30 -4.6 -18 -4.8 -2 L4.8 -2 C4.6 -18 2.4 -30 2.4 -40 Z"/>
+            <path class="nozzle-in" d="M-4.8 -2 L4.8 -2 L3.6 -6 L-3.6 -6 Z"/>
+          </g>
+          <!-- engine cross-section (shown when the camera zooms in) -->
+          <g id="engineDetail" class="fade hidden-g">
+            <!-- propellant feed from tanks -->
+            <path class="pipe lox flow" d="M17 -52 L17 -48 L9 -48 L9 -44"/>
+            <path class="pipe fu flow" d="M-3 -50 L-3 -47 L-9 -47 L-9 -44"/>
+            <!-- turbopumps: two pumps on one shaft -->
+            <g class="pump">
+              <rect x="-13" y="-44" width="8" height="7" rx="1.5" style="fill:var(--surface2)"/>
+              <circle cx="-9" cy="-40.5" r="2.4" style="fill:var(--fuel);opacity:.7"/>
+              <rect x="5" y="-44" width="8" height="7" rx="1.5" style="fill:var(--surface2)"/>
+              <circle cx="9" cy="-40.5" r="2.4" style="fill:var(--lox);opacity:.7"/>
+              <rect x="-5" y="-41.5" width="10" height="2" rx="1"/>
+              <!-- gas generator -->
+              <rect x="-1.6" y="-47" width="3.2" height="3.2" rx=".6" style="fill:var(--accent);opacity:.8"/>
+            </g>
+            <!-- high-pressure lines to injector -->
+            <path class="pipe fu flow" d="M-9 -37 L-9 -35.5 L-4 -35.5 L-4 -33.5"/>
+            <path class="pipe lox flow" d="M9 -37 L9 -35.5 L4 -35.5 L4 -33.5"/>
+            <!-- regenerative cooling channel along the nozzle wall (kerosene) -->
+            <path class="pipe fu flow" d="M-9 -37 L-9 -30 C-7.5 -24 -4.5 -20 -3.4 -18 C-3.4 -14 -5.7 -8 -5.8 -2" style="stroke-width:.9;opacity:.85"/>
+            <path class="pipe fu flow" d="M5.8 -2 C5.7 -8 3.4 -14 3.4 -18 C4.5 -20 7.5 -24 9 -30 L9 -37" style="stroke-width:.9;opacity:.85"/>
+            <!-- chamber + nozzle interior -->
+            <path id="chamberPath" class="chamber" d="M-5 -33 L5 -33 L5 -22 C5 -20.5 2.2 -19.5 2.2 -18 C2.2 -14 4.8 -8 4.8 -2 L-4.8 -2 C-4.8 -8 -2.2 -14 -2.2 -18 C-2.2 -19.5 -5 -20.5 -5 -22 Z"/>
+            <!-- combustion glow -->
+            <ellipse id="glow" cx="0" cy="-26" rx="4.6" ry="7" fill="url(#glowGrad)" style="opacity:.9"/>
+            <!-- injector plate -->
+            <rect x="-5" y="-34" width="10" height="1.6" style="fill:var(--metal);stroke:var(--metal2);stroke-width:.3"/>
+            <path d="M-4 -32.4 L-4 -31.4 M-2.7 -32.4 L-2.7 -31.4 M-1.3 -32.4 L-1.3 -31.4 M0 -32.4 L0 -31.4 M1.3 -32.4 L1.3 -31.4 M2.7 -32.4 L2.7 -31.4 M4 -32.4 L4 -31.4" style="stroke:var(--metal);stroke-width:.35"/>
+            <!-- throat marker -->
+            <line x1="-2.2" y1="-18" x2="2.2" y2="-18" style="stroke:var(--ink);stroke-width:.25;stroke-dasharray:.6 .5;opacity:.7"/>
+            <!-- flow particles (filled by script) -->
+            <g id="flowParticles"></g>
+            <!-- single-engine plume -->
+            <g id="plumeEngine" style="opacity:0">
+              <path filter="url(#fireSmall)" fill="url(#plumeGrad)" d="M-4.8 -2 L4.8 -2 C6.5 8 5.5 24 0 44 C-5.5 24 -6.5 8 -4.8 -2 Z"/>
+              <g id="diamondsEngine">
+                <ellipse cx="0" cy="5" rx="1.2" ry="2.6" style="fill:var(--white-hot)" opacity=".9"/>
+                <ellipse cx="0" cy="13" rx="1" ry="2.4" style="fill:var(--white-hot)" opacity=".6"/>
+                <ellipse cx="0" cy="21" rx=".8" ry="2.2" style="fill:var(--white-hot)" opacity=".35"/>
+              </g>
+            </g>
+          </g>
+        </g>
+
+        <!-- ===== second stage + fairing ===== -->
+        <g id="s2">
+          <g id="plume2" style="opacity:0">
+            <path filter="url(#fire)" fill="url(#plumeGrad)" d="M-13 -446 L13 -446 C 24 -400 26 -340 0 -250 C -26 -340 -24 -400 -13 -446 Z"/>
+          </g>
+          <!-- MVac nozzle sitting inside the interstage -->
+          <path class="nozzle" d="M-5 -502 C-5 -490 -12 -470 -13 -446 L13 -446 C12 -470 5 -490 5 -502 Z"/>
+          <path class="nozzle-in" d="M-13 -446 L13 -446 L10.5 -452 L-10.5 -452 Z"/>
+          <!-- body -->
+          <rect x="-18" y="-620" width="36" height="120" class="skin"/>
+          <rect x="-14" y="-620" width="5" height="120" class="skin-hi"/>
+          <rect class="tank-wall" x="-15" y="-614" width="30" height="54" rx="7"/>
+          <rect id="lox2" class="tank lox" x="-15" y="-614" width="30" height="54" clip-path="url(#clipLox2)"/>
+          <rect class="tank-wall" x="-15" y="-556" width="30" height="50" rx="7"/>
+          <rect id="fu2" class="tank fu" x="-15" y="-556" width="30" height="50" clip-path="url(#clipFu2)"/>
+          <!-- fairing -->
+          <g id="fairing">
+            <path class="skin" d="M-18 -620 L-18 -655 C-18 -692 -9 -713 0 -722 C9 -713 18 -692 18 -655 L18 -620 Z"/>
+            <path class="skin-hi" d="M-14 -620 L-14 -655 C-14 -685 -10 -700 -7 -706 L-9 -706 C-12 -698 -14 -685 -14 -655 Z" style="opacity:.25"/>
+            <line x1="0" y1="-722" x2="0" y2="-620" style="stroke:var(--metal2);stroke-width:.5;opacity:.6"/>
+            <!-- payload: a satellite with folded panels -->
+            <g id="payload">
+              <rect x="-6" y="-672" width="12" height="20" rx="1" style="fill:var(--surface2);stroke:var(--ok);stroke-width:.9"/>
+              <rect x="-9.5" y="-670" width="3" height="16" style="fill:var(--ok);opacity:.7"/>
+              <rect x="6.5" y="-670" width="3" height="16" style="fill:var(--ok);opacity:.7"/>
+              <ellipse cx="0" cy="-676" rx="4" ry="2" style="fill:none;stroke:var(--ok);stroke-width:.7"/>
+            </g>
+          </g>
+        </g>
+      </g>
+
+      <!-- ---------- force arrows (chapters 1 & 4) ---------- -->
+      <g id="forceArrows" class="fade hidden-g">
+        <path id="thrustArrow" class="arrow up" marker-end="url(#mUp)" d="M70 -250 L70 -400"/>
+        <path id="weightArrow" class="arrow down" marker-end="url(#mDown)" d="M70 -250 L70 -120"/>
+        <circle cx="70" cy="-250" r="4" style="fill:var(--ink)"/>
+        <path id="exhaustArrow" class="arrow down" marker-end="url(#mDown)" d="M-70 -30 L-70 120"/>
+      </g>
+
+      <!-- ---------- orbit world (far away in world space; the camera cuts to it) ---------- -->
+      <g id="orbitWorld" class="fade hidden-g">
+        <circle cx="3000" cy="0" r="345" class="atmo"/>
+        <circle cx="3000" cy="0" r="300" class="earth"/>
+        <g clip-path="url(#clipEarth)" style="fill:var(--land);opacity:.85">
+          <ellipse cx="2880" cy="-90" rx="70" ry="95" transform="rotate(-18 2880 -90)"/>
+          <ellipse cx="2905" cy="95" rx="42" ry="80" transform="rotate(12 2905 95)"/>
+          <ellipse cx="3080" cy="-60" rx="95" ry="70" transform="rotate(8 3080 -60)"/>
+          <ellipse cx="3090" cy="70" rx="45" ry="55"/>
+          <ellipse cx="3200" cy="110" rx="50" ry="32"/>
+          <ellipse cx="3000" cy="-270" rx="120" ry="28"/>
+        </g>
+        <path d="M3000 -300 A300 300 0 0 1 3000 300 L3000 -300 Z" style="fill:#000;opacity:.38"/>
+        <circle cx="3000" cy="0" r="300" style="fill:none;stroke:var(--atmo);stroke-width:1.5;opacity:.7"/>
+        <!-- 400 km orbit (altitude exaggerated) -->
+        <circle cx="3000" cy="0" r="335" class="orbit-path"/>
+        <path id="trajPath" class="traj" d="M3000 -300 C3000 -380 3260.1 -219.5 3290.1 -167.5 A335 335 0 0 1 2709.9 167.5 A335 335 0 0 1 3290.1 -167.5"/>
+        <circle cx="3000" cy="-300" r="3.5" style="fill:var(--accent)"/>
+        <g id="ship">
+          <path id="gVec" class="arrow g" marker-end="url(#mG)" d="M0 0 L0 0"/>
+          <path id="vVec" class="arrow up" marker-end="url(#mUp)" d="M0 0 L0 0"/>
+          <circle id="shipDot" r="5" style="fill:var(--ink);stroke:var(--accent);stroke-width:2"/>
+        </g>
+      </g>
+    </g>
+  </svg>
+  <div class="tags" id="tags"></div>
+
+  <div class="eyebrow-stage"><b id="hudChapter">01</b><span id="hudTitle">Anatomy</span></div>
+  <div class="hud">
+    <div class="readouts" id="readouts">
+      <div class="readout"><span class="k" id="k1">Throttle</span><span class="v mono" id="v1">0<em>%</em></span></div>
+      <div class="readout"><span class="k" id="k2">Thrust</span><span class="v mono" id="v2">0<em>kN</em></span></div>
+      <div class="readout"><span class="k" id="k3">Mass</span><span class="v mono" id="v3">549<em>t</em></span></div>
+      <div class="readout"><span class="k" id="k4">Thrust / weight</span><span class="v mono" id="v4">0.00</span></div>
+    </div>
+    <div class="tour" role="group" aria-label="Chapter navigation">
+      <button id="btnPrev" aria-label="Previous chapter">‹</button>
+      <div class="dots" id="dots"></div>
+      <button id="btnNext" aria-label="Next chapter">›</button>
+      <button id="btnPlay" class="play" aria-pressed="false">▶ Tour</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ STORY ============================ -->
+<main class="story">
+  <header class="intro">
+    <div class="eyebrow">Interactive explainer · six chapters</div>
+    <h1>How a rocket works <span>— from ignition to orbit</span></h1>
+    <p>Scroll. The rocket beside you follows the story: it opens up, the camera dives into an engine, it lifts off, drops a stage and falls into orbit. Figures are rounded and modeled on a modern two-stage kerosene–oxygen launcher.</p>
+    <div class="hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v11M3.5 8.5 8 13l4.5-4.5"/></svg>Scroll to begin, or press <b>▶ Tour</b> for a guided pass</div>
+  </header>
+
+  <!-- 01 -->
+  <section class="chapter" id="ch1" data-scene="1">
+    <div>
+      <div class="num">01 · Anatomy</div>
+      <h2>Mostly a <em>tank</em>, with engines bolted on</h2>
+      <p>Cut a rocket open and there is almost nothing inside but two liquids. <strong>Oxidizer</strong> — liquid oxygen at −183 °C — sits on top; <strong>fuel</strong> — RP‑1, a refined kerosene — sits below. A jet engine breathes oxygen from the air. A rocket must carry its own, because the air runs out long before space does. That is the whole reason it is so big.</p>
+      <p>Everything else is thin structure: a first stage that does the heavy lifting, an interstage hiding the second stage's vacuum engine, and a fairing that shields the payload until the atmosphere is gone.</p>
+      <div class="stat-row">
+        <div class="stat"><div class="k">Liftoff mass</div><div class="v">549 <small>t</small></div></div>
+        <div class="stat"><div class="k">Of which propellant</div><div class="v">≈ 94 <small>%</small></div></div>
+        <div class="stat"><div class="k">Height · width</div><div class="v">70 <small>× 3.7 m</small></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 -->
+  <section class="chapter" id="ch2" data-scene="2">
+    <div>
+      <div class="num">02 · Combustion</div>
+      <h2>Turn two cold liquids into a <em>3,300 °C</em> gas</h2>
+      <p>Gravity alone can't feed an engine this hungry. A pair of <strong>turbopumps</strong> on one shaft spins at tens of thousands of rpm, driven by a small <strong>gas generator</strong> that burns a sliver of the propellant. They force kerosene and oxygen through the <strong>injector plate</strong>, where hundreds of tiny jets shatter the liquids into a fine mist that ignites on contact.</p>
+      <p>The chamber runs near <strong>100 bar</strong> — a hundred times atmospheric pressure — at a temperature that would melt the walls in seconds. So the fuel is routed through channels in the wall first (the dashed amber lines), carrying the heat away before it is burned. This is <strong>regenerative cooling</strong>: the engine is cooled by its own fuel.</p>
+      <div class="law">Mixture ratio: every kilogram of kerosene burns with about <span class="mono">2.3 kg</span> of oxygen — which is why the oxygen tank is the bigger one.</div>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section class="chapter" id="ch3" data-scene="3">
+    <div>
+      <div class="num">03 · The nozzle</div>
+      <h2>The nozzle is where heat becomes <em>speed</em></h2>
+      <p>Hot gas in the chamber is chaos — molecules bouncing in every direction. The nozzle turns that chaos into one direction. In the converging section the gas accelerates until it hits exactly <strong>Mach 1 at the throat</strong>, the narrowest point.</p>
+      <p>Then the counter‑intuitive part: past the throat the bell <em>widens</em>, and the gas gets <strong>faster</strong>, not slower. Supersonic flow speeds up as it expands, trading its pressure and heat for velocity. By the exit the exhaust is moving at nearly <strong>3 km/s</strong>. The bright knots in the plume are shock diamonds — the jet re‑adjusting to the pressure of the air around it.</p>
+      <div class="eq">
+        <div class="formula">F = <i>ṁ</i> · v<sub>e</sub> + (p<sub>e</sub> − p<sub>0</sub>) · A<sub>e</sub></div>
+        <div class="legend">
+          <b>ṁ</b><span>mass flow — ≈ 300 kg of gas per second, per engine</span>
+          <b>v<sub>e</sub></b><span>exhaust velocity — ≈ 2.8 km/s at sea level, faster in vacuum</span>
+          <b>(p<sub>e</sub> − p<sub>0</sub>)A<sub>e</sub></b><span>pressure term — a small correction for the air outside</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 -->
+  <section class="chapter" id="ch4" data-scene="4">
+    <div>
+      <div class="num">04 · Liftoff</div>
+      <h2>Newton's third law, at <em>7.6 million newtons</em></h2>
+      <p>A rocket doesn't push against the ground or the air. It pushes against its own exhaust. Nine engines hurl about <strong>2.7 tonnes of gas every second</strong> downward at 2.8 km/s; the gas pushes back on the rocket with exactly the same force. That is the entire trick — it works just as well in vacuum.</p>
+      <p>It only rises when thrust beats weight. At 549 t the stack weighs <strong>5.4 MN</strong>; full thrust is <strong>7.6 MN</strong>. The surplus is small — it leaves the pad at about 0.4 g — and grows every second as propellant burns off.</p>
+      <div class="ctl">
+        <label for="throttle">
+          <div class="row"><span>Throttle</span><output id="throttleOut">0 %</output></div>
+          <input type="range" id="throttle" min="0" max="100" value="0" step="1">
+        </label>
+        <div class="btns">
+          <button class="btn primary" id="btnFull">Full throttle</button>
+          <button class="btn" id="btnCut">Cut engines</button>
+        </div>
+      </div>
+      <div class="law">Thrust equals weight at about <span class="mono">71 %</span> throttle. Below it, the hold‑downs carry the difference. Above it, the rocket climbs.</div>
+    </div>
+  </section>
+
+  <!-- 05 -->
+  <section class="chapter" id="ch5" data-scene="5">
+    <div>
+      <div class="num">05 · Staging</div>
+      <h2>Why throw most of the rocket away?</h2>
+      <p>Reaching orbit takes about <strong>9.4 km/s</strong> of speed change — 7.8 to orbit plus what gravity and drag steal on the way up. The rocket equation says how much propellant that costs, and its answer is brutal: speed grows only with the <em>logarithm</em> of the mass ratio. Doubling the propellant does not double the speed.</p>
+      <div class="eq">
+        <div class="formula">Δv = v<sub>e</sub> · ln( m<sub>0</sub> / m<sub>f</sub> )</div>
+        <div class="legend">
+          <b>m<sub>0</sub> / m<sub>f</sub></b><span>mass ratio — full rocket divided by empty rocket</span>
+          <b>v<sub>e</sub></b><span>exhaust velocity — here ≈ 3.0 km/s</span>
+        </div>
+      </div>
+      <div class="ctl">
+        <label for="ratio">
+          <div class="row"><span>Mass ratio m<sub>0</sub>/m<sub>f</sub></span><output id="ratioOut">4.0 → Δv 4.2 km/s</output></div>
+          <input type="range" id="ratio" min="1.5" max="20" value="4" step="0.1">
+        </label>
+      </div>
+      <p>Empty tanks are dead weight you keep accelerating. <strong>Staging</strong> drops them, and the second stage starts fresh with a small, light rocket of its own — a second helping of the equation.</p>
+      <div class="ctl">
+        <div class="bars" id="massBars">
+          <div class="bar"><span>At liftoff</span><div class="track"><i class="lox" style="width:64.8%"></i><i class="fu" style="width:28.1%"></i><i class="dry" style="width:5.4%"></i><i class="pay" style="width:1.8%"></i></div><span class="val">559 t</span></div>
+          <div class="bar"><span>Stage‑1 burnout</span><div class="track"><i class="lox" style="width:13.4%"></i><i class="fu" style="width:5.9%"></i><i class="dry" style="width:5.4%"></i><i class="pay" style="width:1.8%"></i></div><span class="val">148 t</span></div>
+          <div class="bar"><span>After separation</span><div class="track"><i class="lox" style="width:13.4%"></i><i class="fu" style="width:5.9%"></i><i class="dry" style="width:.7%"></i><i class="pay" style="width:1.8%"></i></div><span class="val">122 t</span></div>
+          <div class="bar"><span>In orbit</span><div class="track"><i class="dry" style="width:.7%"></i><i class="pay" style="width:1.8%"></i></div><span class="val">14 t</span></div>
+        </div>
+        <div class="key"><span><i style="background:var(--lox)"></i>Liquid oxygen</span><span><i style="background:var(--fuel)"></i>RP‑1</span><span><i style="background:var(--metal2)"></i>Structure</span><span><i style="background:var(--ok)"></i>Payload (10 t)</span></div>
+        <div class="btns">
+          <button class="btn primary" id="btnSep">Separate stage</button>
+          <button class="btn" id="btnResetFlight">Reset</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 -->
+  <section class="chapter" id="ch6" data-scene="6">
+    <div>
+      <div class="num">06 · Orbit</div>
+      <h2>Orbit is falling — and <em>missing</em></h2>
+      <p>A rocket doesn't go <em>up</em> to orbit. It goes <strong>sideways</strong>. Seconds after liftoff it begins to lean, and most of its burn is spent gaining horizontal speed; altitude only matters for getting above the air. In the drawing the height is exaggerated — 400 km is barely 6 % of Earth's radius.</p>
+      <p>At <strong>7.8 km/s</strong> something strange happens. The ship is still falling — gravity (grey arrow) pulls it toward Earth just as hard as ever. But it moves sideways so fast that the ground curves away beneath it at the same rate it falls. It falls forever, and never lands. That is an orbit.</p>
+      <div class="stat-row">
+        <div class="stat"><div class="k">Orbital speed</div><div class="v">7.8 <small>km/s</small></div></div>
+        <div class="stat"><div class="k">One lap</div><div class="v">≈ 92 <small>min</small></div></div>
+        <div class="stat"><div class="k">Engines off</div><div class="v">100 <small>% of the time</small></div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="outro">
+    <p>Figures are rounded and modeled on a Falcon 9‑class launcher: two stages, kerosene and liquid oxygen, nine sea‑level engines plus one vacuum engine. The exhaust, tank levels and camera are driven by plain SVG, Canvas and JavaScript — no libraries, so the page runs from a single file on any laptop.</p>
+  </footer>
+</main>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const svg = $('#scene'), stage = $('#stage'), tagsEl = $('#tags');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const narrow = () => matchMedia('(max-width: 900px)').matches;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const fmt = (n, d = 0) => n.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+
+/* ---------- launcher figures (Falcon 9-class, rounded) ---------- */
+const T_FULL = 7607;      // kN, 9 engines at sea level
+const M0 = 549;           // t at liftoff
+const MDOT = 2.745;       // t/s at full throttle
+const S1_PROP = 411;      // t
+const S1_BURNOUT_MASS = M0 - S1_PROP;
+const G = 9.81;
+
+/* ---------- state ---------- */
+const S = {
+  scene: 1, prev: 1,
+  thr: 0, tThr: 0, userThrottle: false,
+  burned: 0,                 // t of stage-1 propellant burned
+  lift: 0, vLift: 0,         // world units (1 unit ≈ 0.1 m)
+  staging: false, sep: 0,    // separation progress 0..1
+  autoSepAt: 0,
+  fuelS2: 1,
+  cam: { cx: 0, cy: -360, hw: 170, hh: 430 },
+  orbitS: 0, orbitLen: 0, ascentLen: 0,
+  tour: false, tourTimer: 0,
+  seedTick: 0, t: 0,
+};
+
+/* ---------- camera frames per chapter ---------- */
+const FRAMES = {
+  1: { cx: 0, cy: -360, hw: 170, hh: 430 },
+  2: { cx: 0, cy: -27, hw: 42, hh: 33 },
+  3: { cx: 0, cy: -14, hw: 28, hh: 24 },
+  4: { cx: 0, cy: -330, hw: 210, hh: 470 },
+  5: { cx: 0, cy: -380, hw: 230, hh: 480 },
+  6: { cx: 3000, cy: 0, hw: 440, hh: 440 },
+};
+const TITLES = { 1: 'Anatomy', 2: 'Combustion', 3: 'The nozzle', 4: 'Liftoff', 5: 'Staging', 6: 'Orbit' };
+
+/* ---------- labels: anchor (x,y) on the part, text placed dx away ---------- */
+const LABELS = {
+  1: [
+    { x: -18, y: -690, dx: -42, side: 'l', text: 'Payload fairing', sub: 'shields the satellite, then splits away' },
+    { x: 6, y: -662, dx: 52, side: 'r', p: 2, text: 'Payload', sub: 'a 10 t satellite', cls: 'ok' },
+    { x: 15, y: -587, dx: 43, side: 'r', p: 2, text: 'Liquid oxygen', sub: 'stage 2 · −183 °C', cls: 'lox' },
+    { x: 15, y: -531, dx: 43, side: 'r', p: 2, text: 'RP‑1 kerosene', sub: 'stage 2', cls: 'fu' },
+    { x: -18, y: -470, dx: -40, side: 'l', text: 'Interstage', sub: 'hides the vacuum engine' },
+    { x: 13, y: -452, dx: 45, side: 'r', text: 'Vacuum engine', sub: '1 × 981 kN · wide bell' },
+    { x: 15, y: -312, dx: 43, side: 'r', text: 'Liquid oxygen', sub: 'stage 1 · 287 t', cls: 'lox' },
+    { x: -21, y: -130, dx: -37, side: 'l', p: 2, text: 'Landing legs', sub: 'stowed for ascent' },
+    { x: 15, y: -121, dx: 43, side: 'r', text: 'RP‑1 kerosene', sub: 'stage 1 · 124 t', cls: 'fu' },
+    { x: -13, y: -22, dx: -45, side: 'l', text: '9 engines', sub: '845 kN each at sea level', cls: 'hot' },
+  ],
+  2: [
+    { x: -13, y: -40.5, dx: -8, side: 'l', text: 'Fuel pump', cls: 'fu' },
+    { x: 13, y: -40.5, dx: 8, side: 'r', text: 'Oxygen pump', cls: 'lox' },
+    { x: 1.6, y: -45.4, dx: 11, side: 'r', p: 2, text: 'Gas generator', sub: 'spins the turbine', cls: 'hot' },
+    { x: 5, y: -33.2, dx: 8, side: 'r', p: 2, text: 'Injector plate', sub: 'mists and mixes' },
+    { x: -5, y: -27, dx: -8, side: 'l', text: 'Combustion chamber', sub: '≈ 100 bar · 3,300 °C', cls: 'hot' },
+    { x: -2.2, y: -18, dx: -10.8, side: 'l', p: 2, text: 'Throat' },
+    { x: 4.8, y: -8, dx: 8.2, side: 'r', text: 'Nozzle bell' },
+    { x: -5.8, y: -5, dx: -7.2, side: 'l', p: 2, text: 'Cooling channels', sub: 'fuel carries wall heat away', cls: 'fu' },
+  ],
+  3: [
+    { x: 5, y: -27, dx: 7, side: 'r', text: 'Subsonic', sub: 'slow · hot · high pressure' },
+    { x: -2.2, y: -18, dx: -9, side: 'l', text: 'Mach 1', sub: 'exactly at the throat', cls: 'hot' },
+    { x: 4.8, y: -7, dx: 7.2, side: 'r', text: 'Supersonic', sub: 'expanding → faster, cooler' },
+    { x: -4.8, y: -2, dx: -7.2, side: 'l', p: 2, text: 'Exit', sub: '≈ 2.8 km/s' },
+    { x: 1.2, y: 5, dx: 8, side: 'r', p: 2, text: 'Shock diamond', sub: 'jet meets outside air' },
+  ],
+  4: [
+    { x: 70, y: -330, dx: 14, side: 'r', text: 'Thrust', sub: 'up to 7.6 MN', cls: 'ok', follow: true },
+    { x: 70, y: -190, dx: 14, side: 'r', text: 'Weight', sub: '5.4 MN at liftoff', cls: 'hot', follow: true },
+    { x: -70, y: 50, dx: -14, side: 'l', text: 'Exhaust', sub: '2.7 t/s at 2.8 km/s', cls: 'hot', follow: true },
+  ],
+  5: [
+    { x: -18, y: -240, dx: -34, side: 'l', text: 'Stage 1', sub: 'empty · 26 t of dead weight', part: 's1' },
+    { x: 18, y: -560, dx: 34, side: 'r', text: 'Stage 2', sub: 'full · 112 t · its own engine', cls: 'lox' },
+  ],
+  6: [
+    { x: 3000, y: -300, dx: -24, side: 'l', text: 'Launch site' },
+    { x: 3290, y: -168, dx: -70, dy: -215, side: 'l', text: 'Orbit insertion', sub: 'engines cut at 7.8 km/s', cls: 'hot' },
+    { x: 3000, y: 335, dx: 24, side: 'r', text: '400 km orbit', sub: 'one lap ≈ 92 min' },
+  ],
+};
+
+/* ---------- element handles ---------- */
+const el = {
+  world: $('#world'), rocket: $('#rocket'), s1: $('#s1'), pad: $('#padWorld'), forces: $('#forceArrows'), orbit: $('#orbitWorld'),
+  side: $('#engineSide'), detail: $('#engineDetail'),
+  plumeMain: $('#plumeMain'), plumeEngine: $('#plumeEngine'), plume2: $('#plume2'), cloud: $('#groundCloud'), plumeClip: $('#plumeClip'), clipRect: $('#clipGroundRect'), glow: $('#glow'),
+  turbA: $('#turbA'), turbB: $('#turbB'),
+  lox1: $('#lox1'), fu1: $('#fu1'), lox2: $('#lox2'), fu2: $('#fu2'),
+  thrustArrow: $('#thrustArrow'), weightArrow: $('#weightArrow'), exhaustArrow: $('#exhaustArrow'),
+  traj: $('#trajPath'), ship: $('#ship'), vVec: $('#vVec'), gVec: $('#gVec'),
+  k: [1, 2, 3, 4].map(i => $('#k' + i)), v: [1, 2, 3, 4].map(i => $('#v' + i)),
+  hudChapter: $('#hudChapter'), hudTitle: $('#hudTitle'),
+  throttle: $('#throttle'), throttleOut: $('#throttleOut'), ratio: $('#ratio'), ratioOut: $('#ratioOut'),
+  bars: [...document.querySelectorAll('#massBars .bar')],
+};
+const hudEl = document.querySelector('.hud');
+const leaders = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+leaders.id = 'leaders';
+el.world.appendChild(leaders);
+
+/* ---------- tank levels ---------- */
+const TANKS = [
+  { el: el.lox1, y: -425, h: 225, stage: 1 }, { el: el.fu1, y: -190, h: 138, stage: 1 },
+  { el: el.lox2, y: -614, h: 54, stage: 2 }, { el: el.fu2, y: -556, h: 50, stage: 2 },
+];
+function setTanks(f1, f2) {
+  for (const t of TANKS) {
+    const f = clamp(t.stage === 1 ? f1 : f2, 0, 1);
+    t.el.setAttribute('y', t.y + t.h * (1 - f));
+    t.el.setAttribute('height', t.h * f);
+  }
+}
+
+/* ---------- labels ---------- */
+let tags = [];
+function buildLabels(scene) {
+  tagsEl.innerHTML = ''; leaders.innerHTML = ''; tags = [];
+  for (const L of LABELS[scene] || []) {
+    if (L.p === 2 && narrow()) continue;
+    const d = document.createElement('div');
+    d.className = 'tag ' + L.side + (L.cls ? ' ' + L.cls : '');
+    d.innerHTML = L.text + (L.sub ? '<small>' + L.sub + '</small>' : '');
+    tagsEl.appendChild(d);
+    const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    ln.setAttribute('class', 'leader'); ln.setAttribute('vector-effect', 'non-scaling-stroke');
+    leaders.appendChild(ln);
+    tags.push({ L, d, ln });
+  }
+  requestAnimationFrame(() => tags.forEach(t => t.d.classList.add('show')));
+}
+const pt = svg.createSVGPoint();
+function project(x, y) {
+  pt.x = x; pt.y = y;
+  const m = svg.getScreenCTM(); if (!m) return { x: -9999, y: -9999 };
+  const q = pt.matrixTransform(m), r = stage.getBoundingClientRect();
+  return { x: q.x - r.left, y: q.y - r.top };
+}
+function placeLabels() {
+  const s1dy = S.sep > 0 ? sepOffset(S.sep).dy : 0;
+  for (const t of tags) {
+    const L = t.L;
+    let oy = 0;
+    if (L.follow) oy -= S.lift;
+    if (L.part === 's1') oy += s1dy;
+    const ax = L.x, ay = L.y + oy, lx = L.x + L.dx, ly = ay + (L.dy || 0);
+    t.ln.setAttribute('x1', ax); t.ln.setAttribute('y1', ay); t.ln.setAttribute('x2', lx); t.ln.setAttribute('y2', ly);
+    const p = project(lx, ly);
+    t.d.style.left = p.x + 'px'; t.d.style.top = p.y + 'px';
+  }
+}
+function sepOffset(p) { return { dy: 40 * p + 420 * p * p, rot: 7 * p }; }
+
+/* ---------- stars canvas ---------- */
+const cv = $('#stars'), cx2 = cv.getContext('2d');
+const STARS = Array.from({ length: 260 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.3 + .3, p: Math.random() * 6.28, s: .4 + Math.random() * .6 }));
+let starDrift = 0;
+function sizeCanvas() {
+  const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  cx2.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return r;
+}
+let stageRect = sizeCanvas();
+function drawStars(dt, env) {
+  if (env === 'pad') return;
+  if (env === 'flight' && !reduce) starDrift = (starDrift + dt * 0.06) % 1;
+  const w = stageRect.width, h = stageRect.height;
+  cx2.clearRect(0, 0, w, h);
+  const ink = getComputedStyle(stage).getPropertyValue('--ink').trim() || '#fff';
+  cx2.fillStyle = ink;
+  for (const s of STARS) {
+    const tw = reduce ? .7 : .55 + .45 * Math.sin(S.t * s.s * 2 + s.p);
+    cx2.globalAlpha = tw * .9;
+    const y = ((s.y + starDrift) % 1) * h;
+    cx2.beginPath(); cx2.arc(s.x * w, y, s.r, 0, 6.283); cx2.fill();
+  }
+  cx2.globalAlpha = 1;
+}
+
+/* ---------- flow particles through the nozzle (chapters 2 & 3) ---------- */
+const NP = 80, flowG = $('#flowParticles');
+const parts = [];
+for (let i = 0; i < NP; i++) {
+  const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  c.setAttribute('r', '.32'); flowG.appendChild(c);
+  parts.push({ c, s: -32.5 + Math.random() * 44, u: Math.random() * 2 - 1 });
+}
+// half-width of the gas column at height y (world units) — chamber, throat, bell, free jet
+function hw(y) {
+  if (y < -22) return 5;
+  if (y < -18) { const t = (y + 22) / 4; return lerp(5, 2.2, t * t * (3 - 2 * t)); }
+  if (y < -2) { const t = (y + 18) / 16; return lerp(2.2, 4.8, Math.sqrt(t)); }
+  return 4.8 + (y + 2) * .12;
+}
+// gas speed (world units / s): subsonic in the chamber, Mach 1 at the throat, supersonic in the bell
+function gasSpeed(y) {
+  if (y < -22) return 5.5;
+  if (y < -18) return lerp(5.5, 14, (y + 22) / 4);
+  if (y < -2) return lerp(14, 38, (y + 18) / 16);
+  return 38;
+}
+function stepParticles(dt, thr) {
+  const k = .35 + .65 * thr;
+  for (const p of parts) {
+    p.s += gasSpeed(p.s) * k * dt;
+    if (p.s > 13) { p.s = -32.5; p.u = Math.random() * 2 - 1; }
+    const y = p.s, x = p.u * hw(y) * .82;
+    p.c.setAttribute('cx', x.toFixed(2)); p.c.setAttribute('cy', y.toFixed(2));
+    const col = y < -20 ? 'var(--white-hot)' : y < -6 ? 'var(--hot)' : 'var(--accent)';
+    const op = y < -2 ? .95 : clamp(1 - (y + 2) / 15, 0, 1) * .9;
+    p.c.style.fill = col; p.c.style.opacity = (op * (.4 + .6 * thr)).toFixed(2);
+    p.c.setAttribute('r', (y < -18 ? .34 : .26).toString());
+  }
+}
+
+/* ---------- scene switching ---------- */
+function setHidden(g, hide) { g.classList.toggle('hidden-g', hide); }
+function go(n, opts = {}) {
+  n = clamp(n, 1, 6);
+  if (n === S.scene && !opts.force) return;
+  const cut = n === 6 || S.scene === 6;
+  S.prev = S.scene; S.scene = n;
+  const apply = () => {
+    setHidden(el.pad, n >= 5); setHidden(el.rocket, n === 6); setHidden(el.orbit, n !== 6);
+    setHidden(el.forces, n !== 4);
+    setHidden(el.detail, !(n === 2 || n === 3)); setHidden(el.side, n === 2 || n === 3);
+    if (cut || reduce) Object.assign(S.cam, FRAMES[n]);
+    buildLabels(n);
+    el.hudChapter.textContent = '0' + n; el.hudTitle.textContent = TITLES[n];
+    document.querySelectorAll('#dots button').forEach((b, i) => b.setAttribute('aria-current', i + 1 === n ? 'true' : 'false'));
+  };
+  // entering-chapter behaviour
+  if (n === 1) { S.tThr = 0; S.userThrottle = false; S.lift = 0; S.vLift = 0; S.burned = 0; S.staging = false; S.sep = 0; }
+  if (n === 2) { S.tThr = .85; }
+  if (n === 3) { S.tThr = .92; }
+  if (n === 4) { S.userThrottle = false; S.lift = 0; S.vLift = 0; S.burned = 0; S.tThr = 0; S.thr = 0; S.staging = false; S.sep = 0; setTimeout(() => { if (S.scene === 4 && !S.userThrottle) setThrottle(100, false); }, 900); }
+  if (n === 5) { resetFlight(); }
+  if (n === 6) { S.orbitS = 0; }
+  if (cut && !reduce) { stage.classList.add('fading'); setTimeout(() => { apply(); stage.classList.remove('fading'); }, 360); }
+  else apply();
+}
+function resetFlight() {
+  S.staging = false; S.sep = 0; S.burned = S1_PROP * .72; S.tThr = 1; S.thr = 1; S.lift = 0; S.vLift = 0; S.fuelS2 = 1;
+  S.autoSepAt = S.t + 5.5;
+  el.plume2.style.opacity = 0; el.s1.removeAttribute('transform'); el.s1.style.opacity = 1;
+  $('#btnSep').disabled = false;
+}
+function separate() { if (S.scene !== 5 || S.staging) return; S.staging = true; S.tThr = 0; $('#btnSep').disabled = true; }
+
+function setThrottle(pct, user) {
+  pct = clamp(Math.round(pct), 0, 100);
+  if (user) S.userThrottle = true;
+  S.tThr = pct / 100;
+  el.throttle.value = pct; el.throttleOut.textContent = pct + ' %';
+}
+
+/* ---------- HUD ---------- */
+function hud(k1, v1, k2, v2, k3, v3, k4, v4) {
+  const K = [k1, k2, k3, k4], V = [v1, v2, v3, v4];
+  for (let i = 0; i < 4; i++) { if (el.k[i].textContent !== K[i]) el.k[i].textContent = K[i]; el.v[i].innerHTML = V[i]; }
+}
+const u = (v, unit) => v + '<em>' + unit + '</em>';
+
+/* ---------- main loop ---------- */
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now; S.t += dt;
+  const n = S.scene;
+
+  // throttle response (engines take ~1 s to spool)
+  S.thr = lerp(S.thr, S.tThr, 1 - Math.exp(-dt * 2.2));
+  const thr = S.thr;
+
+  // mass, weight, thrust
+  const T = T_FULL * thr;
+  const inFlight = n === 4 || n === 5;
+  if (inFlight && !S.staging) S.burned = clamp(S.burned + MDOT * thr * dt, 0, S1_PROP);
+  const m = clamp(M0 - S.burned, S1_BURNOUT_MASS, M0);
+  const W = m * G, TW = T / W;
+  const fuel1 = 1 - S.burned / S1_PROP;
+
+  // liftoff dynamics (chapter 4): hold-downs release when thrust beats weight
+  if (n === 4) {
+    const a = (TW - 1) * G * 10;                          // world units are 0.1 m
+    S.vLift = S.lift <= 0 && a < 0 ? 0 : S.vLift + a * dt;
+    S.lift = clamp(S.lift + S.vLift * dt, 0, 1400);
+    if (S.lift >= 1400) S.vLift = 0;
+  }
+
+  // staging (chapter 5)
+  if (n === 5) {
+    if (!S.staging && fuel1 <= 0.001 && S.t >= S.autoSepAt) separate();
+    if (!S.staging && S.t >= S.autoSepAt && S.burned < S1_PROP) S.burned = Math.min(S1_PROP, S.burned + MDOT * 6 * dt);
+    if (S.staging) {
+      S.sep = clamp(S.sep + dt / 3.2, 0, 1);
+      const o = sepOffset(S.sep);
+      el.s1.setAttribute('transform', `translate(0 ${o.dy.toFixed(1)}) rotate(${o.rot.toFixed(2)} 0 -240)`);
+      el.s1.style.opacity = 1 - clamp((S.sep - .55) / .45, 0, 1) * .9;
+      const ign = clamp((S.sep - .28) / .3, 0, 1);
+      el.plume2.style.opacity = ign;
+      S.fuelS2 = clamp(S.fuelS2 - ign * dt * .05, .35, 1);
+    }
+  }
+
+  // camera: follow the frame, track the rocket in flight
+  const F = { ...FRAMES[n] };
+  if (n === 4) F.cy -= S.lift;
+  if (n === 5 && S.sep > 0) { F.cy = lerp(-380, -600, S.sep); F.hh = lerp(480, 260, S.sep); F.hw = lerp(230, 130, S.sep); }
+  const k = reduce ? 1 : 1 - Math.exp(-dt * 3.2);
+  for (const key of ['cx', 'cy', 'hw', 'hh']) S.cam[key] = lerp(S.cam[key], F[key], k);
+  const hudH = hudEl.offsetHeight + 10, availH = Math.max(120, stageRect.height - hudH);
+  const A = stageRect.width / availH;
+  const vhA = Math.max(2 * S.cam.hh, 2 * S.cam.hw / A), pxPerUnit = availH / vhA;
+  const vw = stageRect.width / pxPerUnit, vh = stageRect.height / pxPerUnit;
+  svg.setAttribute('viewBox', `${(S.cam.cx - vw / 2).toFixed(2)} ${(S.cam.cy - vhA / 2).toFixed(2)} ${vw.toFixed(2)} ${vh.toFixed(2)}`);
+
+  // rocket & arrows
+  const ty = -S.lift;
+  el.rocket.setAttribute('transform', `translate(0 ${ty.toFixed(1)})`);
+  el.forces.setAttribute('transform', `translate(0 ${ty.toFixed(1)})`);
+  setTanks(fuel1, S.fuelS2);
+
+  // exhaust: main plume (whole octaweb), single-engine plume (cross-section), pad steam
+  const showMain = (n === 1 || n === 4 || n === 5) && !S.staging;
+  const pm = showMain ? Math.min(1, thr * 1.4) : 0;
+  el.plumeMain.style.opacity = pm.toFixed(2);
+  el.plumeMain.setAttribute('transform', `translate(0 -2) scale(${(.7 + .3 * thr).toFixed(3)} ${(.25 + .75 * thr).toFixed(3)}) translate(0 2)`);
+  const pe = (n === 2 || n === 3) ? Math.min(1, thr * 1.3) : 0;
+  el.plumeEngine.style.opacity = pe.toFixed(2);
+  el.glow.style.opacity = (.15 + .85 * thr).toFixed(2);
+  const cloud = (n === 1 || n === 4) ? thr * (1 - clamp(S.lift / 220, 0, 1)) : 0;
+  el.cloud.style.opacity = cloud.toFixed(2);
+  el.cloud.setAttribute('transform', `scale(${(.5 + 1.6 * thr).toFixed(2)} ${(.7 + .9 * thr).toFixed(2)})`);
+  if (n <= 4) { el.plumeClip.setAttribute('clip-path', 'url(#clipGround)'); el.clipRect.setAttribute('height', (S.lift + 16).toFixed(1)); }
+  else el.plumeClip.removeAttribute('clip-path');
+  if (!reduce) {
+    S.seedTick += dt;
+    if (S.seedTick > .045) { S.seedTick = 0; const s = (Math.random() * 1000) | 0; if (pm > 0) el.turbA.setAttribute('seed', s); if (pe > 0) el.turbB.setAttribute('seed', s); if (S.staging) el.turbA.setAttribute('seed', s); }
+  }
+  if (n === 2 || n === 3) stepParticles(dt, thr);
+
+  // force arrows (chapter 4)
+  if (n === 4) {
+    el.thrustArrow.setAttribute('d', `M70 -250 L70 ${(-250 - 150 * (T / T_FULL)).toFixed(1)}`);
+    el.thrustArrow.style.opacity = thr > .02 ? 1 : 0;
+    el.weightArrow.setAttribute('d', `M70 -250 L70 ${(-250 + 150 * (W / T_FULL)).toFixed(1)}`);
+    el.exhaustArrow.setAttribute('d', `M-70 -30 L-70 ${(-30 + 160 * thr).toFixed(1)}`);
+    el.exhaustArrow.style.opacity = thr > .02 ? 1 : 0;
+  }
+
+  // orbit (chapter 6)
+  let speedKms = 0, altKm = 0;
+  if (n === 6) {
+    if (!S.orbitLen) { S.orbitLen = el.traj.getTotalLength(); S.ascentLen = findAscentLength(); }
+    const prog = clamp(S.orbitS / S.ascentLen, 0, 1);
+    S.orbitS += (reduce ? 0 : (55 + 130 * prog) * dt);
+    if (S.orbitS > S.orbitLen) S.orbitS -= (S.orbitLen - S.ascentLen);
+    const p = el.traj.getPointAtLength(S.orbitS), q = el.traj.getPointAtLength(Math.min(S.orbitLen, S.orbitS + 2));
+    let vx = q.x - p.x, vy = q.y - p.y; const vl = Math.hypot(vx, vy) || 1; vx /= vl; vy /= vl;
+    const gx = 3000 - p.x, gy = -p.y, gl = Math.hypot(gx, gy) || 1;
+    const vlen = 30 + 50 * prog, glen = 48;
+    el.ship.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`);
+    el.vVec.setAttribute('d', `M0 0 L${(vx * vlen).toFixed(1)} ${(vy * vlen).toFixed(1)}`);
+    el.gVec.setAttribute('d', `M0 0 L${(gx / gl * glen).toFixed(1)} ${(gy / gl * glen).toFixed(1)}`);
+    speedKms = 7.8 * Math.pow(prog, .6); altKm = clamp((gl - 300) / 35 * 400, 0, 400);
+  }
+
+  // environment & backdrop
+  const env = n === 6 ? 'space' : (n === 5 || (n === 4 && S.lift > 260)) ? 'flight' : 'pad';
+  if (stage.dataset.env !== env) stage.dataset.env = env;
+  drawStars(dt, env);
+
+  // HUD
+  if (n === 1) hud('Stage', 'On the pad', 'Propellant', u('518', 't'), 'Structure', u('30', 't'), 'Payload', u('10', 't'));
+  else if (n === 2) hud('Throttle', u(fmt(thr * 100), '%'), 'Chamber pressure', u(fmt(thr * 97), 'bar'), 'Mass flow', u(fmt(thr * 305), 'kg/s'), 'Flame', u(thr > .05 ? '3,300' : '—', '°C'));
+  else if (n === 3) hud('Throat', 'Mach 1.0', 'Exit', u(fmt(thr > .05 ? 2.77 : 0, 2), 'km/s'), 'Exit Mach', u(thr > .05 ? '≈ 3.5' : '—', ''), 'Thrust', u(fmt(845 * thr), 'kN'));
+  else if (n === 4) hud('Throttle', u(fmt(thr * 100), '%'), 'Thrust', u(fmt(T / 1000, 2), 'MN'), 'Weight', u(fmt(W / 1000, 2), 'MN'), 'Thrust / weight', fmt(TW, 2));
+  else if (n === 5) hud('Stage 1 propellant', u(fmt(fuel1 * 100), '%'), 'Stack mass', u(fmt(S.staging ? lerp(m, 122, S.sep) : m), 't'), 'Stage', S.staging ? (S.sep < .3 ? 'Separating' : 'Stage 2 burning') : 'Stage 1 burning', 'Δv so far', u(fmt(3 * Math.log(M0 / m) + (S.staging ? S.sep * 2.4 : 0), 1), 'km/s'));
+  else hud('Speed', u(fmt(speedKms, 1), 'km/s'), 'Altitude', u(fmt(altKm), 'km'), 'Gravity', 'toward Earth', 'Engines', speedKms > 7.7 ? 'off · coasting' : 'burning');
+
+  // mass bars highlight (chapter 5)
+  if (n === 5 || n === 6) {
+    const ph = n === 6 ? 3 : S.staging && S.sep > .3 ? 2 : fuel1 <= .01 ? 1 : 0;
+    el.bars.forEach((b, i) => b.style.opacity = i === ph ? 1 : .45);
+  } else el.bars.forEach(b => b.style.opacity = 1);
+
+  placeLabels();
+  requestAnimationFrame(frame);
+}
+function findAscentLength() {
+  let lo = 0, hi = S.orbitLen;
+  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2, p = el.traj.getPointAtLength(mid); if (Math.hypot(p.x - 3000, p.y) < 334.5) lo = mid; else hi = mid; }
+  return lo;
+}
+
+/* ---------- controls ---------- */
+const chapters = [...document.querySelectorAll('.chapter')];
+const dots = $('#dots');
+chapters.forEach((c, i) => {
+  const b = document.createElement('button'); b.setAttribute('aria-label', 'Chapter ' + (i + 1) + ': ' + TITLES[i + 1]);
+  b.innerHTML = '<span></span>'; b.addEventListener('click', () => { stopTour(); jumpTo(i + 1); }); dots.appendChild(b);
+});
+function jumpTo(n) { go(n); chapters[n - 1].scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: narrow() ? 'start' : 'center' }); }
+$('#btnPrev').addEventListener('click', () => { stopTour(); jumpTo(S.scene - 1); });
+$('#btnNext').addEventListener('click', () => { stopTour(); jumpTo(S.scene + 1); });
+const btnPlay = $('#btnPlay');
+function stopTour() { if (!S.tour) return; S.tour = false; clearTimeout(S.tourTimer); btnPlay.textContent = '▶ Tour'; btnPlay.setAttribute('aria-pressed', 'false'); }
+function tourStep() {
+  if (!S.tour) return;
+  const next = S.scene >= 6 ? 1 : S.scene + 1;
+  jumpTo(next);
+  S.tourTimer = setTimeout(tourStep, next === 4 || next === 5 ? 13000 : 10000);
+}
+btnPlay.addEventListener('click', () => {
+  if (S.tour) return stopTour();
+  S.tour = true; btnPlay.textContent = '❚❚ Pause'; btnPlay.setAttribute('aria-pressed', 'true');
+  jumpTo(S.scene); S.tourTimer = setTimeout(tourStep, S.scene === 4 || S.scene === 5 ? 13000 : 10000);
+});
+window.addEventListener('wheel', stopTour, { passive: true });
+window.addEventListener('touchmove', stopTour, { passive: true });
+
+el.throttle.addEventListener('input', e => setThrottle(+e.target.value, true));
+$('#btnFull').addEventListener('click', () => setThrottle(100, true));
+$('#btnCut').addEventListener('click', () => setThrottle(0, true));
+function updRatio() { const r = +el.ratio.value; el.ratioOut.textContent = `${r.toFixed(1)} → Δv ${(3 * Math.log(r)).toFixed(1)} km/s`; }
+el.ratio.addEventListener('input', updRatio); updRatio();
+$('#btnSep').addEventListener('click', separate);
+$('#btnResetFlight').addEventListener('click', () => { if (S.scene !== 5) jumpTo(5); else resetFlight(); });
+
+/* scroll-driven chapters: whichever section crosses the trigger band becomes the scene */
+function makeObserver() {
+  const rm = narrow() ? '-52% 0px -28% 0px' : '-42% 0px -42% 0px';
+  return new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) go(+e.target.dataset.scene); }, { rootMargin: rm, threshold: 0 });
+}
+let io = makeObserver(); chapters.forEach(c => io.observe(c));
+let wasNarrow = narrow();
+window.addEventListener('resize', () => {
+  stageRect = sizeCanvas();
+  if (narrow() !== wasNarrow) { wasNarrow = narrow(); io.disconnect(); io = makeObserver(); chapters.forEach(c => io.observe(c)); buildLabels(S.scene); }
+});
+
+/* ---------- boot ---------- */
+go(1, { force: true });
+requestAnimationFrame(frame);
+})();
+</script>
