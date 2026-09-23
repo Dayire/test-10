@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "assets": "node tools/export-assets.mjs",
+    "astra": "node tools/astra-assets.mjs",
     "test": "node tools/playtest.mjs && node tools/negative.mjs",
     "build:artifact": "vite build --config tools/vite.artifact.config.js && node tools/make-artifact.mjs dist-artifact"
   },

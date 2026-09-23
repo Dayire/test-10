@@ -22,8 +22,8 @@ npx @openai/codex exec -m gpt-6-astra --skip-git-repo-check \
   "Before anything else, state the exact model name you are running as."
 ```
 
-4. Generate each asset with the prompt template below, writing `.glb` files into `public/assets/models/`.
-5. List them in `public/assets/models/manifest.json` and reload the game:
+4. Run `node tools/astra-assets.mjs`. It stops unless the model answering names itself Astra. It then generates every asset with the prompt template below, validates each `.glb` and adds it to the manifest. Pass asset names to generate only some.
+5. Or do it by hand: write `.glb` files into `public/assets/models/`, list them in `public/assets/models/manifest.json` and reload the game:
 
 ```json
 { "models": [ { "name": "barrel", "file": "barrel.glb" }, { "name": "lantern", "file": "lantern.glb" } ] }
