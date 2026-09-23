@@ -41,6 +41,9 @@ export async function boot(canvas, params) {
   ui.on('mute', () => { audio.muted = !audio.muted; if (audio.master) audio.master.gain.value = audio.muted ? 0 : 0.9; ui.showPause(true, input.lastDevice, world.rs.tier, audio.muted, input.keyLabels); });
   ui.on('again', () => { game.restartLevel(); audio.fadeIn(2); });
   canvas.addEventListener('pointerdown', () => { if (game.mode === 'intro') game.beginPlay(); canvas.focus(); });
+  // unlock audio inside a real user gesture (Safari requires it in the handler itself)
+  const unlockAudio = () => { try { audio.start(); if (audio.ctx && audio.ctx.state === 'suspended' && !game.paused) audio.ctx.resume(); } catch { /* no audio */ } };
+  for (const ev of ['keydown', 'pointerdown', 'touchstart']) window.addEventListener(ev, unlockAudio, { passive: true });
   let last = performance.now();
   window.__ready = true;
   const loop = (now) => {

@@ -14,6 +14,8 @@ ${css}
 <script type="module" src="game.js"></script>
 `;
 fs.writeFileSync(path.join(dist, 'medina.html'), page);
+// local test page that mimics the artifact host skeleton
+fs.writeFileSync(path.join(dist, 'test.html'), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0;font:14px system-ui;background:#fafafa}img{max-width:100%}[hidden]{display:none!important}</style></head><body>${page}</body></html>`);
 fs.mkdirSync(path.join(dist, 'assets/models'), { recursive: true });
 fs.writeFileSync(path.join(dist, 'assets/models/manifest.json'), '{ "models": [] }\n');
 const kb = (f) => (fs.statSync(path.join(dist, f)).size / 1024).toFixed(0) + ' KB';

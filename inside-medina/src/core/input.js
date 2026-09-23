@@ -40,7 +40,8 @@ export class Input {
     if (this.k('Space', 'KeyK')) jump = true;
     if (this.k('ShiftLeft', 'ShiftRight', 'KeyJ', 'KeyE', 'ControlLeft', 'ControlRight', 'KeyF')) grab = true;
     if (this.k('Escape', 'KeyP')) pause = true;
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let pads = [];
+    try { pads = (navigator.getGamepads && navigator.getGamepads()) || []; } catch { pads = []; } // blocked by permissions policy in some frames
     for (const gp of pads) {
       if (!gp) continue;
       const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
