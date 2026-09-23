@@ -27,7 +27,7 @@ export function buildLevel(game) {
     K.add(g, mat, null, { cast: o.cast !== false });
     return g;
   };
-  const ground = (x0, x1, { z0 = FZ - 0.3, z1 = 9, y = 0, mat = 'cobbles', collide = true } = {}) => {
+  const ground = (x0, x1, { z0 = FZ - 0.3, z1 = 17, y = 0, mat = 'cobbles', collide = true } = {}) => {
     if (collide) solid(x0, y - 3, x1, y, { ledges: false, surface: 'stone' });
     const g = boxMM(x0, y - 0.6, z0, x1, y, z1);
     shadeByHeight(g, { base: y - 0.6, grime: 0.1, grimeAmt: 0 });

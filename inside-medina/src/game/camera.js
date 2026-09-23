@@ -64,9 +64,12 @@ export class CameraRig {
     this.aheadX += (aheadT - this.aheadX) * (1 - Math.exp(-1.1 * dt));
     const fx = ppos.x + this.aheadX + p.focusBias;
     const fy = this.groundY + p.yBias;
-    const tp = new THREE.Vector3(fx + p.side, fy + p.height, p.dist);
-    const tl = new THREE.Vector3(fx, fy + p.lookY + p.pitchBias, 0);
-    if (this.snapNext) { this.pos.copy(tp); this.look.copy(tl); this.vel.set(0, 0, 0); this.lvel.set(0, 0, 0); this.fov = p.fov; this.snapNext = false; }
+    const portraitLift = Math.max(0, 1 - (this.cam.aspect || 1.78)) * 3.2;
+    const tp = new THREE.Vector3(fx + p.side, fy + p.height + portraitLift * 0.7, p.dist);
+    const tl = new THREE.Vector3(fx, fy + p.lookY + p.pitchBias + portraitLift, 0);
+    const aspect = this.cam.aspect || 1.78;
+    const minV = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(46) / 2) / aspect));
+    if (this.snapNext) { this.pos.copy(tp); this.look.copy(tl); this.vel.set(0, 0, 0); this.lvel.set(0, 0, 0); this.fov = Math.max(p.fov, minV); this.snapNext = false; }
     const wx = 3.2, wy = 2.4, wz = 1.6;
     [this.pos.x, this.vel.x] = spring(this.pos.x, this.vel.x, tp.x, wx, dt);
     [this.pos.y, this.vel.y] = spring(this.pos.y, this.vel.y, tp.y, wy, dt);
@@ -74,7 +77,8 @@ export class CameraRig {
     [this.look.x, this.lvel.x] = spring(this.look.x, this.lvel.x, tl.x, wx, dt);
     [this.look.y, this.lvel.y] = spring(this.look.y, this.lvel.y, tl.y, wy, dt);
     [this.look.z, this.lvel.z] = spring(this.look.z, this.lvel.z, tl.z, wz, dt);
-    [this.fov, this.fovVel] = spring(this.fov, this.fovVel, p.fov, 1.5, dt);
+    // keep at least ~46 deg of horizontal view on narrow (portrait) screens
+    [this.fov, this.fovVel] = spring(this.fov, this.fovVel, Math.max(p.fov, minV), 1.5, dt);
 
     let pos = this.pos, look = this.look, fov = this.fov;
     // scripted override blending

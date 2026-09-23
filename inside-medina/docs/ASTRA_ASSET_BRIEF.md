@@ -62,6 +62,28 @@ Optional per-entry fields: `scale`, `rotationY`, `offset: [x, y, z]`.
 
 Characters (`boy`, `guard`) are driven by the procedural animator. A replacement must be rigged with these bone names: `pelvis, spine, chest, neck, head, shoulderL/R, elbowL/R, wristL/R, hipL/R, kneeL/R, ankleL/R, skirt`.
 
+## Blockouts to match
+
+`npm run assets` (with `npm run dev` running) exports every swappable asset as a GLB blockout to `exports/`. Each one has the exact size and pivot the game uses, with flat colours. Give Astra the blockout alongside the prompt so its model drops in without rescaling.
+
+| asset | exported size (x × y × z, m) | triangles |
+| --- | --- | --- |
+| crate | 1.00 × 1.00 × 1.05 | 1380 |
+| lantern | 0.20 × 0.49 × 0.20 | 448 |
+| barrel | 0.63 × 0.86 × 0.63 | 1812 |
+| pot_amphora | 0.48 × 0.83 × 0.48 | 528 |
+| pot_jar | 0.46 × 0.50 × 0.46 | 384 |
+| pot_tall | 0.40 × 1.00 × 0.40 | 432 |
+| pot_planter | 0.54 × 0.36 × 0.54 | 288 |
+| pot_bowl | 0.40 × 0.15 × 0.40 | 240 |
+| rug_roll | 0.32 × 1.70 × 0.32 | 60 |
+| sack | 0.56 × 0.63 × 0.46 | 648 |
+| basket | 0.56 × 0.31 × 0.56 | 240 |
+| cart (with shafts and load) | 4.04 × 1.39 × 1.56 | 2744 |
+| stool | 0.39 × 0.49 × 0.40 | 128 |
+| dome (r = 5) | 11.06 × 12.12 × 11.06 | 5736 |
+| finial | 0.48 × 2.20 × 0.48 | 760 |
+
 ## Prompt template
 
 ```text
