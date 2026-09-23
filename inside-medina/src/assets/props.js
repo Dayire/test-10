@@ -328,7 +328,7 @@ export function wire(K, p0, p1, { sag = 0.4, r = 0.008 } = {}) {
 
 // ---------------------------------------------------------------- eave
 // scalloped wooden fascia with terracotta tiles (left side of the reference)
-export function eave(K, { x0, x1, y, z, depth = 1.1, drop = 0.35 }) {
+export function eave(K, { x0, x1, y, z, depth = 1.1, drop = 0.35, soffit = 'woodDark' }) {
   const w = x1 - x0;
   const s = new THREE.Shape();
   const n = Math.max(2, Math.round(w / 0.45));
@@ -341,6 +341,10 @@ export function eave(K, { x0, x1, y, z, depth = 1.1, drop = 0.35 }) {
   K.add(gu, 'woodDark');
   // rafters
   for (let i = 0; i <= n; i++) { const rx = x0 + (i / n) * w; const rg = boxMM(rx - 0.04, y - 0.12, z, rx + 0.04, y, z + depth + 0.08); K.add(rg, 'woodDark'); }
+  // plank soffit closing the underside
+  const sof = boxMM(x0, y - 0.16, z, x1, y - 0.12, z + depth + 0.02); K.add(sof, soffit);
+  // second scalloped board, stepped (layered look of the reference)
+  const g2 = extrude(s, 0.05, { curveSeg: 6 }); g2.translate(x0, y + 0.22, z + depth - 0.25); K.add(worldUV(g2), 'woodDark');
   // tiled roof slope
   const roof = new THREE.PlaneGeometry(w, depth + 0.3, 1, 1);
   roof.rotateX(-Math.PI / 2 + 0.38); roof.translate(x0 + w / 2, y + 0.18, z + (depth + 0.1) / 2);

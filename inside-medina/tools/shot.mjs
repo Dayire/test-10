@@ -18,7 +18,7 @@ const start = await page.evaluate(() => window.__frames || 0);
 try {
   await page.waitForFunction((n) => (window.__frames || 0) >= n, start + (+frames), { timeout: 240000 });
 } catch (e) { logs.push('TIMEOUT waiting frames'); }
-await page.screenshot({ path: out });
+await page.screenshot({ path: out, timeout: 300000 });
 const info = await page.evaluate(() => window.__info ? window.__info() : null).catch(() => null);
 console.log(`shot ${out} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 if (info) console.log('info', JSON.stringify(info));

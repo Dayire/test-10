@@ -41,7 +41,7 @@ class LeafBuilder {
 }
 
 // Ivy hanging from a horizontal edge (x0..x1 at height y, wall face at z facing +z)
-export function ivyCurtain(K, { x0, x1, y, z, density = 1, maxLen = 3, minLen = 0.4, seed = 1, normal = new THREE.Vector3(0, 0, 1), flowers = 0 }) {
+export function ivyCurtain(K, { x0, x1, y, z, density = 1, maxLen = 3, minLen = 0.4, seed = 1, normal = new THREE.Vector3(0, 0, 1), flowers = 0, scale = 1 }) {
   const r = rng(seed);
   const L = new LeafBuilder();
   const F = new LeafBuilder();
@@ -51,7 +51,7 @@ export function ivyCurtain(K, { x0, x1, y, z, density = 1, maxLen = 3, minLen = 
     const len = minLen + Math.pow(r(), 1.6) * (maxLen - minLen);
     const out = r.range(0.02, 0.18);
     let px = sx, pz = z + 0.03 + out * 0.3, py = y + 0.05;
-    const steps = Math.max(3, Math.round(len / 0.055));
+    const steps = Math.max(3, Math.round(len / (0.055 * scale)));
     const wig = r.range(0.5, 2.0), ph = r() * 6;
     for (let i = 0; i < steps; i++) {
       const t = i / steps;
@@ -59,7 +59,7 @@ export function ivyCurtain(K, { x0, x1, y, z, density = 1, maxLen = 3, minLen = 
       pz = z + 0.03 + out * Math.sin(Math.min(1, t * 3) * Math.PI / 2) + Math.sin(t * 5 + ph) * 0.03;
       py = y + 0.05 - t * len;
       const nrm = normal.clone().add(new THREE.Vector3(r.range(-0.5, 0.5), r.range(-0.2, 0.6), r.range(0, 0.4))).normalize();
-      const size = r.range(0.07, 0.13) * (1 - t * 0.35);
+      const size = r.range(0.07, 0.13) * (1 - t * 0.35) * scale;
       const c = new THREE.Vector3(px + r.range(-0.05, 0.05), py, pz + r.range(0, 0.05));
       L.leaf(c, nrm, size, r() * 6.28, Math.floor(r() * 4), 0.02 + t * t * 0.35 * len / 2, r.range(0.1, 0.5));
       if (r() < 0.5) L.leaf(c.clone().add(new THREE.Vector3(r.range(-0.06, 0.06), r.range(-0.03, 0.03), 0.02)), nrm, size * 0.85, r() * 6.28, Math.floor(r() * 4), 0.02 + t * t * 0.35 * len / 2, 0.3);
@@ -71,7 +71,7 @@ export function ivyCurtain(K, { x0, x1, y, z, density = 1, maxLen = 3, minLen = 
   for (let i = 0; i < mat; i++) {
     const c = new THREE.Vector3(x0 + r() * (x1 - x0), y + r.range(-0.12, 0.2), z + r.range(0.0, 0.2));
     const nrm = new THREE.Vector3(r.range(-0.4, 0.4), r.range(0.3, 1), r.range(0.3, 1));
-    L.leaf(c, nrm, r.range(0.08, 0.15), r() * 6.28, Math.floor(r() * 4), 0.02, 0.3);
+    L.leaf(c, nrm, r.range(0.08, 0.15) * scale, r() * 6.28, Math.floor(r() * 4), 0.02, 0.3);
   }
   K.add(L.geometry(), 'ivy', null, { cast: true });
   if (F.n) K.add(F.geometry(), 'blossom', null, { cast: false });

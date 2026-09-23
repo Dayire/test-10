@@ -394,9 +394,9 @@ function rubblePile(K, x0, x1, gapY, r) {
 function skyline(K, farBuilding, r) {
   const styles = ['cream', 'peach', 'ochre', 'white', 'blue', 'cream', 'peach', 'stone'];
   // row 2
-  for (let x = -40; x < 240;) { const w = 5 + r() * 7; if (x + w > 66 && x < 118) { x = 118; continue; } farBuilding(x, x + w, -12 - r() * 6, 7 + r() * 6, styles[Math.floor(r() * styles.length)], { depth: 6 }); x += w + (r() < 0.15 ? 2 + r() * 3 : 0); }
+  for (let x = -40; x < 240;) { const w = 5 + r() * 7; if (x + w > 66 && x < 118) { x = 118; continue; } if (x + w > 176 && x < 203) { x = 203; continue; } farBuilding(x, x + w, -12 - r() * 6, 7 + r() * 6, styles[Math.floor(r() * styles.length)], { depth: 6 }); x += w + (r() < 0.15 ? 2 + r() * 3 : 0); }
   // row 3
-  for (let x = -60; x < 260;) { const w = 7 + r() * 10; farBuilding(x, x + w, -24 - r() * 12, 13 + r() * 10, styles[Math.floor(r() * styles.length)], { depth: 8 }); x += w + r() * 2; }
+  for (let x = -60; x < 260;) { const w = 7 + r() * 10; if (x + w > 174 && x < 205) { x = 205; continue; } farBuilding(x, x + w, -24 - r() * 12, 13 + r() * 10, styles[Math.floor(r() * styles.length)], { depth: 8 }); x += w + r() * 2; }
   // row 4 (hazy far city)
   for (let x = -100; x < 320;) { const w = 10 + r() * 16; farBuilding(x, x + w, -55 - r() * 40, 14 + r() * 16, styles[Math.floor(r() * styles.length)], { depth: 10, parapet: r() < 0.5 }); x += w + r() * 4; }
 }
@@ -415,7 +415,7 @@ function buildHeroAlley(game, batch, K, L, lantern) {
   // LEFT wall (faces +x): blue lower storey, yellow upper with tile roundels
   const KL = K.with(new THREE.Matrix4().makeRotationY(Math.PI / 2).premultiply(new THREE.Matrix4().makeTranslation(xl, 0, 0)));
   // in KL local space: x -> -z world (x_local = -z_world), front face z_local=0 -> x_world = xl
-  building(KL, { x0: 1.2, x1: -zEnd + 1, z: 0, y0: 0, height: 7.2, style: 'blue', door: 7.5, doorKind: 'pointed', depth: 5, merlons: false, winSkip: 0.5, seed: 901 });
+  building(KL, { x0: 1.2, x1: -zEnd + 1, z: 0, y0: 0, height: 7.2, style: 'blue', door: 7.5, doorKind: 'pointed', depth: 5, merlons: false, winSkip: 0.75, noGroundWindows: true, seed: 901 });
   wallWithOpenings(KL, { x0: 1.2, x1: -zEnd + 1, y0: 7.2, y1: 15, z: 0.05, depth: 0.4, mat: 'plasterOchre', openings: [] });
   for (let i = 0; i < 9; i++) { // tile roundels band
     const cx = 2 + i * 1.5;
@@ -425,15 +425,15 @@ function buildHeroAlley(game, batch, K, L, lantern) {
   }
   cornice(KL, { x0: 1.2, x1: -zEnd + 1, y: 7.0, z: 0.05, profile: 'heavy', mat: 'limestone', scale: 0.9 });
   cornice(KL, { x0: 1.2, x1: -zEnd + 1, y: 14.6, z: 0.05, profile: 'classic', mat: 'limestone', scale: 1.2 });
-  ivyCurtain(KL, { x0: 1.5, x1: 6.5, y: 14.8, z: 0.1, maxLen: 6, seed: 61, flowers: 0.3 });
+  ivyCurtain(KL, { x0: 1.5, x1: 9.5, y: 14.8, z: 0.1, maxLen: 7, seed: 61, flowers: 0.3, density: 1.8, scale: 1.7 });
   ivyCurtain(KL, { x0: 2, x1: 12, y: 7.4, z: 0.3, maxLen: 2.2, seed: 62 });
   // big scalloped eave near the camera + beige stall awning + lantern
-  eave(KL, { x0: 1.0, x1: 6.2, y: 5.0, z: 0.1, depth: 1.8, drop: 0.45 });
-  awning(KL, { x0: 5.2, x1: 9.2, z0: 0.05, z1: 2.3, y0: 2.8, y1: 2.1, mat: 'fabricTan', sag: 0.14 });
-  const lp = new THREE.Vector3(xl + 0.02, 3.3, -5.2);
+  eave(KL, { x0: 1.6, x1: 7.4, y: 6.6, z: 0.1, depth: 0.85, drop: 0.5, soffit: 'wood' });
+  awning(KL, { x0: 6.6, x1: 10.6, z0: 0.05, z1: 2.2, y0: 2.9, y1: 2.2, mat: 'fabricTan', sag: 0.14, poles: true });
+  const lp = new THREE.Vector3(xl + 0.02, 3.6, -9.2);
   const lb = bracket(K, lp.x, lp.y, lp.z, { len: 0.62, dir: 1 });
   void lb;
-  const lan = lanternMesh(game.mats, { s: 1.25 }); lan.position.set(xl + 0.64, 3.3 - 0.6, -5.2); game.scene.add(lan);
+  const lan = lanternMesh(game.mats, { s: 1.25 }); lan.position.set(xl + 0.64, 3.6 - 0.6, -9.2); game.scene.add(lan);
   L.lanterns.push({ mesh: lan, light: null, phase: 1 });
   // right side (faces -x): arcade with red/cream horseshoe arches + stair + striped awning
   const KR = K.with(new THREE.Matrix4().makeRotationY(-Math.PI / 2).premultiply(new THREE.Matrix4().makeTranslation(xr, 0, 0)));
@@ -441,9 +441,11 @@ function buildHeroAlley(game, batch, K, L, lantern) {
   arcade(KR, { x0: -14.6, x1: -1.6, z: 0, y0: 2.2, span: 2.2, pierW: 0.7, pierD: 0.6, hs: 2.4, upper: 3.2, mat: 'plasterPeach', galleryDepth: 2.6 });
   // podium under the raised arcade
   const pod = boxMM(-14.6, 0, -3.4, -1.6, 2.2, 0.05); shadeByHeight(pod, { base: 0, grime: 1.4, grimeAmt: 0.35 }); KR.add(pod, 'plasterPeach');
-  stairs(KR, { x0: -2.0, x1: -8.0, y0: 0, y1: 2.2, z0: -0.2, z1: 1.1, mat: 'limestone', rail: true, railSide: 'front' });
-  ivyCurtain(KR, { x0: -14, x1: -2, y: 10.2, z: 0.1, maxLen: 5, seed: 63, flowers: 1.0 });
-  awning(K, { x0: xr - 2.2, x1: xr - 0.02, z0: -2.6, z1: -0.2, y0: 2.6, y1: 2.0, mat: 'fabricRed', sag: 0.12, poles: true });
+  stairs(KR, { x0: -5.2, x1: -11.2, y0: 0, y1: 2.2, z0: -0.2, z1: 1.2, mat: 'limestone', rail: true, railSide: 'front' });
+  ivyCurtain(KR, { x0: -14, x1: -2, y: 10.2, z: 0.1, maxLen: 6.5, seed: 63, flowers: 1.0, density: 2.2, scale: 1.8 });
+  // striped red awning on the right, seen from below like the reference
+  const KRa = K.with(new THREE.Matrix4().makeRotationY(-Math.PI / 2).premultiply(new THREE.Matrix4().makeTranslation(xr, 0, 0)));
+  awning(KRa, { x0: -6.8, x1: -3.9, z0: 0.05, z1: 1.7, y0: 2.5, y1: 1.95, mat: 'fabricRed', sag: 0.16, poles: false });
   // END wall with the great pointed arch
   const aw = 3.3, ahs = 4.3, arise = 2.2;
   wallWithOpenings(K, { x0: xl - 1, x1: xr + 1, y0: 0, y1: 9.2, z: zEnd, depth: 0.9, mat: 'plasterBlue', openings: [{ kind: 'pointed', cx: X, sill: 0, w: aw, hs: ahs, rise: arise, noInterior: true }] });
@@ -453,14 +455,14 @@ function buildHeroAlley(game, batch, K, L, lantern) {
   zellige(K, { x0: X - 2.6, x1: X + 2.6, y0: 6.9, y1: 7.4, z: zEnd + 0.02, border: 0.04 });
   cornice(K, { x0: xl - 1, x1: xr + 1, y: 7.6, z: zEnd + 0.02, profile: 'heavy', mat: 'limestone', scale: 1.0 });
   cornice(K, { x0: xl - 1, x1: xr + 1, y: 9.0, z: zEnd + 0.02, profile: 'classic', mat: 'limestone', scale: 1.0 });
-  ivyCurtain(K, { x0: xl - 0.8, x1: xr + 0.8, y: 9.3, z: zEnd + 0.1, maxLen: 3.2, seed: 64, density: 1.6 });
+  ivyCurtain(K, { x0: xl - 0.8, x1: xr + 0.8, y: 9.3, z: zEnd + 0.1, maxLen: 3.4, seed: 64, density: 2.4, scale: 1.7 });
   ivyPatch(K, { x0: X - 2.2, x1: X + 2.4, y0: 7.8, y1: 9.2, z: zEnd + 0.05, seed: 65, density: 1.5 });
   // courtyard beyond the arch (sunlit)
   const cz0 = zEnd - 0.9;
   building(K, { x0: xl - 6, x1: xr + 6, z: -29, y0: 0, height: 8.5, style: 'peach', door: X + 0.8, doorKind: 'round', depth: 4, seed: 902 });
   stairs(K, { x0: X - 3.8, x1: X - 1.2, y0: 0, y1: 1.4, z0: -27.8, z1: -25.6, mat: 'limestone', rail: false });
   building(K.with(new THREE.Matrix4().makeRotationY(Math.PI / 2).premultiply(new THREE.Matrix4().makeTranslation(xl - 3, 0, 0))), { x0: -cz0 + 0.2, x1: 29, z: 0, y0: 0, height: 7, style: 'ochre', door: 22, depth: 3, seed: 903 });
-  building(K.with(new THREE.Matrix4().makeRotationY(-Math.PI / 2).premultiply(new THREE.Matrix4().makeTranslation(xr + 3.5, 0, 0))), { x0: -29, x1: cz0 - 0.2, z: 0, y0: 0, height: 9, style: 'cream', door: -22, depth: 3, seed: 904 });
+  building(K.with(new THREE.Matrix4().makeRotationY(-Math.PI / 2).premultiply(new THREE.Matrix4().makeTranslation(xr + 4.5, 0, 0))), { x0: -29, x1: cz0 - 0.2, z: 0, y0: 0, height: 4.2, style: 'cream', door: -22, depth: 3, seed: 904 });
   // round tower with balcony behind the courtyard (reference mid-ground)
   const tw = new THREE.CylinderGeometry(2.2, 2.3, 11, 32); tw.translate(X + 2.5, 5.5, -33); K.add(worldUV(tw), 'plasterPeach');
   const twb = new THREE.CylinderGeometry(2.6, 2.6, 0.4, 32); twb.translate(X + 2.5, 8.2, -33); K.add(worldUV(twb), 'limestone');
@@ -481,8 +483,11 @@ function buildHeroAlley(game, batch, K, L, lantern) {
   grassTufts(K, { x0: xl + 0.2, x1: xr - 0.2, z0: -14, z1: -2, n: 40, seed: 72 });
   wire(K, new THREE.Vector3(xl - 0.1, 12.5, -4), new THREE.Vector3(xr + 0.1, 11.2, -6.5), { sag: 0.6 });
   // landmarks framing the sky
-  minaret(K, { x: X - 7.5, z: -36, w: 3.4, h: 21, mat: 'sandstone' });
-  dome(K, { x: X + 7.5, y: 10.5, z: -24, r: 4.3, drumH: 3.2, onion: 0.28 });
+  minaret(K, { x: X - 6.5, z: -46, w: 3.6, h: 28, mat: 'sandstone' });
+  // white round tower carrying the green-gold dome (reference, upper right)
+  const tw2 = new THREE.CylinderGeometry(4.8, 5.0, 15, 40); tw2.translate(X + 2.6, 7.5, -33); const tw2u = worldUV(tw2); shadeByHeight(tw2u, { base: 0, grime: 4, grimeAmt: 0.25 }); K.add(tw2u, 'plasterWhite');
+  dome(K, { x: X + 2.6, y: 15, z: -33, r: 5.0, drumH: 3.4, onion: 0.22, windows: 10 });
+  ivyPatch(K, { x0: X - 1.5, x1: X + 3.5, y0: 13, y1: 19, z: -28.1, seed: 77, density: 1.4 });
   // sun shafts through the arch and over the courtyard
   L.shaftSpots.push({ p: new THREE.Vector3(X - 0.6, 0, zEnd + 3.5), o: { w: 2.6, d: 2.2, len: 16, intensity: 0.16 } });
   L.shaftSpots.push({ p: new THREE.Vector3(X - 1.5, 0, zEnd - 4), o: { w: 3.2, d: 3, len: 20, intensity: 0.12 } });
@@ -490,8 +495,9 @@ function buildHeroAlley(game, batch, K, L, lantern) {
   return {
     X, zEnd,
     path: [new THREE.Vector3(187.6, 0, 0), new THREE.Vector3(188.1, 0, -1.6), new THREE.Vector3(188.0, 0, -6), new THREE.Vector3(188.0, 0, -12), new THREE.Vector3(188.0, 0, -17.5), new THREE.Vector3(188.2, 0, -22)],
-    camPos: new THREE.Vector3(188.7, 0.55, 1.2),
-    camLook: new THREE.Vector3(187.8, 6.6, -15),
-    fov: 64,
+    camPos: new THREE.Vector3(187.55, 0.45, 1.8),
+    camLook: new THREE.Vector3(188.5, 8.4, -15),
+    fov: 68,
+    sunDir: new THREE.Vector3(0.3, 0.22, -0.93).normalize(),
   };
 }

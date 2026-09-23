@@ -215,6 +215,9 @@ export class Game {
   }
 
   restartLevel() {
+    G.uFogParams.value.x = LOOK.fogDensity;
+    this.world.rs.post.params.contrast = LOOK.post.contrast; this.world.rs.post.params.saturation = LOOK.post.saturation;
+    if (this.sunFrom) { LOOK.sunDir.copy(this.sunFrom); this.world.light.sunDir.copy(this.sunFrom); this.world.sky.uniforms.uSunDir.value.copy(this.sunFrom); this.world.light.sun.color.set(LOOK.sunColor); this.sunFrom = null; }
     this.cpIndex = 0; this.cpSnap = this.initialSnap;
     this.respawn();
     this.finaleT = 0;
@@ -249,16 +252,29 @@ export class Game {
     };
     this.camRig.setOverride(() => {
       const k = smooth(this.finaleT / 14);
-      const pos = F.camPos.clone().add(new THREE.Vector3(0, -0.05 * k, -2.2 * k));
-      const look = F.camLook.clone().add(new THREE.Vector3(0, -0.4 * k, 0));
-      return { pos, look, fov: F.fov - 3 * k };
+      // portrait screens get the tall reference framing, landscape a narrower lens looking less steeply up
+      const aspect = this.camera.aspect;
+      const w = THREE.MathUtils.clamp((aspect - 0.7) / 1.1, 0, 1);
+      const pos = F.camPos.clone().add(new THREE.Vector3(0.25 * w, -0.05 * k + 0.25 * w, -2.2 * k + 0.5 * w));
+      const look = F.camLook.clone().add(new THREE.Vector3(-0.3 * w, -0.4 * k - 2.6 * w, 0));
+      return { pos, look, fov: THREE.MathUtils.lerp(F.fov, 47, w) - 3 * k };
     }, 3.2);
     this.audio.finale();
-    this.ui.showHint(this.input.lastDevice, 0);
+    this.ui.el('hint').classList.add('hidden'); this.ui.hintTimer = 0;
   }
 
   updateFinale(dt) {
     this.finaleT += dt;
+    const F = this.level.finale;
+    if (!this.sunFrom) this.sunFrom = LOOK.sunDir.clone();
+    const ks = smooth(this.finaleT / 7);
+    LOOK.sunDir.copy(this.sunFrom).lerp(F.sunDir, ks).normalize();
+    this.world.light.sunDir.copy(LOOK.sunDir);
+    this.world.sky.uniforms.uSunDir.value.copy(LOOK.sunDir);
+    this.world.light.sun.color.set(LOOK.sunColor).lerp(new THREE.Color('#ffb46e'), ks * 0.6);
+    G.uFogParams.value.x = LOOK.fogDensity * (1 - 0.45 * ks);
+    const P2 = this.world.rs.post.params;
+    P2.contrast = LOOK.post.contrast + 0.08 * ks; P2.saturation = LOOK.post.saturation + 0.1 * ks;
     const P = this.world.rs.post.params;
     const k = smooth(this.finaleT / 4);
     P.letterbox = 0.075 * k;
@@ -363,7 +379,7 @@ export class Game {
       // title
       if (this.titleFade !== undefined) { this.titleFade = Math.max(0, this.titleFade - dt * 0.35); this.ui.titleOpacity(this.titleFade); if (this.titleFade <= 0) { this.ui.showTitle(false); this.titleFade = undefined; } }
       // god rays: strong in the finale
-      P.rays = this.mode === 'finale' || this.mode === 'end' ? 0.9 : 0.35;
+      P.rays = this.mode === 'finale' || this.mode === 'end' ? 1.6 : 0.35;
       P.bloom = this.mode === 'finale' || this.mode === 'end' ? 0.42 : 0.28;
       // shadow frustum follows the view
       const focus = new THREE.Vector3(this.camRig.look.x, this.camRig.look.y, this.mode === 'finale' ? -8 : -2);

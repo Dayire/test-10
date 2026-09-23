@@ -83,7 +83,7 @@ void main(){
   float l = dot(c, vec3(.2126,.7152,.0722));
   vec2 dv = (vUv - uSun) * vec2(uAspect, 1.);
   float prox = exp(-dot(dv, dv) * 1.5);
-  float m = sky * min(l, 6.) * (.25 + prox) + max(l - 2.5, 0.) * .15;
+  float m = sky * max(min(l, 8.) - 1.05, 0.) * (.15 + prox * 1.6) + max(l - 3.0, 0.) * .08;
   gl_FragColor = vec4(vec3(m), 1.);
 }`;
 

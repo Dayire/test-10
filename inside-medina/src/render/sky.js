@@ -47,9 +47,9 @@ void main(){
   col += uSunColor * (pow(sd, 6.) * .45 + pow(sd, 32.) * .6) * smoothstep(-.05, .1, el);
   col += uSunColor * pow(sd, 1600.) * 60. * uSunDisk;
   if (el > 0.) {
-    vec2 p = d.xz / (el + .09) * .55 + vec2(uTime * .006, uTime * .002);
+    vec2 p = d.xz / (el + .12) * 1.1 + vec2(uTime * .006, uTime * .002);
     float c = cloudField(p);
-    float cov = smoothstep(.46, .78, c) * smoothstep(.0, .22, el);
+    float cov = smoothstep(.42, .7, c) * smoothstep(.0, .18, el);
     float c2 = cloudField(p + uSunDir.xz * .09);
     float lit = sat(.55 + (c - c2) * 3.5);
     vec3 cc = mix(uCloudShade, uCloudLit, lit);

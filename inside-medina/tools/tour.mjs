@@ -18,7 +18,7 @@ for (const s of shots) {
   const r = await page.evaluate(([x, y, f, sim, extra]) => { const st = window.__medina.photo(+x, +y, +f, +sim); if (extra) eval(extra); return st; }, [x, y, facing, sim, extra]);
   const start = await page.evaluate(() => window.__frames);
   await page.waitForFunction((n) => window.__frames >= n, start + 3, { timeout: 300000 });
-  await page.screenshot({ path: `${outdir}/${name}.png` });
+  await page.screenshot({ path: `${outdir}/${name}.png`, timeout: 300000 });
   const info = await page.evaluate(() => window.__info());
   console.log(name, JSON.stringify({ x: r.x, y: r.y, st: r.st, calls: info.calls, tris: info.tris }));
 }
