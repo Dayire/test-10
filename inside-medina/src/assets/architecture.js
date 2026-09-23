@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { worldUV, shadeByHeight, setColor, extrude, lathe, pointedArchPoints, mat4, boxMM, rng } from './geom.js';
+import { worldUV, shadeByHeight, setColor, extrude, lathe, pointedArchPoints, mat4, boxMM, rng, tube } from './geom.js';
 import { Overrides } from './library.js';
 
 // ---------------------------------------------------------------------------
@@ -97,6 +97,35 @@ export function archFrame(K, o) {
     shadeByHeight(gu, { base: sill, grime: 0.8, grimeAmt: 0.2 });
     K.add(gu, mat);
   }
+}
+
+// zellige spandrels: fills the corners between an arch (grown by `band`) and
+// the rectangle [x0, x1] x [springing, yTop], optionally boxed by a limestone alfiz
+export function spandrels(K, { kind = 'pointed', cx, sill, w, hs, rise = w * 0.6, band = 0.2, x0, x1, yTop, z, alfiz = 0 }) {
+  const outer = archOutline(kind, w, hs, rise, band, 24);
+  const ys = sill + hs;
+  const sh = new THREE.Shape();
+  sh.moveTo(x0, ys); sh.lineTo(x0, yTop); sh.lineTo(x1, yTop); sh.lineTo(x1, ys);
+  for (let i = outer.length - 1; i >= 0; i--) { const p = outer[i]; if (sill + p.y >= ys - 1e-4) sh.lineTo(cx + p.x, sill + p.y); }
+  sh.lineTo(x0, ys);
+  const g = new THREE.ShapeGeometry(sh, 1); g.translate(0, 0, z);
+  K.add(setColor(worldUV(g), 0xffffff), 'zellige', null, { cast: false });
+  if (alfiz > 0) {
+    const d = z + 0.05, b = alfiz;
+    for (const bb of [boxMM(x0 - b, sill, z - 0.02, x0, yTop + b, d), boxMM(x1, sill, z - 0.02, x1 + b, yTop + b, d), boxMM(x0, yTop, z - 0.02, x1, yTop + b, d)]) {
+      shadeByHeight(bb, { base: sill, grime: 0.6, grimeAmt: 0.2 });
+      K.add(bb, 'limestone');
+    }
+  }
+}
+
+// carved bead (half-round moulding) following an arch outline and its jambs
+export function archBead(K, { kind = 'pointed', cx, sill, w, hs, rise = w * 0.6, grow = 0, z, r = 0.03, mat = 'limestone', jambs = true }) {
+  const pts = archOutline(kind, w, hs, rise, grow, 20).map((p) => new THREE.Vector3(cx + p.x, sill + p.y, z));
+  if (jambs) { pts.unshift(new THREE.Vector3(pts[0].x, sill, z)); pts.push(new THREE.Vector3(pts[pts.length - 1].x, sill, z)); }
+  const g = tube(pts, r, pts.length * 3, 6);
+  shadeByHeight(g, { base: sill, grime: 0.6, grimeAmt: 0.2 });
+  K.add(worldUV(g), mat);
 }
 
 // alternating red / cream voussoirs (Cordoba style), as separate wedges
@@ -334,12 +363,13 @@ export function dome(K, { x, y, z, r = 5, drumH = 3, onion = 0.25, windows = 8 }
   const du = worldUV(drumG); shadeByHeight(du, { base: y, grime: 1.5, grimeAmt: 0.35 });
   K.add(du, 'plasterWhite');
   // drum windows (dark pointed slits as slabs) + pilasters
+  const wk = Math.min(1, drumH / 3.2), ww = Math.min(0.7, (Math.PI * 2 * r / windows) * 0.32);
   for (let i = 0; i < windows; i++) {
     const a = (i / windows) * Math.PI * 2;
     const wx = x + Math.cos(a) * r * 1.03, wz = z + Math.sin(a) * r * 1.03;
-    const pts = archOutline('pointed', 0.7, 1.2, 0.5);
-    const s = new THREE.Shape(); s.moveTo(-0.35, 0); pts.forEach((v) => s.lineTo(v.x, v.y)); s.lineTo(0.35, 0);
-    const g = extrude(s, 0.08); g.translate(0, y + 0.6, 0);
+    const pts = archOutline('pointed', ww, 1.2 * wk, 0.5 * wk * ww / 0.7);
+    const s = new THREE.Shape(); s.moveTo(-ww / 2, 0); pts.forEach((v) => s.lineTo(v.x, v.y)); s.lineTo(ww / 2, 0);
+    const g = extrude(s, 0.08); g.translate(0, y + 0.6 * wk, 0);
     g.applyMatrix4(mat4(wx, 0, wz, 0, -a + Math.PI / 2, 0));
     setColor(g, 0xffffff);
     K.add(g, 'darkInterior', null, { cast: false });
@@ -373,6 +403,16 @@ export function dome(K, { x, y, z, r = 5, drumH = 3, onion = 0.25, windows = 8 }
   dg.computeVertexNormals();
   shadeByHeight(dg, { base: y + drumH, grime: r * 0.5, grimeAmt: 0.15 });
   K.add(dg, 'domeGlaze');
+  // gilded ribs running up the onion and a band at its base
+  const ribs = 12;
+  for (let i = 0; i < ribs; i++) {
+    const a = (i / ribs) * Math.PI * 2 + Math.PI / ribs;
+    const pts = [];
+    for (let k = 2; k <= N - 2; k += 2) pts.push(new THREE.Vector3(x + Math.cos(a) * (prof[k].x + r * 0.008), y + drumH + prof[k].y, z + Math.sin(a) * (prof[k].x + r * 0.008)));
+    K.add(worldUV(tube(pts, r * 0.011, 28, 5)), 'goldLeaf', null, { cast: false });
+  }
+  const bandK = 3, bandG = new THREE.TorusGeometry(prof[bandK].x + r * 0.01, r * 0.022, 6, 64); bandG.rotateX(Math.PI / 2); bandG.translate(x, y + drumH + prof[bandK].y, z);
+  K.add(worldUV(bandG), 'goldLeaf', null, { cast: false });
   // finial
   const topY = y + drumH + prof[N].y;
   finial(K, { x, y: topY - 0.05, z, s: r * 0.22 });

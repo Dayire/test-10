@@ -14,10 +14,11 @@ export class UI {
           <button data-a="restart">restart level</button>
           <button data-a="quality">quality: <span class="q"></span></button>
           <button data-a="mute">sound: <span class="m">on</span></button>
+          <button data-a="assets">asset sheet</button>
           <div class="keys"></div>
         </div>
       </div>
-      <div id="end" class="hidden"><div class="e1">MEDINA</div><div class="e2">thank you for walking with us</div><button data-a="again">walk again</button></div>
+      <div id="end" class="hidden"><div class="e1">MEDINA</div><div class="e2">thank you for walking with us</div><button data-a="again">walk again</button><button data-a="assets">see how it was built</button></div>
       <div id="dbg" class="hidden"></div>`;
     this.el = (id) => root.querySelector('#' + id);
     this.handlers = {};

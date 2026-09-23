@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { lathe } from './geom.js';
+import { lathe, gridGeom } from './geom.js';
 
 // Procedural, jointed characters. Local space: facing +Z, up +Y, left = +X.
 // Every limb segment is a smooth tapered capsule parented to its joint.
@@ -70,47 +70,75 @@ export class Rig {
     const hemR = S.hemR, hemY = -S.hemLen;
     const sk = lathe([[0.0001, S.spine1 + 0.02], [S.waist * 1.03, S.spine1 + 0.01], [S.waist * 1.08, 0], [(S.waist + hemR) / 2 * 1.05, hemY * 0.5], [hemR, hemY], [hemR * 0.97, hemY - 0.012]], 24);
     sk.scale(1, 1, S.torsoDepth * 1.05);
-    const skm = this.add('skirt', sk, S.robe ? M(S.robe) : top);
-    skm.material = skm.material; // double sided via material def
+    if (S.folds) {
+      // soft vertical folds growing towards the hem
+      const sp = sk.attributes.position;
+      for (let i = 0; i < sp.count; i++) {
+        const px = sp.getX(i), py = sp.getY(i), pz = sp.getZ(i);
+        const t = Math.max(0, Math.min(1, -py / S.hemLen));
+        const a = Math.atan2(pz, px);
+        const k = 1 + S.folds * t * (Math.sin(a * 9) * 0.6 + Math.sin(a * 5 + 1.3) * 0.4);
+        sp.setXYZ(i, px * k, py + (t > 0.97 ? Math.sin(a * 7) * 0.012 : 0), pz * k);
+      }
+      sk.computeVertexNormals();
+    }
+    this.add('skirt', sk, S.robe ? M(S.robe) : top);
+    if (S.belt) {
+      const belt = new THREE.TorusGeometry(S.waist * 1.06, 0.022, 6, 24); belt.rotateX(Math.PI / 2); belt.scale(1, 1, S.torsoDepth * 1.05); belt.translate(0, 0.02, 0);
+      this.add('spine', belt, M(S.belt));
+    }
     // neck + head
-    this.add('neck', capsule(S.neckR, S.neckR, S.headY + 0.01, 10), skin);
-    const head = ellipsoid(S.headR * 0.92, S.headR * 1.05, S.headR * 0.98);
-    head.translate(0, S.headR * 0.75, S.headR * 0.05);
+    this.add('neck', capsule(S.neckR, S.neckR, S.headY + 0.01, 10), S.hood ? M(S.robe) : skin);
+    const head = S.hood ? ellipsoid(S.headR * 0.78, S.headR * 0.92, S.headR * 0.8) : ellipsoid(S.headR * 0.92, S.headR * 1.05, S.headR * 0.98);
+    head.translate(0, S.headR * 0.75, S.headR * (S.hood ? -0.06 : 0.05));
     this.add('head', head, S.hood ? M(S.hood) : skin);
     if (!S.hood) {
-      const hairG = new THREE.SphereGeometry(S.headR * 1.05, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.6);
-      const hp = hairG.attributes.position;
-      for (let i = 0; i < hp.count; i++) {
-        const x = hp.getX(i), y = hp.getY(i), z = hp.getZ(i);
-        const n = 1 + 0.06 * Math.sin(x * 90) * Math.sin(z * 80 + y * 40);
-        hp.setXYZ(i, x * n, y * n, z * n);
-      }
-      hairG.computeVertexNormals();
-      hairG.scale(0.95, 1.0, 1.02);
-      hairG.rotateX(-0.42);
-      hairG.translate(0, S.headR * 0.8, -S.headR * 0.06);
+      // hair shell: covers crown and back down to the nape, hairline high on the
+      // forehead, tousled clumps and a jagged fringe along the front edge
+      const R = S.headR, C = new THREE.Vector3(0, R * 0.75, R * 0.05);
+      const hairG = gridGeom(40, 12, (u, v, p) => {
+        const phi = u * Math.PI * 2;
+        const front = (1 + Math.cos(phi)) / 2;
+        const thMax = Math.PI * (0.72 - 0.36 * front);
+        const th = v * thMax;
+        const clump = 1 + 0.07 * Math.sin(phi * 9 + th * 5) * Math.sin(th * 3 + 1) + 0.04 * Math.sin(phi * 17 - th * 9);
+        const tuck = 1 - 0.07 * Math.pow(v, 6);
+        const fringe = v > 0.8 ? (v - 0.8) / 0.2 * front * 0.35 * Math.max(0, Math.sin(phi * 13)) : 0;
+        const k = 1.08 * clump * tuck;
+        p.set(Math.sin(th + fringe * 0.25) * Math.sin(phi) * R * 0.92 * k, Math.cos(th + fringe * 0.25) * R * 1.05 * k, Math.sin(th + fringe * 0.25) * Math.cos(phi) * R * 0.98 * k).add(C);
+      }, { wrapU: true });
       this.add('head', hairG, hair);
-      // tousled fringe and nape tufts
-      const tufts = [[0.3, 1.45, 0.72], [-0.28, 1.47, 0.7], [0.02, 1.55, 0.74], [0.55, 1.2, 0.55], [-0.55, 1.2, 0.55], [0, 0.55, -0.9], [0.35, 0.6, -0.85], [-0.35, 0.6, -0.85]];
-      for (const [tx, ty, tz] of tufts) {
-        const tg = ellipsoid(S.headR * 0.32, S.headR * 0.24, S.headR * 0.3, 8, 6);
-        tg.translate(tx * S.headR, ty * S.headR * 0.62, tz * S.headR);
-        this.add('head', tg, hair, false);
-      }
-      // subtle nose/brow bump so the silhouette reads in profile
-      const nose = ellipsoid(0.012, 0.018, 0.012, 8, 6); nose.translate(0, S.headR * 0.72, S.headR * 0.97);
+      // ears: small flattened bumps so the head reads in profile
+      for (const sx of [-1, 1]) { const ear = ellipsoid(R * 0.12, R * 0.2, R * 0.1, 8, 6); ear.translate(sx * R * 0.9, R * 0.72, R * 0.02); this.add('head', ear, skin, false); }
+      const nose = ellipsoid(0.012, 0.018, 0.012, 8, 6); nose.translate(0, R * 0.72, R * 0.97);
       this.add('head', nose, skin, false);
     } else {
-      // hood: a cone-ish lathe draped over the head, and a dark face opening
-      const hood = lathe([[0.0001, S.headR * 2.1], [S.headR * 0.55, S.headR * 1.95], [S.headR * 1.12, S.headR * 1.2], [S.headR * 1.2, S.headR * 0.3], [S.headR * 1.35, -S.headR * 0.4], [S.headR * 1.6, -S.headR * 0.8]], 20);
-      hood.scale(1, 1, 1.05); hood.translate(0, 0, -S.headR * 0.08);
+      // djellaba hood: rises to a peak that falls back behind the head, open
+      // around a dark, faceless void
+      const R = S.headR;
+      const prof = [[1.62, -0.85], [1.38, -0.42], [1.2, 0.3], [1.1, 0.95], [0.86, 1.4], [0.58, 1.75], [0.36, 2.1], [0.2, 2.45], [0.08, 2.8], [0.01, 2.98]];
+      const at = (v) => { const f = v * (prof.length - 1), i = Math.min(prof.length - 2, Math.floor(f)), t = f - i; return [prof[i][0] + (prof[i + 1][0] - prof[i][0]) * t, prof[i][1] + (prof[i + 1][1] - prof[i][1]) * t]; };
+      const hood = gridGeom(32, 20, (u, v, p) => {
+        const [rr, yy] = at(v);
+        const gap = v < 0.62 ? 1.25 * Math.sin(Math.min(1, v / 0.62) * Math.PI) ** 0.6 * (v > 0.05 ? 1 : v / 0.05) : 0;
+        const phi = gap / 2 + u * (Math.PI * 2 - gap);
+        const back = Math.pow(Math.max(0, (yy - 1.1) / 1.88), 1.6);
+        const fold = 1 + 0.035 * Math.sin(phi * 7 + v * 4);
+        const brim = Math.max(0, Math.cos(phi)) * 0.2 * Math.max(0, Math.sin(Math.min(1, Math.max(0, (yy - 1.0) / 1.0)) * Math.PI));
+        p.set(Math.sin(phi) * rr * R * fold * (1 - 0.3 * back), (yy - 0.45 * back * back) * R, (Math.cos(phi) * rr * fold * 1.05 - 0.08 - back * 1.7 + brim) * R);
+      });
       this.add('head', hood, M(S.robe));
-      const face = ellipsoid(S.headR * 0.62, S.headR * 0.75, S.headR * 0.3); face.translate(0, S.headR * 0.7, S.headR * 0.78);
+      const face = ellipsoid(R * 0.7, R * 0.85, R * 0.55); face.translate(0, R * 0.72, R * 0.42);
       this.add('head', face, M('darkInterior'), false);
     }
     for (const side of ['L', 'R']) {
       this.add('shoulder' + side, capsule(S.armR * 1.25, S.armR * 1.05, S.upperArm, 12), S.sleeves ? top : skin);
       this.add('elbow' + side, capsule(S.armR * 1.0, S.armR * 0.8, S.foreArm, 12), S.longSleeves ? top : skin);
+      if (S.wideSleeves) {
+        const sl = new THREE.CylinderGeometry(S.armR * 1.15, S.armR * 2.1, S.foreArm * 0.55, 14, 1, true);
+        sl.translate(0, -S.foreArm * 0.78, 0);
+        this.add('elbow' + side, sl, top);
+      }
       const hand = ellipsoid(S.armR * 0.95, S.armR * 1.35, S.armR * 0.75, 12, 8); hand.translate(0, -S.armR * 1.1, 0.004);
       this.add('wrist' + side, hand, skin);
       this.add('hip' + side, capsule(S.legR * 1.3, S.legR * 1.05, S.thigh, 12), legs);
@@ -227,7 +255,7 @@ export const BOY = {
   hipX: 0.066, thigh: 0.29, shin: 0.27, legR: 0.043, foot: 0.1,
   waist: 0.098, chestR: 0.118, neckR: 0.034, torsoDepth: 0.78, hemR: 0.15, hemLen: 0.2,
   skin: 'skin', top: 'clothRed', legs: 'clothTrousers', sleeves: true, longSleeves: false,
-  scarf: true, scarfLen: 0.5, scarfW: 0.1,
+  scarf: true, scarfLen: 0.5, scarfW: 0.1, folds: 0.03,
 };
 
 export const GUARD = {
@@ -236,7 +264,7 @@ export const GUARD = {
   hipX: 0.1, thigh: 0.44, shin: 0.43, legR: 0.062, foot: 0.15,
   waist: 0.16, chestR: 0.2, neckR: 0.05, torsoDepth: 0.72, hemR: 0.34, hemLen: 0.78,
   skin: 'skin', top: 'robeGuard', legs: 'robeGuard', robe: 'robeGuard', hood: 'robeGuard', sleeves: true, longSleeves: true,
-  scarf: false,
+  scarf: false, folds: 0.06, belt: 'leather', wideSleeves: true,
 };
 
 export function createCharacter(spec, mats) {

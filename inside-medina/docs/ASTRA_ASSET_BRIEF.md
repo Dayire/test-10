@@ -44,19 +44,19 @@ Optional per-entry fields: `scale`, `rotationY`, `offset: [x, y, z]`.
 
 | name | size (m) | notes |
 | --- | --- | --- |
-| `crate` | 1.0 × 1.0 × 1.0 | pushable market crate, planks + edge beams + diagonal brace; physics box stays 1 m |
-| `barrel` | Ø 0.60, h 0.86 | oak staves, three iron hoops |
+| `crate` | 1.0 × 1.0 × 1.0 | pushable market crate: corner posts, gapped boards, diagonal brace, iron corner plates; physics box stays 1 m |
+| `barrel` | Ø 0.60, h 0.86 | oak staves with a chime, four flat iron hoops, plank head, bung |
 | `pot_amphora` | Ø 0.48, h 0.83 | terracotta, salt bloom near the rim |
 | `pot_jar` | Ø 0.46, h 0.50 | terracotta storage jar |
 | `pot_tall` | Ø 0.40, h 1.00 | tall slender jar |
 | `pot_planter` | Ø 0.54, h 0.36 | wide planter (plants are added by the game) |
 | `pot_bowl` | Ø 0.40, h 0.15 | shallow bowl |
 | `rug_roll` | Ø 0.32, length 1.70 along +Y | rolled Persian rug, visible spiral end |
-| `sack` | 0.55 × 0.60 × 0.45 | burlap sack with a tied neck |
+| `sack` | 0.55 × 0.60 × 0.55 | burlap sack with a gathered, cord-tied neck (open spice sacks and lying grain sacks stay procedural) |
 | `basket` | Ø 0.52, h 0.30 | woven palm basket |
 | `cart` | 2.4 (x) × 1.2 (z) × 1.0 | two wheels Ø 0.84, shafts toward +x |
 | `stool` | Ø 0.40, h 0.45 | three-legged wooden stool |
-| `lantern` | Ø 0.20, h 0.46 | brass Moroccan lantern, 8 glass panes, hanging ring at y = 0.46; name the glass material `glass` |
+| `lantern` | Ø 0.20, h 0.62 | pierced brass Moroccan lantern: 8 panels with arched cut-outs, faceted ogee roof with pinholes, finial and ring; name the glass material `glass`. Pivot at the base as usual; the game hangs it by its top |
 | `dome` | base Ø 10, h ≈ 9 | drum with pointed windows + green-gold glazed onion dome, scaled by the game |
 | `finial` | h 2.2 | gilded jamour finial (stacked spheres) |
 
@@ -68,21 +68,23 @@ Characters (`boy`, `guard`) are driven by the procedural animator. A replacement
 
 | asset | exported size (x × y × z, m) | triangles |
 | --- | --- | --- |
-| crate | 1.00 × 1.00 × 1.05 | 1380 |
-| lantern | 0.20 × 0.49 × 0.20 | 448 |
-| barrel | 0.63 × 0.86 × 0.63 | 1812 |
-| pot_amphora | 0.48 × 0.83 × 0.48 | 528 |
-| pot_jar | 0.46 × 0.50 × 0.46 | 384 |
-| pot_tall | 0.40 × 1.00 × 0.40 | 432 |
-| pot_planter | 0.54 × 0.36 × 0.54 | 288 |
-| pot_bowl | 0.40 × 0.15 × 0.40 | 240 |
-| rug_roll | 0.32 × 1.70 × 0.32 | 60 |
-| sack | 0.56 × 0.63 × 0.46 | 648 |
-| basket | 0.56 × 0.31 × 0.56 | 240 |
-| cart (with shafts and load) | 4.04 × 1.39 × 1.56 | 2744 |
+| crate | 1.01 × 1.00 × 1.04 | 3816 |
+| lantern (with 6 cm of chain) | 0.21 × 0.68 × 0.21 | 3352 |
+| barrel | 0.60 × 0.86 × 0.61 | 2436 |
+| pot_amphora | 0.50 × 0.81 × 0.44 | 2384 |
+| pot_jar | 0.46 × 0.51 × 0.46 | 1856 |
+| pot_tall | 0.39 × 1.01 × 0.39 | 1856 |
+| pot_planter | 0.54 × 0.36 × 0.54 | 1280 |
+| pot_bowl | 0.41 × 0.16 × 0.41 | 1088 |
+| rug_roll (with fringe) | 0.41 × 1.70 × 0.41 | 1104 |
+| sack (tied) | 0.54 × 0.59 × 0.54 | 2200 |
+| basket | 0.54 × 0.38 × 0.54 | 2944 |
+| cart (with shafts and load) | 4.04 × 1.33 × 1.56 | 7320 |
 | stool | 0.39 × 0.49 × 0.40 | 128 |
-| dome (r = 5) | 11.06 × 12.12 × 11.06 | 5736 |
+| dome (r = 5) | 11.06 × 12.12 × 11.06 | 9864 |
 | finial | 0.48 × 2.20 × 0.48 | 760 |
+
+These are the second-generation procedural models (see the asset sheet: `?dev=assets` locally, `#assets` on the published build). A GLB override has to beat them, not just the blockout.
 
 ## Prompt template
 

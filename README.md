@@ -16,9 +16,11 @@ Controls: **A/D** or **←/→** to move, **W/S** to climb and crawl, **Space** 
 
 Useful URL flags: `?cp=3` starts at a checkpoint (0–6), `?tier=low|medium|high|ultra` sets quality, and `?debug=1` shows an overlay.
 
+Asset sheet: `?dev=assets` (or `#assets` on the published build, or **asset sheet** in the pause menu) shows every hand-built model up close under the game's lighting. Drag to orbit, scroll to zoom, and use ← → to browse.
+
 ## What's inside
 
-- **3D assets.** Everything is procedural: architecture, props, ivy, both characters, and GPU-baked PBR textures.
+- **3D assets.** Everything is built in code: architecture, props, ivy, both characters, and GPU-baked PBR textures. The props include a pierced brass lantern on a forged scroll bracket, coopered barrels, glazed and painted pots, open spice sacks, woven baskets, fringed rugs, a green-tiled eave, and a watchman in a pointed djellaba hood.
 - **Swappable models.** Any asset can be replaced by a GLB listed in `public/assets/models/manifest.json`, such as models made by Codex Astra. See [`docs/ASTRA_ASSET_BRIEF.md`](inside-medina/docs/ASTRA_ASSET_BRIEF.md).
 - **Rendering.** Sun shadows, sky-driven image-based lighting, height fog with sun in-scatter, and volumetric sun shafts. Also bloom, depth of field, god rays, and an ACES filmic grade with adaptive quality tiers.
 - **Mechanics.** Mantle and hang-climb ledges, push and pull crates, ivy and ladders, a lever, and a pressure-plated drawbridge. There is also searchlight stealth with real shadow cover, a guard chase and crawl spaces, plus checkpoints and instant respawn.

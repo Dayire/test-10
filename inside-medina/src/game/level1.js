@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Batcher, boxMM, worldUV, shadeByHeight, setColor, mat4, rng, extrude } from '../assets/geom.js';
-import { building, wallWithOpenings, archFrame, arcade, dome, minaret, cornice, merlons, zellige, door, archOutline } from '../assets/architecture.js';
+import { building, wallWithOpenings, archFrame, arcade, dome, minaret, cornice, merlons, zellige, door, archOutline, spandrels, archBead } from '../assets/architecture.js';
 import { barrel, pot, rugRoll, hangingRug, sack, basket, cart, awning, drape, lanternMesh, bracket, laundry, wire, eave, stairs, stool, pole, souqCanopy } from '../assets/props.js';
 import { ivyCurtain, ivyPatch, leafClump, grassTufts } from '../assets/foliage.js';
 import { dressFacade } from '../assets/dressing.js';
@@ -42,14 +42,14 @@ export function buildLevel(game) {
     }
     return s;
   };
-  const lantern = (x, y, z, { light = false, s = 1, bracketDir = 0, intensity = 3 } = {}) => {
+  const lantern = (x, y, z, { light = false, s = 1, bracketDir = 0, yaw, chain, intensity = 3 } = {}) => {
     let p = new THREE.Vector3(x, y, z);
-    if (bracketDir) p = bracket(K, x, y, z, { len: 0.55, dir: bracketDir });
-    const m = lanternMesh(game.mats, { s });
-    m.position.copy(p).add(new THREE.Vector3(0, -0.46 * s, 0));
+    if (bracketDir) p = bracket(K, x, y, z, { len: 0.55, dir: bracketDir, yaw });
+    const m = lanternMesh(game.mats, { s, chain: chain ?? (bracketDir ? 0.06 : 0.3) });
+    m.position.copy(p);
     game.scene.add(m);
     const glow = { mesh: m, light: null, phase: r() * 10 };
-    if (light) L.lightSources.push({ pos: m.position.clone().add(new THREE.Vector3(0, 0.18 * s, 0.15)), intensity, phase: glow.phase });
+    if (light) L.lightSources.push({ pos: m.position.clone().add(new THREE.Vector3(0, m.userData.glowY, 0.15)), intensity, phase: glow.phase });
     L.lanterns.push(glow);
     return m;
   };
@@ -118,10 +118,10 @@ export function buildLevel(game) {
   // awnings / stalls on the low shops, goods beneath
   awning(K, { x0: -0.9, x1: 2.5, z0: FZ + 0.02, z1: 0.2, y0: 2.6, y1: 2.05, mat: 'fabricTan' });
   awning(K, { x0: 9.3, x1: 12.1, z0: FZ + 0.02, z1: 0.3, y0: 2.8, y1: 2.15, mat: 'fabricRed' });
-  basket(K, -0.2, 0, -0.9); basket(K, 0.5, 0, -1.0, { r: 0.22 }); sack(K, 1.3, 0, -1.0); pot(K, 2.0, 0, -1.1, { kind: 'amphora' });
+  basket(K, -0.2, 0, -0.9); basket(K, 0.5, 0, -1.0, { r: 0.22 }); sack(K, 1.05, 0, -1.0, { kind: 'open', spice: 'spicePaprika' }); sack(K, 1.52, 0, -1.05, { kind: 'open', spice: 'spiceTurmeric', s: 0.9 }); pot(K, 2.0, 0, -1.1, { kind: 'amphora' });
   rugRoll(K, 9.8, 0, -1.1, { seed: 3 }); rugRoll(K, 10.25, 0, -1.2, { seed: 4, r: 0.13, len: 1.5 }); rugRoll(K, 10.7, 0, -1.05, { seed: 5, len: 1.9 });
   hangingRug(K, 11.3, 2.05, -1.4, { w: 1.1, h: 1.7 });
-  pot(K, 3.3, 0, -1.0, { kind: 'tall' }); pot(K, 3.9, 0, -1.2, { kind: 'jar' });
+  pot(K, 3.3, 0, -1.0, { kind: 'tall', glaze: 'green' }); pot(K, 3.9, 0, -1.2, { kind: 'jar', glaze: 'fez' });
   zellige(K, { x0: -5.6, x1: -1.4, y0: 0.36, y1: 1.3, z: FZ + 0.02 });
   lantern(-3.4 + 1.1, 2.9, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.5 });
   lantern(6.2 + 1.2, 3.0, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.5 });
@@ -132,7 +132,7 @@ export function buildLevel(game) {
   laundry(K, new THREE.Vector3(2.8, 6.5, FZ), new THREE.Vector3(8.5, 6.2, FZ + 0.1), { sag: 0.4, seed: 7 });
   // sack pile obstacle (tutorial jump)
   solid(8.15, 0, 8.9, 0.7, { ledges: false, surface: 'cloth' });
-  sack(K, 8.3, 0, 0.1, { s: 1.1 }); sack(K, 8.75, 0, -0.1, { s: 1.0, rot: 1.2 }); sack(K, 8.5, 0.4, 0.0, { s: 0.9, rot: 0.4 }); sack(K, 8.6, 0, 0.55, { s: 1.0, rot: 2 });
+  sack(K, 8.34, 0, 0.04, { kind: 'lying', rot: Math.PI / 2 + 0.08, hgt: 0.4 }); sack(K, 8.72, 0, -0.04, { kind: 'lying', rot: Math.PI / 2 - 0.1, hgt: 0.4 }); sack(K, 8.52, 0.27, 0.0, { kind: 'lying', rot: 0.06, hgt: 0.5, wid: 0.5 }); sack(K, 8.6, 0, 0.55, { s: 1.0, rot: 2 });
   basket(K, 7.6, 0, 0.6, { r: 0.2 });
   // foreground silhouettes
   rugRoll(K, -3.4, 0, 5.2, { seed: 8, r: 0.22, len: 2.4, lean: 0.18 }); rugRoll(K, -2.6, 0, 5.8, { seed: 9, r: 0.18, len: 2.1, lean: 0.1 });
@@ -154,7 +154,7 @@ export function buildLevel(game) {
   drape(K, new THREE.Vector3(18, 7.2, FZ), new THREE.Vector3(24, 6.6, 3.5), { width: 1.4, sag: 0.9, mat: 'fabricRed', twist: 0.3 });
   drape(K, new THREE.Vector3(23, 6.4, FZ), new THREE.Vector3(29, 7.0, 3.5), { width: 1.3, sag: 0.8, mat: 'fabricTan', twist: -0.2 });
   pot(K, 22.2, 1.5, -1.0, { kind: 'planter' }); leafClump(K, { x: 22.2, y: 2.0, z: -1.0, r: 0.35, seed: 21 });
-  sack(K, 23.2, 1.5, -1.1); basket(K, 25.2, 1.5, -1.1);
+  sack(K, 23.2, 1.5, -1.1, { kind: 'open', spice: 'spiceCumin' }); sack(K, 23.7, 1.5, -1.2, { kind: 'open', spice: 'spiceHenna', s: 0.85 }); basket(K, 25.2, 1.5, -1.1);
   lantern(18.8 + 1.0, 4.5, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.5 });
   ivyCurtain(K, { x0: 24.3, x1: 29.8, y: 9.5, z: FZ, maxLen: 3.5, seed: 14 });
   shaft(22.5, 1.5, 0.2, { w: 2.2, len: 14, intensity: 0.1 });
@@ -241,8 +241,9 @@ export function buildLevel(game) {
     pole(K, x - 1.2, 0, 2.7, -0.8, 0.04); pole(K, x + 1.2, 0, 2.7, -0.8, 0.04);
     wire(K, new THREE.Vector3(x - 1.2, 2.62, -0.8), new THREE.Vector3(x + 1.2, 2.62, -0.8), { sag: 0.12, r: 0.01 });
   }
-  pot(K, 79.5, 0, -2.6, { kind: 'amphora' }); pot(K, 85, 0, -2.5, { kind: 'jar' }); cart(K, 101.5, 0, -2.6, { rot: 0.1 });
-  for (const x of [74.2, 96.3, 110.6]) lantern(x, 3.0, -4.0, { light: true, intensity: 1.6 });
+  pot(K, 79.5, 0, -2.6, { kind: 'amphora' }); pot(K, 85, 0, -2.5, { kind: 'jar', glaze: 'cobalt' }); cart(K, 101.5, 0, -2.6, { rot: 0.1 });
+  for (const x of [74.52, 96.38]) lantern(x, 3.25, -4.15, { bracketDir: 1, light: true, intensity: 1.6 });
+  lantern(110.44, 4.0, -4.6, { chain: 0.9, light: true, intensity: 1.6 });
   grassTufts(K, { x0: 70, x1: 112, z0: -1.5, z1: 6, n: 70, seed: 9 });
   // foreground pillars of the near side of the courtyard (silhouettes)
   // velarium: sail strips over the front half of the courtyard (shade + back-lit glow)
@@ -446,10 +447,8 @@ function buildHeroAlley(game, batch, K, L, lantern) {
   // big scalloped eave near the camera + beige stall awning + lantern
   eave(KL, { x0: 1.6, x1: 7.4, y: 6.6, z: 0.1, depth: 0.85, drop: 0.5, soffit: 'wood' });
   awning(KL, { x0: 6.6, x1: 10.6, z0: 0.05, z1: 2.2, y0: 2.9, y1: 2.2, mat: 'fabricTan', sag: 0.14, poles: true });
-  const lp = new THREE.Vector3(xl + 0.02, 3.6, -9.2);
-  const lb = bracket(K, lp.x, lp.y, lp.z, { len: 0.62, dir: 1 });
-  void lb;
-  const lan = lanternMesh(game.mats, { s: 1.25 }); lan.position.set(xl + 0.64, 3.6 - 0.6, -9.2); game.scene.add(lan);
+  const tip = bracket(K, xl + 0.01, 3.7, -9.2, { len: 0.62, yaw: Math.PI / 2 });
+  const lan = lanternMesh(game.mats, { s: 1.25 }); lan.position.copy(tip); game.scene.add(lan);
   L.lanterns.push({ mesh: lan, light: null, phase: 1 });
   // right side (faces -x): arcade with red/cream horseshoe arches + stair + striped awning
   const KR = K.with(new THREE.Matrix4().makeRotationY(-Math.PI / 2).premultiply(new THREE.Matrix4().makeTranslation(xr, 0, 0)));
@@ -469,6 +468,9 @@ function buildHeroAlley(game, batch, K, L, lantern) {
   zellige(K, { x0: X - 2.6, x1: X - aw / 2 - 0.36, y0: 1.2, y1: 6.9, z: zEnd + 0.02, border: 0.06 });
   zellige(K, { x0: X + aw / 2 + 0.36, x1: X + 2.6, y0: 1.2, y1: 6.9, z: zEnd + 0.02, border: 0.06 });
   zellige(K, { x0: X - 2.6, x1: X + 2.6, y0: 6.9, y1: 7.4, z: zEnd + 0.02, border: 0.04 });
+  spandrels(K, { kind: 'pointed', cx: X, sill: 0, w: aw, hs: ahs, rise: arise, band: 0.34, x0: X - aw / 2 - 0.36, x1: X + aw / 2 + 0.36, yTop: 6.9, z: zEnd + 0.02 });
+  archBead(K, { kind: 'pointed', cx: X, sill: 0, w: aw, hs: ahs, rise: arise, grow: 0.02, z: zEnd + 0.37, r: 0.035 });
+  archBead(K, { kind: 'pointed', cx: X, sill: 0, w: aw, hs: ahs, rise: arise, grow: 0.34, z: zEnd + 0.25, r: 0.03 });
   cornice(K, { x0: xl - 1, x1: xr + 1, y: 7.6, z: zEnd + 0.02, profile: 'heavy', mat: 'limestone', scale: 1.0 });
   cornice(K, { x0: xl - 1, x1: xr + 1, y: 9.0, z: zEnd + 0.02, profile: 'classic', mat: 'limestone', scale: 1.0 });
   ivyCurtain(K, { x0: xl - 0.8, x1: xr + 0.8, y: 9.3, z: zEnd + 0.1, maxLen: 3.4, seed: 64, density: 2.4, scale: 1.7 });
@@ -493,7 +495,7 @@ function buildHeroAlley(game, batch, K, L, lantern) {
   rugRoll(K, xl + 0.35, 0, -2.2, { seed: 71, r: 0.2, len: 2.2, lean: 0.12 });
   rugRoll(K, xl + 0.75, 0, -1.9, { seed: 72, r: 0.17, len: 1.8, lean: -0.08 });
   barrel(K, xl + 1.3, 0, -5.6, { r: 0.32 });
-  pot(K, xr - 0.6, 0, -6.4, { kind: 'jar' }); pot(K, xr - 0.4, 0, -7.0, { kind: 'amphora' });
+  pot(K, xr - 0.6, 0, -6.4, { kind: 'jar', glaze: 'green' }); pot(K, xr - 0.4, 0, -7.0, { kind: 'amphora' });
   const pedestal = boxMM(xr - 1.5, 0, -12.2, xr - 1.0, 0.95, -11.7); K.add(pedestal, 'limestone');
   basket(K, xl + 1.2, 0, -9.2);
   grassTufts(K, { x0: xl + 0.2, x1: xr - 0.2, z0: -14, z1: -2, n: 40, seed: 72 });

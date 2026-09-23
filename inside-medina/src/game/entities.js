@@ -300,13 +300,13 @@ export class Guard {
     this.prev = new THREE.Vector2(x, y);
     this.facing = 1;
     // lantern in right hand + light
-    this.lantern = lanternMesh(game.mats, { s: 1.1 });
-    this.lantern.position.set(0, -0.12, 0.02);
-    this.lantern.rotation.x = Math.PI;
+    this.lantern = lanternMesh(game.mats, { s: 1.1, chain: 0.02 });
+    this.lantern.position.set(0, -0.07, 0.01);
     this.rig.j.wristR.add(this.lantern);
     this.light = new THREE.PointLight(0xffa860, 6, 7, 1.6);
-    this.light.position.set(0, -0.35, 0);
-    this.rig.j.wristR.add(this.light);
+    this.light.position.set(0, this.lantern.userData.glowY, 0.08);
+    this.lantern.add(this.light);
+    this._wq = new THREE.Quaternion();
     this.rig.root.visible = false; this.light.intensity = 0;
     this.body.enabled = false;
     this.steps = 0;
@@ -383,6 +383,11 @@ export class Guard {
       this.rig.j.shoulderR.rotation.x = -0.5 + Math.sin(this.t * 9) * 0.1; this.rig.j.elbowR.rotation.x = -0.9;
     }
     this.light.intensity = 6 + Math.sin(this.t * 17) * 0.6 + Math.sin(this.t * 7.3) * 0.4;
+    // the lantern hangs plumb from the hand whatever the arm is doing
+    this.rig.j.wristR.updateWorldMatrix(true, false);
+    this.rig.j.wristR.getWorldQuaternion(this._wq).invert();
+    this.lantern.quaternion.copy(this._wq);
+    this.lantern.rotateZ(Math.sin(this.t * 6.5) * 0.12 * Math.min(1, Math.abs(this.body.vx) / 2));
   }
   getState() { return { state: this.state === 'hidden' ? 'hidden' : 'hidden' }; }
   setState() { this.deactivate(); this.vault = null; }

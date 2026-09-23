@@ -40,6 +40,7 @@ export async function boot(canvas, params) {
   ui.on('quality', () => { const order = ['low', 'medium', 'high', 'ultra']; const i = order.indexOf(world.rs.tier); world.rs.autoQuality = false; world.rs.setTier(order[(i + 1) % order.length]); ui.showPause(true, input.lastDevice, world.rs.tier, audio.muted, input.keyLabels); });
   ui.on('mute', () => { audio.muted = !audio.muted; if (audio.master) audio.master.gain.value = audio.muted ? 0 : 0.9; ui.showPause(true, input.lastDevice, world.rs.tier, audio.muted, input.keyLabels); });
   ui.on('again', () => { game.restartLevel(); audio.fadeIn(2); });
+  ui.on('assets', () => { location.hash = 'assets'; location.reload(); });
   canvas.addEventListener('pointerdown', () => { if (game.mode === 'intro') game.beginPlay(); canvas.focus(); });
   // unlock audio inside a real user gesture (Safari requires it in the handler itself)
   const unlockAudio = () => { try { audio.start(); if (audio.ctx && audio.ctx.state === 'suspended' && !game.paused) audio.ctx.resume(); } catch { /* no audio */ } };

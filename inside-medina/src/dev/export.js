@@ -9,6 +9,8 @@ const COLORS = {
   wood: '#8a6446', woodDark: '#4a3322', iron: '#3a3634', brass: '#c79a4a', terracotta: '#b0613d', rug: '#7a1e1e',
   fabricTan: '#c49a6c', fabricCream: '#e2d6be', ropeMat: '#b8a58a', domeGlaze: '#8a8a4e', plasterWhite: '#dcd8cf',
   limestone: '#d8cdbd', darkInterior: '#140d09', glassGlow: '#ffc27a', goldLeaf: '#e0b060', zellige: '#1d2a3a',
+  woodPlank: '#8f6a48', burlap: '#b08c5e', wicker: '#c29a62', glazeGreen: '#4f7d42', glazeCobalt: '#3558a0', glazeWhite: '#ece3d2', glazeTile: '#4a7f4f',
+  spicePaprika: '#b83c1c', spiceTurmeric: '#d99a22', spiceCumin: '#8e6232', spiceHenna: '#6a8436', spiceRose: '#ad5470',
 };
 const METAL = { iron: 0.9, brass: 1, goldLeaf: 1 };
 

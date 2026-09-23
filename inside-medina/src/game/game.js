@@ -76,7 +76,7 @@ export class Game {
     for (const l of L.lanterns) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: 0xffa860, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.55 }));
       sp.scale.setScalar(0.9);
-      sp.position.set(0, 0.2, 0);
+      sp.position.set(0, l.mesh.userData.glowY ?? 0.2, 0);
       l.mesh.add(sp);
       l.sprite = sp;
     }
@@ -256,7 +256,7 @@ export class Game {
     pl.scripted = (dt, p) => {
       p.state = 'ground';
       const inp = this.input.state;
-      const want = Math.max(inp.x, inp.y, this.finaleT > 6 ? 0.55 : 0, this.params.autostart ? 1 : 0);
+      const want = Math.max(inp.x, inp.y, this.finaleT > 2 ? 0.55 : 0, this.params.autostart ? 1 : 0);
       const v = 1.55 * Math.min(1, want);
       p.fvx = (p.fvx || 0) + (v - (p.fvx || 0)) * (1 - Math.exp(-3 * dt));
       this.finaleS = Math.min(this.finaleLen, this.finaleS + p.fvx * dt);

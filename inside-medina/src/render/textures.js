@@ -132,11 +132,11 @@ void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out flo
   paint *= mix(1., .82, smoothstep(.55, .8, streak)); // weather streaks
   // hairline cracks
   vec4 vc = pvoronoi(uv + (vec2(pfbm(uv, vec2(8.), 3, .5), pfbm(uv + .3, vec2(8.), 3, .5)) - .5) * .05, vec2(5.), .9);
-  float crack = (1. - smoothstep(0., .012, vc.w)) * smoothstep(.45, .6, pfbm(uv + .9, vec2(4.), 4, .5));
+  float crack = (1. - smoothstep(0., .006, vc.w)) * smoothstep(.56, .72, pfbm(uv + .9, vec2(4.), 4, .5));
   vec3 base = mix(under, brick * (0.7 + 0.3 * smoothstep(0., .12, bedge)), bmask * (1. - paintA) * .85);
   alb = mix(base, paint, paintA);
   alb = mix(alb, alb * 1.25 + .03, edge * .7);
-  alb *= 1. - crack * .55;
+  alb *= 1. - crack * .38;
   h = n2 * .25 + n1 * .5 + paintA * .9 + edge * .35 - crack * .8 - (1. - smoothstep(0., .1, bedge)) * bmask * (1. - paintA) * .5;
   h *= .02;
   r = mix(.93, .78, paintA) - n2 * .06;
@@ -233,7 +233,7 @@ void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out flo
   c = mix(c, hex(150., 140., 120.), (1. - grout) * .9);
   c = mix(c, hex(150., 140., 120.), seam * (1. - isLight) * .8);
   // missing / broken tiles reveal plaster
-  float miss = step(.9, hash12(idc + 13.)) * step(.35, pfbm(uv, vec2(3.), 4, .5));
+  float miss = step(.968, hash12(idc + 13.)) * step(.42, pfbm(uv, vec2(3.), 4, .5));
   vec3 plaster = hex(190., 150., 108.) * (.8 + .4 * pfbm(uv, vec2(20.), 4, .5));
   float glaze = pfbm(uv + .6, vec2(30.), 3, .5);
   alb = mix(c * (.92 + .16 * glaze), plaster, miss);
@@ -483,6 +483,88 @@ void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out flo
   vec3 c = mix(hex(214., 70., 140.), hex(236., 120., 176.), v);
   alb = mix(hex(250., 230., 170.), c, smoothstep(.08, .25, rad));
   h = (1. - rad) * .01; r = .6; ao = 1.;
+}` },
+  woodPlank: {
+    // a single board (no plank seams): staves, crate boards, furniture
+    size: 512, normalStrength: 1.5,
+    glsl: /* glsl */ `
+void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out float m, out float a){
+  m = 0.; a = 1.;
+  float grain = pfbm(uv, vec2(2., 24.), 5, .6);
+  float fine = pfbm(uv, vec2(4., 128.), 3, .5);
+  float ring = sin((uv.y * 24. + grain * 6.) * 3.1416) * .5 + .5;
+  vec3 c = mix(hex(98., 68., 44.), hex(152., 114., 76.), grain) * (.86 + .22 * fine) * (.9 + .12 * ring);
+  float weather = pfbm(uv + .5, vec2(3.), 5, .5);
+  c = mix(c, hex(152., 140., 122.), smoothstep(.5, .85, weather) * .6);
+  vec2 kc = floor(uv * vec2(2., 3.));
+  float knot = (1. - smoothstep(.0, .045, length((fract(uv * vec2(2., 3.)) - .5) * vec2(1., .45)))) * step(.7, hash12(kc + 4.));
+  alb = mix(c, hex(58., 38., 24.), knot * .8);
+  h = (grain * .25 + fine * .2 + ring * .1 - knot * .2) * .01;
+  r = .78 + fine * .12; ao = 1.;
+}` },
+  glaze: {
+    // near-white ceramic glaze, tinted per material: crackle, pinholes, pooling
+    size: 512, normalStrength: 0.8,
+    glsl: /* glsl */ `
+void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out float m, out float a){
+  m = 0.; a = 1.;
+  float n = pfbm(uv, vec2(4.), 5, .55);
+  vec4 vc = pvoronoi(uv, vec2(14.), .9);
+  float crackle = 1. - smoothstep(0., .035, vc.w);
+  float pin = step(.97, hash12(floor(uv * 160.)));
+  float pool = smoothstep(.35, .75, pfbm(uv + .4, vec2(3.), 4, .5));
+  alb = vec3(.84) * (.9 + .14 * n) * (1. - pool * .28) * (1. - crackle * .14) * (1. - pin * .35);
+  h = (n * .3 - crackle * .4 - pin * .3) * .004;
+  r = .14 + n * .1 + crackle * .18 + pin * .3; ao = 1.;
+}` },
+  wicker: {
+    // plain-weave basketry: weavers passing over and under upright stakes
+    size: 512, normalStrength: 2.2,
+    glsl: /* glsl */ `
+void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out float m, out float a){
+  m = 0.; a = 1.;
+  vec2 q = uv * vec2(14., 20.);
+  vec2 id = floor(q), f = fract(q);
+  float over = mod(id.x + id.y, 2.);
+  float weaver = sin(f.y * 3.1416);
+  float bow = .72 + .28 * (over * 2. - 1.) * cos((f.x - .5) * 3.1416);
+  float stake = (1. - over) * (1. - smoothstep(.1, .2, abs(f.x - .5)));
+  float hw = weaver * bow;
+  float hgt = max(hw, stake * .85);
+  float strand = pfbm(vec2(uv.x * .5, uv.y * 20.), vec2(1., 20.), 3, .5);
+  float tone = hash12(vec2(id.y, 3.)) * .5 + hash12(id + 1.) * .5;
+  vec3 c = mix(hex(164., 122., 70.), hex(212., 176., 118.), tone * .6 + strand * .4);
+  c = mix(c, hex(140., 100., 58.), stake * .5);
+  alb = c * (.45 + .55 * smoothstep(0., .5, hgt));
+  h = hgt * .006; r = .78; ao = mix(.45, 1., smoothstep(0., .45, hgt));
+}` },
+  burlap: {
+    size: 512, normalStrength: 1.6,
+    glsl: /* glsl */ `
+void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out float m, out float a){
+  m = 0.; a = 1.;
+  vec2 q = uv * 84.;
+  vec2 f = fract(q); vec2 id = floor(q);
+  float warp = sin(f.x * 3.1416), weft = sin(f.y * 3.1416);
+  float over = mod(id.x + id.y, 2.);
+  float thread = mix(weft * (.55 + .45 * warp), warp * (.55 + .45 * weft), over);
+  float slub = pfbm(vec2(uv.x * 4., uv.y), vec2(4., 64.), 3, .5);
+  float n = pfbm(uv, vec2(5.), 5, .5);
+  vec3 c = mix(hex(150., 112., 70.), hex(198., 160., 108.), n) * (.7 + .38 * thread) * (.9 + .2 * slub);
+  c *= 1. - smoothstep(.6, .85, pfbm(uv + .3, vec2(3.), 4, .5)) * .25;
+  alb = c; h = (thread * .6 + slub * .2) * .004; r = .96; ao = mix(.7, 1., thread);
+}` },
+  powder: {
+    // heaped spice / grain, tinted per material
+    size: 256, normalStrength: 1.4,
+    glsl: /* glsl */ `
+void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out float m, out float a){
+  m = 0.; a = 1.;
+  float g1 = pfbm(uv, vec2(48.), 3, .5);
+  float g2 = hash12(floor(uv * 256.));
+  float clump = pfbm(uv, vec2(6.), 4, .5);
+  alb = vec3(.8) * (.78 + .28 * g1) * (.9 + .16 * g2) * (.85 + .22 * clump);
+  h = (g1 * .5 + g2 * .15 + clump) * .006; r = .95; ao = 1. - (1. - g1) * .2;
 }` },
   lattice: {
     size: 512, normalStrength: 1.0,

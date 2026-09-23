@@ -29,6 +29,7 @@ All surfaces are GPU-baked procedural PBR sets (albedo, normal, ORM) generated a
 - **Crafts**: wood planks, roof tiles, glazed dome tiles and terracotta.
 - **Textiles and metal**: striped fabrics, a Persian rug, brass with patina, and rusted iron.
 - **Foliage**: ivy leaves, bougainvillea blossoms and dry grass.
+- **Market goods**: ceramic glaze (Tamegroute green, Fez cobalt, and white with hand-painted cobalt bands), plain-weave wicker, coarse burlap, heaped spice powders (paprika, turmeric, cumin, henna, rose), and single boards of weathered wood for staves and crates.
 
 Fabric, leaves and skin carry a back-light translucency term, so canopies and ivy glow when the sun is behind them.
 
@@ -37,7 +38,10 @@ Fabric, leaves and skin carry a back-light translucency term, so canopies and iv
 - Pointed and horseshoe arches with layered limestone frames, and zellige dados around doors.
 - Stepped merlons on every roofline, moulded cornices, and mashrabiya lattice screens.
 - Souk canopies of striped cloth spanning the street, dappling light onto the cobbles.
-- Scalloped wooden eaves with terracotta tiles, and brass lanterns on scrolled iron brackets.
+- Scalloped wooden eaves on carved corbels under green glazed barrel tiles, and pierced brass lanterns on forged scroll brackets, their light escaping through arched cut-outs.
+- Zellige spandrels and carved beads framing the great pointed arch.
+- Open spice sacks with rolled-down rims, glazed jars and woven baskets in the souk.
+- The watchman is faceless under a pointed djellaba hood, carrying a lantern that always hangs plumb.
 - Ivy curtains with pink blossom, laundry lines, sagging wires.
 - Rolled rugs, amphorae, barrels, sacks and carts as foreground silhouettes.
 - Domes and minarets with gilded finials on the skyline.

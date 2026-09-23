@@ -175,6 +175,43 @@ export function lathe(profile, seg = 32, phiStart = 0, phiLength = Math.PI * 2) 
   return g;
 }
 
+// Parametric surface: fn(u, v, out) with u, v in [0,1]. `wrapU` welds the
+// normals along the u=0 / u=1 seam of closed surfaces.
+export function gridGeom(nu, nv, fn, { wrapU = false } = {}) {
+  const pos = [], uv = [], idx = [];
+  const p = new THREE.Vector3();
+  for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+    fn(i / nu, j / nv, p);
+    pos.push(p.x, p.y, p.z); uv.push(i / nu, j / nv);
+  }
+  const row = nu + 1;
+  for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+    const a = j * row + i, b = a + 1, c = a + row, d = c + 1;
+    idx.push(a, c, b, b, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  if (wrapU) {
+    const n = g.attributes.normal, t = new THREE.Vector3();
+    for (let j = 0; j <= nv; j++) {
+      const a = j * row, b = a + nu;
+      t.set(n.getX(a) + n.getX(b), n.getY(a) + n.getY(b), n.getZ(a) + n.getZ(b)).normalize();
+      n.setXYZ(a, t.x, t.y, t.z); n.setXYZ(b, t.x, t.y, t.z);
+    }
+  }
+  return g;
+}
+
+// Dense Catmull-Rom resampling of a sparse [r, y] lathe profile (each control
+// segment gets the same number of samples, so short lips stay crisp).
+export function smoothProfile(pts, perSeg = 4) {
+  const c = new THREE.SplineCurve(pts.map(([a, b]) => new THREE.Vector2(a, b)));
+  return c.getPoints((pts.length - 1) * perSeg);
+}
+
 export function catenary(p0, p1, sag, n = 24) {
   const pts = [];
   for (let i = 0; i <= n; i++) {
