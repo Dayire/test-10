@@ -193,6 +193,7 @@ export class Audio {
       case 'grabbed': this.tone(x, { f: 60, f2: 30, dur: 0.8, gain: 0.6 }); break;
       case 'death': this.tone(x, { f: 55, f2: 28, dur: 1.6, gain: 0.5 }); this.duck(); break;
       case 'crawl': this.noiseHit(x, { f: 800, q: 0.6, dur: 0.2, gain: 0.08, type: 'lowpass' }); break;
+      case 'wings': if (this._lastWings && this.ctx.currentTime - this._lastWings < 0.25) break; this._lastWings = this.ctx.currentTime; for (let i = 0; i < 7; i++) this.noiseHit(x, { f: 1200 + r() * 900, q: 0.8, dur: 0.06, gain: 0.09, delay: i * 0.075 + r() * 0.02 }); break;
       default: break;
     }
   }

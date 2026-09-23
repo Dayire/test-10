@@ -17,6 +17,16 @@ export class Input {
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
     this._setupTouch();
+    // show the letters the player actually has under the WASD positions (ZQSD on AZERTY)
+    this.keyLabels = null;
+    try {
+      if (navigator.keyboard && navigator.keyboard.getLayoutMap) {
+        navigator.keyboard.getLayoutMap().then((m) => {
+          const g = (c, d) => (m.get(c) || d).toUpperCase();
+          this.keyLabels = { up: g('KeyW', 'W'), left: g('KeyA', 'A'), down: g('KeyS', 'S'), right: g('KeyD', 'D') };
+        }).catch(() => {});
+      }
+    } catch { /* keyboard map not allowed in this frame */ }
   }
 
   k(...codes) { return codes.some((c) => this.keys.has(c)); }

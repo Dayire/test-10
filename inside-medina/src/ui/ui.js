@@ -4,7 +4,7 @@ export class UI {
     this.root = root;
     root.innerHTML = `
       <div id="loading"><div class="lt">MEDINA</div><div class="lbar"><i></i></div><div class="lmsg">weaving the alleys…</div></div>
-      <div id="title" class="hidden"><div class="t1">MEDINA</div><div class="t2">a short walk into the light</div><div class="t3">press any key</div></div>
+      <div id="title" class="hidden"><div class="t1">MEDINA</div><div class="t2">a short walk into the light</div><div class="t3">press any key or click</div></div>
       <div id="hint" class="hidden"></div>
       <div id="pause" class="hidden">
         <div class="pbox">
@@ -29,16 +29,17 @@ export class UI {
   hideLoading() { const l = this.el('loading'); l.classList.add('fade'); setTimeout(() => l.remove(), 1500); }
   showTitle(on) { this.el('title').classList.toggle('hidden', !on); }
   titleOpacity(a) { this.el('title').style.opacity = a; }
-  keysHtml(device) {
+  keysHtml(device, labels) {
     if (device === 'gamepad') return '<b>stick</b> move &nbsp; <b>A</b> jump &nbsp; <b>X / RT</b> grab (hold) &nbsp; <b>start</b> pause';
     if (device === 'touch') return 'left pad: move / climb / crawl &nbsp; ⤒ jump &nbsp; ✋ grab (hold)';
-    return '<b>A D / ← →</b> move &nbsp; <b>W / ↑</b> climb &nbsp; <b>S / ↓</b> crawl &nbsp; <b>space</b> jump &nbsp; <b>shift</b> grab (hold) &nbsp; <b>esc</b> pause';
+    const k = labels ? { m: `${labels.left} ${labels.right} / `, u: `${labels.up} / `, d: `${labels.down} / ` } : { m: '', u: '', d: '' };
+    return `<b>${k.m}← →</b> move &nbsp; <b>${k.u}↑</b> climb &nbsp; <b>${k.d}↓</b> crawl &nbsp; <b>space</b> jump &nbsp; <b>shift</b> grab (hold) &nbsp; <b>esc</b> pause`;
   }
-  showHint(device, sec = 7) { const h = this.el('hint'); h.innerHTML = this.keysHtml(device); h.classList.remove('hidden'); this.hintTimer = sec; }
+  showHint(device, sec = 7, labels = null) { const h = this.el('hint'); h.innerHTML = this.keysHtml(device, labels); h.classList.remove('hidden'); this.hintTimer = sec; }
   update(dt) { if (this.hintTimer > 0) { this.hintTimer -= dt; if (this.hintTimer <= 0) this.el('hint').classList.add('hidden'); } }
-  showPause(on, device, quality, muted) {
+  showPause(on, device, quality, muted, labels = null) {
     this.el('pause').classList.toggle('hidden', !on);
-    if (on) { this.el('pause').querySelector('.keys').innerHTML = this.keysHtml(device); this.el('pause').querySelector('.q').textContent = quality; this.el('pause').querySelector('.m').textContent = muted ? 'off' : 'on'; }
+    if (on) { this.el('pause').querySelector('.keys').innerHTML = this.keysHtml(device, labels); this.el('pause').querySelector('.q').textContent = quality; this.el('pause').querySelector('.m').textContent = muted ? 'off' : 'on'; }
   }
   showEnd(on) { this.el('end').classList.toggle('hidden', !on); }
   debug(text) { const d = this.el('dbg'); d.classList.remove('hidden'); d.textContent = text; }

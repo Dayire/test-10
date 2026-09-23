@@ -25,17 +25,20 @@ export async function boot(canvas, params) {
   game.init((p, msg) => ui.progress(0.5 + p * 0.45, msg));
   ui.progress(0.97, 'lighting the lanterns…');
   await nextFrame();
-  // shader warm-up: compile everything before the first visible frame
+  // shader warm-up: compile everything (including things that appear later) before the first frame
+  const hidden = [];
+  world.scene.traverse((o) => { if (!o.visible) { hidden.push(o); o.visible = true; } });
   world.rs.renderer.compile(world.scene, game.camera);
   game.render(0.016, 0);
+  for (const o of hidden) o.visible = false;
   await nextFrame();
   ui.hideLoading();
   if (!P.autostart) ui.showTitle(true); else game.beginPlay();
   ui.on('resume', () => game.setPaused(false));
   ui.on('checkpoint', () => { game.setPaused(false); game.player.die('restart'); game.dieT = 1.6; });
   ui.on('restart', () => { game.setPaused(false); game.restartLevel(); });
-  ui.on('quality', () => { const order = ['low', 'medium', 'high', 'ultra']; const i = order.indexOf(world.rs.tier); world.rs.autoQuality = false; world.rs.setTier(order[(i + 1) % order.length]); ui.showPause(true, input.lastDevice, world.rs.tier, audio.muted); });
-  ui.on('mute', () => { audio.muted = !audio.muted; if (audio.master) audio.master.gain.value = audio.muted ? 0 : 0.9; ui.showPause(true, input.lastDevice, world.rs.tier, audio.muted); });
+  ui.on('quality', () => { const order = ['low', 'medium', 'high', 'ultra']; const i = order.indexOf(world.rs.tier); world.rs.autoQuality = false; world.rs.setTier(order[(i + 1) % order.length]); ui.showPause(true, input.lastDevice, world.rs.tier, audio.muted, input.keyLabels); });
+  ui.on('mute', () => { audio.muted = !audio.muted; if (audio.master) audio.master.gain.value = audio.muted ? 0 : 0.9; ui.showPause(true, input.lastDevice, world.rs.tier, audio.muted, input.keyLabels); });
   ui.on('again', () => { game.restartLevel(); audio.fadeIn(2); });
   canvas.addEventListener('pointerdown', () => { if (game.mode === 'intro') game.beginPlay(); canvas.focus(); });
   let last = performance.now();

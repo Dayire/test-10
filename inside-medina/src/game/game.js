@@ -10,6 +10,7 @@ import { LOOK } from '../render/look.js';
 import { Shafts } from '../render/shafts.js';
 import { updateAtmosphere } from '../render/world.js';
 import { LightPool } from '../render/lightpool.js';
+import { Dust, Flock } from '../render/fx.js';
 
 const STEP = 1 / 120;
 const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
@@ -41,6 +42,7 @@ export class Game {
     this.anim = new Animator(this.rig);
     this.anim.onFootstep = (speed, st) => {
       const g = this.player.groundObj;
+      if (speed > 3.2 && this.dust && Math.random() < 0.5) this.dust.emit(new THREE.Vector3(this.player.x - this.player.facing * 0.15, this.player.y, (this.player.z || 0) + 0.1), { count: 1, spread: 0.3, up: 0.25, size: 0.3, alpha: 0.18, life: 0.7 });
       this.audio.play('step', this.player.x, { surface: g?.surface || 'stone', speed: st === 'crawl' ? 1 : speed });
     };
     progress(0.1, 'raising walls…');
@@ -51,7 +53,7 @@ export class Game {
     this.crates = [L.crateA, L.crateB];
     this.camRig.setKeys(L.cameraKeys);
     this.phys.onImpact = (b, speed) => {
-      if (b.kind === 'crate') { this.sfx('crateImpact', b.x); if (speed > 6) this.camRig.addShake(0.5); }
+      if (b.kind === 'crate') { this.sfx('crateImpact', b.x); if (speed > 6) this.camRig.addShake(0.5); this.dust && this.dust.emit(new THREE.Vector3(b.x, b.y, 0), { count: 14, spread: 1.4, up: 0.5, size: 0.9, alpha: 0.35 }); }
     };
     // light shafts & dust
     this.shafts = new Shafts(this.scene, LOOK.sunDir, G);
@@ -60,6 +62,12 @@ export class Game {
     // lantern lights: fixed pool reassigned to the nearest lanterns (no shader recompiles)
     this.lightPool = new LightPool(this.scene, 4);
     for (const s of L.lightSources) this.lightPool.add(s.pos, s.intensity, s.phase);
+    // dust puffs and pigeons
+    this.dust = new Dust(this.scene, 64);
+    this.flock = new Flock(this.scene, this.mats, [
+      { x: 4.5, y: 0, z: 1.6, w: 2.5, n: 5 }, { x: 26, y: 1.5, z: 0.6, w: 2, n: 3 }, { x: 48.5, y: 3.1, z: -0.6, w: 3, n: 4 },
+      { x: 80.5, y: 0, z: 1.8, w: 3, n: 4 }, { x: 160, y: 0, z: 1.5, w: 3, n: 4 }, { x: 188.2, y: 0, z: -19.5, w: 3, n: 7 },
+    ]);
     // subtle character fill light so the boy reads in deep shade
     this.charLight = new THREE.PointLight(0xffd2a0, 1.2, 4.5, 1.5);
     this.scene.add(this.charLight);
@@ -166,7 +174,11 @@ export class Game {
     }
     // player events -> sound / feedback
     for (const [name, data] of pl.events) {
-      if (name === 'land') { this.sfx('land', pl.x, data); this.anim.land(Math.min(1, data.speed / 11) * (data.hard ? 1.3 : 0.8)); if (data.hard) this.camRig.addShake(0.35); }
+      if (name === 'land') {
+        this.sfx('land', pl.x, data); this.anim.land(Math.min(1, data.speed / 11) * (data.hard ? 1.3 : 0.8));
+        if (data.hard) this.camRig.addShake(0.35);
+        if (data.speed > 5) this.dust.emit(new THREE.Vector3(pl.x, pl.y, pl.z || 0), { count: data.hard ? 12 : 6, spread: data.hard ? 1.2 : 0.7, size: data.hard ? 0.7 : 0.45, alpha: 0.3 });
+      }
       else if (name === 'death') this.onDeath(data);
       else if (name === 'crateMove') { this._crateMoving = 0.1; }
       else this.sfx(name, pl.x, data);
@@ -181,7 +193,7 @@ export class Game {
   beginPlay() {
     this.mode = 'play';
     this.audio.start();
-    this.ui.showHint(this.input.lastDevice, 9);
+    this.ui.showHint(this.input.lastDevice, 9, this.input.keyLabels);
     this.titleFade = 1;
     this.camRig.clearOverride(2.8);
     this.stats.t0 = this.time;
@@ -189,7 +201,7 @@ export class Game {
 
   setPaused(p) {
     this.paused = p;
-    this.ui.showPause(p, this.input.lastDevice, this.world.rs.tier, this.audio.muted);
+    this.ui.showPause(p, this.input.lastDevice, this.world.rs.tier, this.audio.muted, this.input.keyLabels);
     if (this.audio.ctx) { if (p) this.audio.ctx.suspend(); else this.audio.ctx.resume(); }
   }
 
@@ -219,6 +231,7 @@ export class Game {
   }
 
   restartLevel() {
+    this.flock && this.flock.reset();
     G.uFogParams.value.x = LOOK.fogDensity;
     this.world.rs.post.params.contrast = LOOK.post.contrast; this.world.rs.post.params.saturation = LOOK.post.saturation;
     if (this.sunFrom) { LOOK.sunDir.copy(this.sunFrom); this.world.light.sunDir.copy(this.sunFrom); this.world.sky.uniforms.uSunDir.value.copy(this.sunFrom); this.world.light.sun.color.set(LOOK.sunColor); this.sunFrom = null; }
@@ -370,6 +383,8 @@ export class Game {
       }
       this.charLight.position.set(x + 0.6, this._vy + 1.5, z + 1.6);
       this.lightPool.update(this.camRig.look, this.time, dt);
+      this.dust.update(dt);
+      this.flock.update(dt, x, this._vy, Math.abs(pl.body.vx) + (pl.state === 'air' ? 2 : 0), (bx) => this.sfx('wings', bx));
       // camera
       const ppos = new THREE.Vector3(x, this._vy, z);
       if (this.mode === 'intro' && !this.camRig.override) this.introCamera();
