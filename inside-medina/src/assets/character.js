@@ -242,3 +242,5 @@ export const GUARD = {
 export function createCharacter(spec, mats) {
   return new Rig(spec, mats);
 }
+// Note: character GLB overrides (boy / guard) must be rigged with the joint names
+// listed in docs/ASTRA_ASSET_BRIEF.md; the procedural animator drives those joints.

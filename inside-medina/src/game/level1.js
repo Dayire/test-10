@@ -3,6 +3,7 @@ import { Batcher, boxMM, worldUV, shadeByHeight, setColor, mat4, rng, extrude } 
 import { building, wallWithOpenings, archFrame, arcade, dome, minaret, cornice, merlons, zellige, door, archOutline } from '../assets/architecture.js';
 import { barrel, pot, rugRoll, hangingRug, sack, basket, cart, awning, drape, lanternMesh, bracket, laundry, wire, eave, stairs, stool, pole, souqCanopy } from '../assets/props.js';
 import { ivyCurtain, ivyPatch, leafClump, grassTufts } from '../assets/foliage.js';
+import { dressFacade } from '../assets/dressing.js';
 import { Crate, Plate, Lever, Searchlight, Guard, Trigger } from './entities.js';
 import { Drawbridge, RopeLadder } from './bridge.js';
 
@@ -13,7 +14,7 @@ export function buildLevel(game) {
   const K = batch.kit();
   const phys = game.phys;
   const L = {
-    checkpoints: [], cameraKeys: [], triggers: [], lanterns: [], shaftSpots: [], dustRegions: [], covers: [],
+    checkpoints: [], cameraKeys: [], triggers: [], lanterns: [], shaftSpots: [], dustRegions: [], covers: [], lightSources: [],
     finale: null,
   };
   const r = rng(42);
@@ -48,12 +49,7 @@ export function buildLevel(game) {
     m.position.copy(p).add(new THREE.Vector3(0, -0.46 * s, 0));
     game.scene.add(m);
     const glow = { mesh: m, light: null, phase: r() * 10 };
-    if (light) {
-      const pl = new THREE.PointLight(0xffa550, intensity, 6, 1.8);
-      pl.position.copy(m.position).add(new THREE.Vector3(0, 0.18 * s, 0));
-      game.scene.add(pl);
-      glow.light = pl;
-    }
+    if (light) L.lightSources.push({ pos: m.position.clone().add(new THREE.Vector3(0, 0.18 * s, 0.15)), intensity, phase: glow.phase });
     L.lanterns.push(glow);
     return m;
   };
@@ -63,22 +59,37 @@ export function buildLevel(game) {
   const facades = (list, z = FZ) => {
     for (const f of list) {
       const [x0, x1, h, style, o = {}] = f;
-      building(K, { x0, x1, z, y0: o.y0 ?? 0, height: h, style, seed: Math.round(x0 * 7 + 3), depth: o.depth ?? 6, ...o });
+      const y0 = o.y0 ?? 0;
+      const b = building(K, { x0, x1, z, y0, height: h, style, seed: Math.round(x0 * 7 + 3), depth: o.depth ?? 6, ...o });
+      if (o.dress !== false && h > 2.5) dressFacade(K, { x0, x1, z, y0, top: b.top, openings: b.openings, seed: Math.round(x0 * 3 + 1), floors: Math.max(1, Math.round(h / 3.4)) });
     }
   };
   const farBuilding = (x0, x1, z, h, style, o = {}) => {
     const mats = { blue: 'plasterBlue', peach: 'plasterPeach', cream: 'plasterCream', ochre: 'plasterOchre', white: 'plasterWhite', stone: 'sandstone' };
     const m = mats[style] || 'plasterCream';
     const d = o.depth ?? 7;
-    vbox(x0, 0, z - d, x1, h, z, m, { base: 0, grime: 3, grimeAmt: 0.25 });
-    if (o.parapet !== false) merlons(K, { x0: x0 + 0.1, x1: x1 - 0.1, y: h, z: z + 0.01, h: 0.5, mat: 'plasterCream' });
     const rr = rng(Math.round(x0 * 13 + z));
+    const tint = new THREE.Color().setHSL(0.08 + rr() * 0.04, 0.15, 0.82 + rr() * 0.16);
+    const g = boxMM(x0, 0, z - d, x1, h, z, {});
+    shadeByHeight(g, { base: 0, grime: 3, grimeAmt: 0.25, tint });
+    K.add(g, m, null, { cast: o.cast !== false });
+    // setback upper storey
+    if (rr() < 0.35 && x1 - x0 > 5) {
+      const w = (x1 - x0) * (0.35 + rr() * 0.3), sx = x0 + rr() * (x1 - x0 - w);
+      const u = boxMM(sx, h, z - d + 1, sx + w, h + 2.6 + rr() * 1.5, z - 1.2, {}); shadeByHeight(u, { base: h, grime: 0.5, grimeAmt: 0.1, tint }); K.add(u, m, null, { cast: o.cast !== false });
+    }
+    // rooftop clutter: stair house, water tank, laundry
+    if (rr() < 0.5) { const cx = x0 + 1 + rr() * (x1 - x0 - 2); K.add(boxMM(cx - 0.7, h, z - 3.5, cx + 0.7, h + 2.1, z - 2), m, null, { cast: false }); }
+    if (rr() < 0.3) { const cx = x0 + 1 + rr() * (x1 - x0 - 2); const t = new THREE.CylinderGeometry(0.5, 0.5, 1.1, 12); t.translate(cx, h + 0.75, z - 4.5); K.add(worldUV(t), 'iron', null, { cast: false }); }
+    if (o.parapet !== false) merlons(K, { x0: x0 + 0.1, x1: x1 - 0.1, y: h, z: z + 0.01, h: 0.5, mat: 'plasterCream' });
     const n = Math.floor((x1 - x0) / 2.2);
     for (let f = 1; f < h / 3.2; f++) for (let i = 0; i < n; i++) {
-      if (rr() < 0.4) continue;
+      if (rr() < 0.45) continue;
       const cx = x0 + (i + 0.5) * ((x1 - x0) / n), sy = f * 3.2 - 1.9;
-      const g = boxMM(cx - 0.3, sy, z - 0.02, cx + 0.3, sy + 1.2, z + 0.02); setColor(g, 0xffffff);
-      K.add(g, 'darkInterior', null, { cast: false });
+      const pts = archOutline(rr() < 0.5 ? 'pointed' : 'round', 0.62, 0.8, 0.4);
+      const sh = new THREE.Shape(); sh.moveTo(-0.31, 0); pts.forEach((v) => sh.lineTo(v.x, v.y)); sh.lineTo(0.31, 0);
+      const wg = new THREE.ShapeGeometry(sh, 6); wg.translate(cx, sy, z + 0.02); setColor(wg, 0xffffff);
+      K.add(worldUV(wg), 'darkInterior', null, { cast: false });
     }
   };
 
@@ -88,8 +99,8 @@ export function buildLevel(game) {
   // ravine walls + floor (lethal fall)
   solid(136.8, -10, 140.3, -9, { ledges: false });
   solid(128, -10, 136.8, -2.9, { ledges: false }); solid(140.3, -10, 150, -2.9, { ledges: false });
-  vbox(136.4, -9.6, FZ - 6, 137.0, 0, 3, 'sandstone', { base: -9, grime: 5, grimeAmt: 0.5 });
-  vbox(140.1, -9.6, FZ - 6, 140.7, 0, 3, 'sandstone', { base: -9, grime: 5, grimeAmt: 0.5 });
+  vbox(136.4, -9.6, FZ - 6, 137.0, 0, 3, 'sandstone', { base: -9, grime: 8, grimeAmt: 0.85 });
+  vbox(140.1, -9.6, FZ - 6, 140.7, 0, 3, 'sandstone', { base: -9, grime: 8, grimeAmt: 0.85 });
   vbox(136.8, -10, FZ - 6, 140.3, -9, 3, 'sand', { base: -10 });
   solid(-16, 0, -3.2, 12, { ledges: false }); // invisible start boundary
   solid(190.6, 0, 205, 14, { ledges: false }); // end boundary (right of the hero alley)
@@ -191,7 +202,6 @@ export function buildLevel(game) {
   awning(K, { x0: 67.2, x1: 70.2, z0: FZ + 0.02, z1: 0.9, y0: 2.05, y1: 1.52, mat: 'fabricRed', sag: 0.1 });
   // foreground
   barrel(K, 34.8, 0, 6.0); rugRoll(K, 33.6, 0, 5.6, { seed: 22, len: 2.3, r: 0.2 });
-  eave(K, { x0: 50, x1: 60, y: 8.6, z: 4.4, depth: 1.3 });
   pot(K, 57, 0, 5.4, { kind: 'tall', s: 1.3 });
   shaft(57.1, 0, 0.0, { w: 1.6, len: 12, intensity: 0.14 });
   cp(57.0, 54.8, 3.1, 1);
@@ -235,8 +245,11 @@ export function buildLevel(game) {
   for (const x of [74.2, 96.3, 110.6]) lantern(x, 3.0, -4.0, { light: true, intensity: 1.6 });
   grassTufts(K, { x0: 70, x1: 112, z0: -1.5, z1: 6, n: 70, seed: 9 });
   // foreground pillars of the near side of the courtyard (silhouettes)
-  for (const x of [79, 103]) { vbox(x - 0.5, 0, 6.2, x + 0.5, 9.5, 7.0, 'plasterPeach', { base: 0 }); }
-  eave(K, { x0: 74, x1: 110, y: 9.0, z: 5.2, depth: 1.2 });
+  // velarium: sail strips over the front half of the courtyard (shade + back-lit glow)
+  for (let i = 0; i < 6; i++) {
+    const x0 = 72.5 + i * 6.6, x1 = x0 + 5.6;
+    drape(K, new THREE.Vector3((x0 + x1) / 2, 8.6, -3.2), new THREE.Vector3((x0 + x1) / 2 + 0.4, 9.1, 7.5), { width: 5.4, sag: 0.9, mat: i % 2 ? 'fabricCream' : 'fabricTan', twist: 0.05 });
+  }
   // right wall + rope ladder + lever
   block(113.5, 118, 0, 4.6, { z0: FZ, z1: 1.3, mat: 'plasterBlue', coping: 'limestone' });
   const ladderVine = { x0: 112.7, x1: 113.5, y0: 0, y1: 4.6, exit: { x: 114.1, y: 4.6 }, enabled: false };
@@ -393,12 +406,15 @@ function rubblePile(K, x0, x1, gapY, r) {
 
 function skyline(K, farBuilding, r) {
   const styles = ['cream', 'peach', 'ochre', 'white', 'blue', 'cream', 'peach', 'stone'];
-  // row 2
-  for (let x = -40; x < 240;) { const w = 5 + r() * 7; if (x + w > 66 && x < 118) { x = 118; continue; } if (x + w > 176 && x < 203) { x = 203; continue; } farBuilding(x, x + w, -12 - r() * 6, 7 + r() * 6, styles[Math.floor(r() * styles.length)], { depth: 6 }); x += w + (r() < 0.15 ? 2 + r() * 3 : 0); }
+  // row 2 (just behind the street facades)
+  for (let x = -40; x < 240;) { const w = 4 + r() * 6; if (x + w > 66 && x < 118) { x = 118; continue; } if (x + w > 176 && x < 203) { x = 203; continue; } farBuilding(x, x + w, -12 - r() * 5, 6 + r() * 5, styles[Math.floor(r() * styles.length)], { depth: 6 }); x += w + (r() < 0.25 ? 1.5 + r() * 3 : 0.2); }
   // row 3
-  for (let x = -60; x < 260;) { const w = 7 + r() * 10; if (x + w > 174 && x < 205) { x = 205; continue; } farBuilding(x, x + w, -24 - r() * 12, 13 + r() * 10, styles[Math.floor(r() * styles.length)], { depth: 8 }); x += w + r() * 2; }
+  for (let x = -60; x < 260;) { const w = 5 + r() * 8; if (x + w > 174 && x < 205) { x = 205; continue; } farBuilding(x, x + w, -24 - r() * 12, 7 + r() * 7, styles[Math.floor(r() * styles.length)], { depth: 8, cast: false }); x += w + r() * 3; }
   // row 4 (hazy far city)
-  for (let x = -100; x < 320;) { const w = 10 + r() * 16; farBuilding(x, x + w, -55 - r() * 40, 14 + r() * 16, styles[Math.floor(r() * styles.length)], { depth: 10, parapet: r() < 0.5 }); x += w + r() * 4; }
+  for (let x = -100; x < 320;) { const w = 8 + r() * 14; farBuilding(x, x + w, -55 - r() * 40, 9 + r() * 12, styles[Math.floor(r() * styles.length)], { depth: 10, parapet: r() < 0.5, cast: false }); x += w + r() * 4; }
+  // cypress and far domes punctuating the skyline
+  for (let i = 0; i < 26; i++) { const x = -30 + i * 10 + r() * 6; if ((x > 64 && x < 120) || (x > 174 && x < 205)) continue; cypress(K, x, -20 - r() * 14, 7 + r() * 6); }
+  for (const [dx, dz, dr] of [[12, -60, 4], [88, -70, 5], [118, -52, 3.5], [212, -58, 4.5], [-22, -66, 4]]) dome(K, { x: dx, y: 9, z: dz, r: dr, drumH: 2.5 });
 }
 
 // ---------------------------------------------------------------------------

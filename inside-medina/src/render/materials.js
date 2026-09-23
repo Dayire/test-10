@@ -79,6 +79,7 @@ export const MATERIAL_DEFS = {
   grass: { surf: 'grass', tile: 1, side: DS, alphaTest: 0.4, sway: 1, translucency: 0.8, translucencyColor: 0xfff0a0 },
   lattice: { surf: 'lattice', tile: 1.0, side: DS, alphaTest: 0.5 },
   cypress: { surf: 'sand', tile: 2, color: 0x33452a, rough: 0.95, envInt: 0.4, translucency: 0.3, translucencyColor: 0x80a060 },
+  stain: { surf: null, color: 0x3a2c22, rough: 1, transparent: true, opacity: 0.35, envInt: 0 },
   glassGlow: { surf: null, color: 0xffc27a, rough: 0.3, emissive: 0xffa550, emissiveIntensity: 3.0, vertexColors: false },
   darkInterior: { surf: null, color: 0x140d09, rough: 1, vertexColors: false, envInt: 0 },
   ropeMat: { surf: 'fabricCream', tile: 0.3, color: 0xb8a58a },

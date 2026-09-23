@@ -9,6 +9,7 @@ import { G } from '../render/atmosphere.js';
 import { LOOK } from '../render/look.js';
 import { Shafts } from '../render/shafts.js';
 import { updateAtmosphere } from '../render/world.js';
+import { LightPool } from '../render/lightpool.js';
 
 const STEP = 1 / 120;
 const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
@@ -56,6 +57,9 @@ export class Game {
     this.shafts = new Shafts(this.scene, LOOK.sunDir, G);
     for (const s of L.shaftSpots) this.shafts.add(s.p, s.o);
     this.shafts.addDust(L.dustRegions, 1400);
+    // lantern lights: fixed pool reassigned to the nearest lanterns (no shader recompiles)
+    this.lightPool = new LightPool(this.scene, 4);
+    for (const s of L.lightSources) this.lightPool.add(s.pos, s.intensity, s.phase);
     // subtle character fill light so the boy reads in deep shade
     this.charLight = new THREE.PointLight(0xffd2a0, 1.2, 4.5, 1.5);
     this.scene.add(this.charLight);
@@ -365,6 +369,7 @@ export class Game {
         l.mesh.rotation.z = Math.sin(this.time * 0.8 + l.phase) * 0.03;
       }
       this.charLight.position.set(x + 0.6, this._vy + 1.5, z + 1.6);
+      this.lightPool.update(this.camRig.look, this.time, dt);
       // camera
       const ppos = new THREE.Vector3(x, this._vy, z);
       if (this.mode === 'intro' && !this.camRig.override) this.introCamera();

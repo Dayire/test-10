@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { worldUV, shadeByHeight, setColor, extrude, lathe, pointedArchPoints, mat4, boxMM, rng } from './geom.js';
+import { Overrides } from './library.js';
 
 // ---------------------------------------------------------------------------
 // Arch outlines (points from left springing, over the crown, to right springing)
@@ -326,6 +327,7 @@ export function arcade(K, o) {
 // Dome with drum, glazed onion cap and golden finial
 // ---------------------------------------------------------------------------
 export function dome(K, { x, y, z, r = 5, drumH = 3, onion = 0.25, windows = 8 }) {
+  if (Overrides.has('dome')) return Overrides.place(K, 'dome', mat4(x, y, z, 0, 0, 0, r / 5));
   // drum
   const drumG = new THREE.CylinderGeometry(r * 1.02, r * 1.05, drumH, 40, 1, true);
   drumG.translate(x, y + drumH / 2, z);
@@ -377,6 +379,7 @@ export function dome(K, { x, y, z, r = 5, drumH = 3, onion = 0.25, windows = 8 }
 }
 
 export function finial(K, { x, y, z, s = 1 }) {
+  if (Overrides.has('finial')) return Overrides.place(K, 'finial', mat4(x, y, z, 0, 0, 0, s));
   const p = [[0.001, 0], [0.12, 0], [0.12, 0.3], [0.06, 0.35], [0.06, 0.5], [0.22, 0.62], [0.24, 0.72], [0.2, 0.82], [0.05, 0.9], [0.05, 1.0], [0.16, 1.1], [0.17, 1.2], [0.13, 1.28], [0.04, 1.34], [0.04, 1.45], [0.1, 1.52], [0.1, 1.6], [0.03, 1.66], [0.01, 2.1], [0.001, 2.2]];
   const g = lathe(p.map(([a, b]) => new THREE.Vector2(a * s, b * s)), 20);
   g.translate(x, y, z);

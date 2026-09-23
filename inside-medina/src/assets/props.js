@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { worldUV, shadeByHeight, setColor, setSway, extrude, lathe, mat4, boxMM, box, catenary, tube, rng } from './geom.js';
+import { Overrides } from './library.js';
 
 function latheUV(g, r, swap = false) {
   const pos = g.attributes.position, uv = g.attributes.uv;
@@ -16,6 +17,7 @@ function prep(g) { if (!g.attributes.color) setColor(g, 0xffffff); return g; }
 
 // ---------------------------------------------------------------- crate
 export function crateMesh(mats, size = 1) {
+  if (Overrides.has('crate')) { const o = Overrides.instance('crate'); o.scale.multiplyScalar(size); return o; }
   const s = size, t = 0.085 * s;
   const planks = [], frame = [];
   // side panels (slightly inset)
@@ -51,6 +53,7 @@ export function crateMesh(mats, size = 1) {
 
 // ---------------------------------------------------------------- barrel
 export function barrel(K, x, y, z, { r = 0.3, h = 0.86, rot = 0 } = {}) {
+  if (Overrides.has('barrel')) return Overrides.place(K, 'barrel', mat4(x, y, z, 0, rot, 0, r / 0.3, h / 0.86, r / 0.3));
   const prof = [];
   for (let i = 0; i <= 12; i++) { const t = i / 12; prof.push(new THREE.Vector2(r * (0.86 + 0.14 * Math.sin(t * Math.PI)), t * h)); }
   const g = lathe(prof, 28);
@@ -83,6 +86,7 @@ const POTS = {
   bowl: [[0.001, 0], [0.08, 0], [0.16, 0.06], [0.2, 0.14], [0.19, 0.15], [0.001, 0.08]],
 };
 export function pot(K, x, y, z, { kind = 'jar', s = 1, rot = 0, mat = 'terracotta', lean = 0 } = {}) {
+  if (Overrides.has('pot_' + kind)) return Overrides.place(K, 'pot_' + kind, mat4(x, y, z, lean, rot, 0, s));
   const g = lathe(POTS[kind].map(([a, b]) => new THREE.Vector2(a * s, b * s)), 24);
   latheUV(g, 0.2 * s);
   shadeByHeight(g, { base: 0, grime: 0.15 * s, grimeAmt: 0.25 });
@@ -91,6 +95,7 @@ export function pot(K, x, y, z, { kind = 'jar', s = 1, rot = 0, mat = 'terracott
 
 // ---------------------------------------------------------------- rugs
 export function rugRoll(K, x, y, z, { r = 0.16, len = 1.7, upright = true, rot = 0, lean = 0.12, seed = 1 } = {}) {
+  if (Overrides.has('rug_roll')) return Overrides.place(K, 'rug_roll', upright ? mat4(x, y, z, lean, rot, lean * 0.5, r / 0.16, len / 1.7, r / 0.16) : mat4(x, y + r, z, 0, rot, Math.PI / 2, r / 0.16, len / 1.7, r / 0.16));
   const g = new THREE.CylinderGeometry(r, r, len, 20, 1, true);
   const uv = g.attributes.uv;
   const off = rng(seed)();
@@ -123,6 +128,7 @@ export function hangingRug(K, x, y, z, { w = 1.6, h = 2.2, rot = 0 } = {}) {
 }
 
 export function sack(K, x, y, z, { s = 1, rot = 0, mat = 'fabricTan' } = {}) {
+  if (Overrides.has('sack')) return Overrides.place(K, 'sack', mat4(x, y, z, 0, rot, 0, s));
   // burlap sack: slumped body + gathered neck + tie
   const g = new THREE.SphereGeometry(0.25, 18, 14);
   const pos = g.attributes.position;
@@ -162,6 +168,7 @@ export function souqCanopy(K, { x0, x1, zBack = -1.6, zFront = 8, y = 6.4, seed 
 }
 
 export function basket(K, x, y, z, { r = 0.26, h = 0.3, s = 1 } = {}) {
+  if (Overrides.has('basket')) return Overrides.place(K, 'basket', mat4(x, y, z, 0, 0, 0, s * r / 0.26));
   const g = lathe([[0.001, 0], [r * 0.8, 0], [r, h * 0.5], [r * 1.08, h], [r * 1.02, h * 1.02], [r * 0.94, h * 0.95], [0.001, h * 0.4]].map(([a, b]) => new THREE.Vector2(a, b)), 20);
   latheUV(g, r);
   shadeByHeight(g, { base: 0, grime: 0.1, grimeAmt: 0.2 });
@@ -170,6 +177,7 @@ export function basket(K, x, y, z, { r = 0.26, h = 0.3, s = 1 } = {}) {
 
 // ---------------------------------------------------------------- cart
 export function cart(K, x, y, z, { w = 2.4, rot = 0 } = {}) {
+  if (Overrides.has('cart')) return Overrides.place(K, 'cart', mat4(x, y, z, 0, rot, 0, w / 2.4, 1, 1));
   const m = mat4(x, y, z, 0, rot, 0);
   const bed = boxMM(-w / 2, 0.55, -0.6, w / 2, 0.66, 0.6, { round: 0.01 }); K.add(bed, 'wood', m);
   for (const sz of [-0.6, 0.6]) { const side = boxMM(-w / 2, 0.66, sz - 0.03, w / 2, 1.0, sz + 0.03); K.add(side, 'wood', m); }
@@ -265,6 +273,7 @@ export function drape(K, p0, p1, { width = 1.2, sag = 0.6, mat = 'fabricTeal', t
 
 // ---------------------------------------------------------------- lantern
 export function lanternMesh(mats, { s = 1, lit = true } = {}) {
+  if (Overrides.has('lantern')) { const o = Overrides.instance('lantern'); o.scale.multiplyScalar(s); o.userData.glowY = 0.18 * s; return o; }
   const grp = new THREE.Group();
   const brass = mats.get('brass');
   const cage = lathe([[0.001, 0.0], [0.03, 0], [0.05, 0.03], [0.09, 0.06], [0.1, 0.1], [0.08, 0.26], [0.1, 0.28], [0.07, 0.31], [0.04, 0.36], [0.02, 0.42], [0.001, 0.43]].map(([a, b]) => new THREE.Vector2(a * s, b * s)), 8);
@@ -379,6 +388,7 @@ export function stairs(K, { x0, x1, y0, y1, z0, z1, steps, mat = 'limestone', ra
 
 // ---------------------------------------------------------------- misc
 export function stool(K, x, y, z) {
+  if (Overrides.has('stool')) return Overrides.place(K, 'stool', mat4(x, y, z));
   const top = new THREE.CylinderGeometry(0.2, 0.2, 0.05, 14); top.translate(0, 0.45, 0); K.add(worldUV(top), 'wood', mat4(x, y, z));
   for (let i = 0; i < 3; i++) { const a = i * 2.09; const l = new THREE.CylinderGeometry(0.02, 0.025, 0.46, 6); l.rotateZ(0.12); l.rotateY(a); l.translate(Math.cos(a) * 0.14, 0.22, Math.sin(a) * 0.14); K.add(worldUV(l), 'woodDark', mat4(x, y, z)); }
 }

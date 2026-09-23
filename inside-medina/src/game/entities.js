@@ -307,18 +307,18 @@ export class Guard {
     this.light = new THREE.PointLight(0xffa860, 6, 7, 1.6);
     this.light.position.set(0, -0.35, 0);
     this.rig.j.wristR.add(this.light);
-    this.rig.root.visible = false; this.light.visible = false;
+    this.rig.root.visible = false; this.light.intensity = 0;
     this.body.enabled = false;
     this.steps = 0;
     this.anim.onFootstep = () => this.game.sfx('guardStep', this.body.x);
   }
   activate(x) {
     const b = this.body; b.x = x ?? this.home.x; b.y = this.home.y; b.vx = 0; b.vy = 0; this.prev.set(b.x, b.y);
-    this.state = 'chase'; this.t = 0; this.rig.root.visible = true; this.light.visible = true; b.enabled = true;
+    this.state = 'chase'; this.t = 0; this.rig.root.visible = true; b.enabled = true;
     this.anim.setState('ground', 0.01);
     this.game.sfx('shout', b.x);
   }
-  deactivate() { this.state = 'hidden'; this.rig.root.visible = false; this.light.visible = false; this.body.enabled = false; }
+  deactivate() { this.state = 'hidden'; this.rig.root.visible = false; this.light.intensity = 0; this.body.enabled = false; }
   prestep() { this.prev.set(this.body.x, this.body.y); }
   step(dt) {
     if (this.state === 'hidden') return;
@@ -358,7 +358,7 @@ export class Guard {
     }
   }
   render(alpha, dt) {
-    if (this.state === 'hidden') return;
+    if (this.state === 'hidden') { this.light.intensity = 0; return; }
     const b = this.body;
     const x = lerp(this.prev.x, b.x, alpha), y = lerp(this.prev.y, b.y, alpha);
     this.rig.root.position.set(x, y, 0.15);
