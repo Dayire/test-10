@@ -23,7 +23,7 @@ export class Drawbridge {
       const m = new THREE.Mesh(beam, game.mats.get('woodDark')); m.castShadow = true; grp.add(m);
     }
     grp.position.set(x1, y, 0);
-    game.scene.add(grp);
+    game.add(grp);
     this.mesh = grp;
     this.moving = false;
   }
@@ -64,7 +64,7 @@ export class RopeLadder {
     }
     grp.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     grp.position.set(x, y1, z);
-    game.scene.add(grp);
+    game.add(grp);
     this.mesh = grp;
     this.len = len;
   }

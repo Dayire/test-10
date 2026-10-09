@@ -19,6 +19,7 @@ export class Solid {
     this.kind = o.kind || 'solid';
     this.owner = o.owner || null;
     this.lethalTop = !!o.lethalTop;
+    this.light = o.light || 'block'; // 'block' | 'pass' (light tracing)
   }
 }
 
@@ -38,6 +39,9 @@ export class Body {
     this.fallStartY = y;
     this.lastImpact = 0;
     this.pushedThisStep = 0;
+    this.weight = o.weight; // plate load; undefined = by kind
+    this.crushes = !!o.crushes; // kills the boy when it falls on him
+    this.light = o.light || 'block';
   }
   get x0() { return this.x - this.w / 2; }
   get x1() { return this.x + this.w / 2; }
@@ -54,6 +58,9 @@ export class PhysicsWorld {
 
   addSolid(x0, y0, x1, y1, o) { const s = new Solid(Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1), o); this.solids.push(s); return s; }
   addBody(b) { this.bodies.push(b); return b; }
+  removeSolid(s) { const i = this.solids.indexOf(s); if (i >= 0) this.solids.splice(i, 1); }
+  removeBody(b) { const i = this.bodies.indexOf(b); if (i >= 0) this.bodies.splice(i, 1); }
+  clear(keep = []) { this.solids.length = 0; this.bodies = this.bodies.filter((b) => keep.includes(b)); }
 
   *colliders(ignore) {
     for (const s of this.solids) if (s.enabled && s !== ignore) yield s;

@@ -10,13 +10,13 @@ const lerp = (a, b, t) => a + (b - a) * t;
 
 // ------------------------------------------------------------------ crate
 export class Crate {
-  constructor(game, x, y, size = 1) {
-    this.game = game;
-    this.body = new Body(x, y, size, size, { kind: 'crate', mass: 3, surface: 'wood' });
+  constructor(game, x, y, size = 1, { id } = {}) {
+    this.game = game; if (id) this.id = id;
+    this.body = new Body(x, y, size, size, { kind: 'crate', mass: 3, surface: 'wood', crushes: true });
     game.phys.addBody(this.body);
     this.mesh = crateMesh(game.mats, size);
     this.mesh.position.set(x, y, 0);
-    game.scene.add(this.mesh);
+    game.add(this.mesh);
     this.prev = new THREE.Vector2(x, y);
     this.moveSnd = 0;
     this.tilt = 0;
@@ -49,10 +49,10 @@ export class Plate {
     this.mesh = new THREE.Mesh(gg, game.mats.get('limestone'));
     this.mesh.receiveShadow = true; this.mesh.castShadow = true;
     this.mesh.position.set((x0 + x1) / 2, y - 0.06, 0.2);
-    game.scene.add(this.mesh);
+    game.add(this.mesh);
     // brass rim so the plate reads as a mechanism
     const rim = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0 + 0.06, 0.03, 1.46), game.mats.get('brass'));
-    rim.position.set((x0 + x1) / 2, y - 0.09, 0.2); game.scene.add(rim);
+    rim.position.set((x0 + x1) / 2, y - 0.09, 0.2); game.add(rim);
     this.wasPressed = false;
   }
   step(dt) {
@@ -60,7 +60,7 @@ export class Plate {
     let load = 0;
     for (const b of this.game.phys.bodies) {
       if (!b.enabled) continue;
-      if (b.x1 > s.x0 + 0.05 && b.x0 < s.x1 - 0.05 && Math.abs(b.y - s.y1) < 0.05) load += b.kind === 'player' ? 0.35 : 1;
+      if (b.x1 > s.x0 + 0.05 && b.x0 < s.x1 - 0.05 && Math.abs(b.y - s.y1) < 0.05) load += b.weight ?? (b.kind === 'player' ? 0.35 : b.kind === 'guard' ? 0 : 1);
     }
     this.load = Math.min(1, load);
     const target = this.load > 0 ? 0.07 * Math.min(1, this.load + 0.4) : 0;
@@ -74,7 +74,8 @@ export class Plate {
     if (pressed !== this.wasPressed) { this.game.sfx(pressed ? 'plateDown' : 'plateUp', (s.x0 + s.x1) / 2); this.wasPressed = pressed; }
   }
   render() { this.mesh.position.y = this.y - this.depress - 0.06; }
-  getState() { return {}; } setState() {}
+  getState() { return { depress: this.depress }; }
+  setState(s) { this.depress = s.depress ?? 0; this.solid.y1 = this.y - this.depress; }
 }
 
 // ------------------------------------------------------------------ gate (portcullis)
@@ -97,8 +98,7 @@ export class Gate {
     for (let j = 0; j < 5; j++) { const b = new THREE.BoxGeometry(w - 0.1, 0.07, 0.07); b.translate(0, 0.15 + j * (h - w * 0.62) / 5, 0.04); bars.push(b); }
     for (const b of bars) { worldUV(b); setColor(b, 0xffffff); const m = new THREE.Mesh(b, game.mats.get('woodDark')); m.castShadow = true; grp.add(m); }
     grp.position.set(x, y0, z);
-    grp.rotation.y = Math.PI / 2 * 0; // faces the camera; the arch opening is in the wall plane behind
-    game.scene.add(grp);
+    game.add(grp);
     this.mesh = grp;
     this.moving = 0;
   }
@@ -141,21 +141,24 @@ export class Lever {
     grp.add(arm);
     grp.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (!o.geometry.attributes.color) setColor(o.geometry, 0xffffff); } });
     grp.position.set(x, y, 0.25);
-    game.scene.add(grp);
+    game.add(grp);
     this.arm = arm; this.mesh = grp;
+    this.playerState = 'lever';
   }
+  // interactable contract: near / grab / release / drive
+  near(px, py) { return !this.pulled && Math.abs(px - (this.x + this.dir * 0.55)) < 0.45 && Math.abs(py - this.y) < 0.3; }
   grab(player) { this.held = true; player.facing = -this.dir; this.game.sfx('grip', this.x); }
   release() { this.held = false; }
-  drive(pull, dt, player) {
+  drive(input, dt, player) {
     // pull > 0 means moving away from the lever
     if (this.pulled) return;
+    const pull = input.x * this.dir;
     if (pull > 0.3) this.t = Math.min(1, this.t + dt * 1.6);
     player.body.x = this.x + this.dir * (0.55 + this.t * 0.25);
     if (this.t >= 1 && !this.pulled) { this.pulled = true; this.game.sfx('lever', this.x); this.onPulled && this.onPulled(); }
   }
   step(dt) { if (!this.held && !this.pulled) this.t = Math.max(0, this.t - dt * 2); }
   render() { this.arm.rotation.z = 0.6 * this.dir * (1 - 2 * this.t); }
-  near(px, py) { return Math.abs(px - (this.x + this.dir * 0.55)) < 0.45 && Math.abs(py - this.y) < 0.3; }
   getState() { return { t: this.t, pulled: this.pulled }; }
   setState(s) { this.t = s.t; this.pulled = s.pulled; }
 }
@@ -197,7 +200,7 @@ export class Searchlight {
     spot.shadow.camera.near = 5; spot.shadow.camera.far = 80;
     spot.position.copy(this.origin);
     spot.target.position.copy(this.aim);
-    game.scene.add(spot, spot.target);
+    game.add(spot); game.add(spot.target);
     this.spot = spot;
     this.baseColor = new THREE.Color(color);
     // volumetric beam cone (additive)
@@ -210,7 +213,7 @@ export class Searchlight {
     });
     this.beam = new THREE.Mesh(cone, this.beamMat);
     this.beam.frustumCulled = false;
-    game.scene.add(this.beam);
+    game.add(this.beam);
     // lamp housing
     const lamp = new THREE.Group();
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 0.8, 16), game.mats.get('brass'));
@@ -218,7 +221,7 @@ export class Searchlight {
     const lens = new THREE.Mesh(new THREE.CircleGeometry(0.4, 20), new THREE.MeshBasicMaterial({ color: new THREE.Color(8, 7, 5) }));
     lens.position.z = 0.41; lamp.add(lens);
     lamp.position.copy(this.origin);
-    game.scene.add(lamp);
+    game.add(lamp);
     this.lamp = lamp;
     this._v = new THREE.Vector3(); this._d = new THREE.Vector3(); this._ray = new THREE.Ray();
     this.hum = 0;
@@ -264,7 +267,7 @@ export class Searchlight {
     }
   }
 
-  render(dt) {
+  render(alpha, dt) {
     const alarm = this.state === 'alarm' ? Math.min(1, this.alarmT * 3) : 0;
     this.spot.target.position.copy(this.aim);
     this.spot.target.updateMatrixWorld();
@@ -290,7 +293,7 @@ export class Guard {
     this.rig = createCharacter(GUARD, game.mats);
     this.anim = new Animator(this.rig, { scale: 1.5 });
     this.rig.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    game.scene.add(this.rig.root);
+    game.add(this.rig.root);
     this.body = new Body(x, y, 0.5, 1.8, { kind: 'guard', solid: false, pushable: false });
     this.body.kinematic = true;
     game.phys.addBody(this.body);
@@ -389,8 +392,14 @@ export class Guard {
     this.lantern.quaternion.copy(this._wq);
     this.lantern.rotateZ(Math.sin(this.t * 6.5) * 0.12 * Math.min(1, Math.abs(this.body.vx) / 2));
   }
-  getState() { return { state: this.state === 'hidden' ? 'hidden' : 'hidden' }; }
-  setState() { this.deactivate(); this.vault = null; }
+  getState() { const b = this.body; return { state: this.state, x: b.x, y: b.y, vx: b.vx, vy: b.vy, t: this.t, facing: this.facing, vault: this.vault && { ...this.vault } }; }
+  setState(s) {
+    this.vault = null;
+    if (!s || s.state === 'hidden') { this.deactivate(); return; }
+    const b = this.body; b.x = s.x; b.y = s.y; b.vx = s.vx; b.vy = s.vy; this.prev.set(b.x, b.y);
+    this.state = s.state; this.t = s.t; this.facing = s.facing; this.vault = s.vault ? { ...s.vault } : null;
+    this.rig.root.visible = true; b.enabled = true;
+  }
 }
 
 // ------------------------------------------------------------------ triggers

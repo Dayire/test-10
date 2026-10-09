@@ -33,12 +33,13 @@ export class Player {
     this.prev = new THREE.Vector2(); this.cur = new THREE.Vector2();
     this.renderPos = new THREE.Vector3();
     this.yaw = Math.PI / 2; this.yawVel = 0;
-    this.animState = 'ground';
     this.pushing = 0;
     this.crawling = false;
     this.hidden = false; // in cover (used by stealth)
     this.scripted = null; // cutscene driver
     this.events = [];
+    this.tune = { ...P }; // per-instance tuning (assists change coyote and buffer)
+    this.z = 0; this.fvx = 0;
   }
 
   emit(name, data) { this.events.push([name, data]); }
@@ -53,7 +54,7 @@ export class Player {
     this.fallStartY = y; this.coyote = 0; this.jumpBuf = 0;
     this.prev.set(x, y); this.cur.set(x, y);
     this.yaw = this.targetYaw(); this.yawVel = 0;
-    this.scripted = null;
+    this.scripted = null; this.z = 0; this.fvx = 0; this.pushing = 0;
     const g = this.phys.groundUnder(b, 0.05);
     this.grounded = !!g; this.groundObj = g;
     if (!g) this.state = 'air';
@@ -71,7 +72,7 @@ export class Player {
   step(dt, inp) {
     const b = this.body;
     this.prev.set(b.x, b.y);
-    this.jumpBuf = inp.jumpPressed || (inp.y > 0.6 && inp.upPressed && !this.nearVine()) ? P.buffer : Math.max(0, this.jumpBuf - dt);
+    this.jumpBuf = inp.jumpPressed || (inp.y > 0.6 && inp.upPressed && !this.nearVine()) ? this.tune.buffer : Math.max(0, this.jumpBuf - dt);
     if (this.scripted) { this.scripted(dt, this); this.cur.set(b.x, b.y); return; }
     switch (this.state) {
       case 'ground': this.stepGround(dt, inp); break;
@@ -80,6 +81,7 @@ export class Player {
       case 'climbUp': this.stepClimbUp(dt, inp); break;
       case 'climb': this.stepClimb(dt, inp); break;
       case 'lever': this.stepLever(dt, inp); break;
+      default: if (this.lever) this.stepLever(dt, inp); break;
       case 'dead': this.deathT += dt; this.stepDeadFall(dt); break;
     }
     this.cur.set(b.x, b.y);
@@ -100,7 +102,7 @@ export class Player {
     // ground check
     const g = this.phys.groundUnder(b, 0.04);
     if (!g) {
-      this.state = 'air'; this.coyote = P.coyote; this.fallStartY = b.y; this.grip = null; this.setCrawl(false);
+      this.state = 'air'; this.coyote = this.tune.coyote; this.fallStartY = b.y; this.grip = null; this.setCrawl(false);
       return this.stepAir(dt, inp);
     }
     if (g !== this.groundObj && g.vy !== undefined) { /* standing on a body */ }
@@ -115,10 +117,10 @@ export class Player {
       const v = this.nearVine();
       if (v) { this.enterVine(v); return; }
     }
-    // levers
+    // levers and other interactables
     if (inp.grab && !this.grip) {
-      const lv = this.game.leverNear(b.x, b.y, this.facing);
-      if (lv) { this.lever = lv; this.state = 'lever'; lv.grab(this); b.vx = 0; return; }
+      const it = this.game.interactNear(b.x, b.y, this.facing);
+      if (it) { this.lever = it; this.state = it.playerState || 'lever'; it.grab(this); b.vx = 0; return; }
     }
     // crawl
     const wantCrawl = inp.y < -0.5;
@@ -393,10 +395,11 @@ export class Player {
     if (this.jumpBuf > 0 && inp.x !== 0) { this.vine = null; b.vx = inp.x * 2.4; this.jump(); b.vy = P.jumpV * 0.7; }
   }
 
+  // held interactable (lever; later cranks and capstans)
   stepLever(dt, inp) {
     const lv = this.lever;
     if (!inp.grab) { lv.release(this); this.lever = null; this.state = 'ground'; return; }
-    lv.drive(inp.x * lv.dir, dt, this);
+    lv.drive(inp, dt, this);
   }
 
   stepDeadFall(dt) {
@@ -406,6 +409,37 @@ export class Player {
   }
 
   // ------------------------------------------------------------------ visuals
+  // animator state and cross-fade time for the current controller state
+  animState() {
+    let st = 'ground';
+    switch (this.state) {
+      case 'air': st = 'air'; break;
+      case 'hang': st = 'hang'; break;
+      case 'climbUp': st = 'climbUp'; break;
+      case 'climb': st = 'climb'; break;
+      case 'lever': st = 'lever'; break;
+      case 'dead': st = 'dead'; break;
+      default:
+        if (this.crawling) st = 'crawl';
+        else if (this.grip) st = (Math.sign(this.body.vx) === this.facing || Math.abs(this.body.vx) < 0.05) ? 'push' : 'pull';
+        else if (this.pushing > 0) st = 'push';
+    }
+    const fade = { ground: 0.12, air: 0.1, hang: 0.08, climbUp: 0.06, climb: 0.15, crawl: 0.2, push: 0.2, pull: 0.2, lever: 0.2, dead: 0.1 }[st] || 0.15;
+    return { st, fade };
+  }
+
+  // animator context for this frame
+  animContext(lookYaw = null) {
+    const b = this.body;
+    const speed = this.scripted ? b.vx : (this.state === 'climb' ? 0 : b.vx);
+    return {
+      speed: Math.abs(speed), vx: b.vx, vy: b.vy, grounded: this.state === 'ground', facing: this.facing,
+      climbT: this.climbT, hangSwing: this.state === 'hang' ? Math.sin(this.hangT * 3) * Math.exp(-this.hangT * 2) : 0,
+      climbSpeed: this.climbSpeed || 0, deathT: this.deathT, deathKind: this.deathKind, leverT: this.lever?.t ?? 0,
+      lookYaw,
+    };
+  }
+
   targetYaw() {
     const side = Math.PI / 2;
     switch (this.state) {

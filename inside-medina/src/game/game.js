@@ -50,10 +50,11 @@ export class Game {
     const L = this.level;
     progress(0.8, 'hanging the lanterns…');
     this.entities = [L.crateA, L.crateB, L.plate, L.bridge, L.lever, L.ladder, L.searchlight, L.guard].filter(Boolean);
-    this.crates = [L.crateA, L.crateB];
+    this.interactables = [L.lever];
     this.camRig.setKeys(L.cameraKeys);
-    this.phys.onImpact = (b, speed) => {
-      if (b.kind === 'crate') { this.sfx('crateImpact', b.x); if (speed > 6) this.camRig.addShake(0.5); this.dust && this.dust.emit(new THREE.Vector3(b.x, b.y, 0), { count: 14, spread: 1.4, up: 0.5, size: 0.9, alpha: 0.35 }); }
+    this.phys.onImpact = (b, speed, hit) => {
+      if (b.onImpact) b.onImpact(speed, hit);
+      else if (b.kind === 'crate') { this.sfx('crateImpact', b.x); if (speed > 6) this.camRig.addShake(0.5); this.dust && this.dust.emit(new THREE.Vector3(b.x, b.y, 0), { count: 14, spread: 1.4, up: 0.5, size: 0.9, alpha: 0.35 }); }
     };
     // light shafts & dust
     this.shafts = new Shafts(this.scene, LOOK.sunDir, G);
@@ -119,8 +120,9 @@ export class Game {
   }
 
   sfx(name, x, data) { this.audio.play(name, x, data); }
+  add(o) { (this.root || this.scene).add(o); return o; }
   safeZone(x) { return x > 182.95; }
-  leverNear(px, py, facing) { const lv = this.level.lever; return lv && !lv.pulled && lv.near(px, py) ? lv : null; }
+  interactNear(px, py, facing) { for (const it of this.interactables) if (it.near(px, py, facing)) return it; return null; }
 
   // ------------------------------------------------------------------ loop
   frame(dt) {
@@ -153,15 +155,15 @@ export class Game {
       grabPressed: first && this.input.grabPressed,
     };
     if (this.mode !== 'play' && this.mode !== 'finale') { pin.jump = false; pin.grab = false; }
-    for (const c of this.crates) c.prestep();
-    this.level.guard.prestep();
+    for (const e of this.entities) e.prestep?.();
     const pl = this.player;
     pl.step(dt, pin);
-    for (const e of this.entities) if (e.step) e.step(dt);
+    for (const e of this.entities) e.step?.(dt);
     this.phys.stepBodies(dt);
-    // crates falling onto the boy
-    for (const c of this.crates) {
-      const b = c.body, p = pl.body;
+    // bodies falling onto the boy
+    for (const b of this.phys.bodies) {
+      if (!b.crushes || !b.enabled) continue;
+      const p = pl.body;
       if (!pl.dead && b.vy < -3 && b.x1 > p.x0 + 0.05 && b.x0 < p.x1 - 0.05 && b.y < p.y + p.h && b.y > p.y + p.h - 0.4) { pl.die('crushed'); this.sfx('crateImpact', b.x); }
     }
     if (this.mode === 'play') {
@@ -332,20 +334,7 @@ export class Game {
       pl.yawVel = (pl.yawVel || 0) + a * dt;
       root.rotation.y += pl.yawVel * dt;
       // animation state
-      let st = 'ground';
-      switch (pl.state) {
-        case 'air': st = 'air'; break;
-        case 'hang': st = 'hang'; break;
-        case 'climbUp': st = 'climbUp'; break;
-        case 'climb': st = 'climb'; break;
-        case 'lever': st = 'lever'; break;
-        case 'dead': st = 'dead'; break;
-        default:
-          if (pl.crawling) st = 'crawl';
-          else if (pl.grip) st = (Math.sign(pl.body.vx) === pl.facing || Math.abs(pl.body.vx) < 0.05) ? 'push' : 'pull';
-          else if (pl.pushing > 0) st = 'push';
-      }
-      const fade = { ground: 0.12, air: 0.1, hang: 0.08, climbUp: 0.06, climb: 0.15, crawl: 0.2, push: 0.2, pull: 0.2, lever: 0.2, dead: 0.1 }[st] || 0.15;
+      let { st, fade } = pl.animState();
       if (this.debugPose) {
         const D = this.debugPose;
         st = { run: 'ground', walk: 'ground', idle: 'ground' }[D.pose] || D.pose;
@@ -356,14 +345,8 @@ export class Game {
         pl.climbT = D.phase; pl.deathT = 2; pl.deathKind = 'caught';
       }
       this.anim.setState(st, fade);
-      const speed = pl.scripted ? pl.body.vx : (pl.state === 'climb' ? 0 : pl.body.vx);
       if (this.debugPose) { this.anim.prevVx = pl.body.vx; }
-      this.anim.update(dt, {
-        speed: Math.abs(speed), vx: pl.body.vx, vy: pl.body.vy, grounded: pl.state === 'ground', facing: pl.facing,
-        climbT: pl.climbT, hangSwing: pl.state === 'hang' ? Math.sin(pl.hangT * 3) * Math.exp(-pl.hangT * 2) : 0,
-        climbSpeed: pl.climbSpeed || 0, deathT: pl.deathT, deathKind: pl.deathKind, leverT: this.level.lever.t,
-        lookYaw: this.lookTarget(pl),
-      });
+      this.anim.update(dt, pl.animContext(this.lookTarget(pl)));
       root.updateMatrixWorld(true);
       if (this.debugPose) { root.rotation.y = targetYaw + this.debugPose.yawOff; pl.yawVel = 0; if (this.debugPose.pose === 'climb') root.rotation.y = Math.PI + this.debugPose.yawOff; }
       if (this.rig.scarf) {
@@ -371,9 +354,7 @@ export class Game {
         this.rig.scarf.update(dt, wind);
       }
       // entities
-      for (const c of this.crates) c.render(alpha, dt);
-      for (const e of this.entities) if (e.render && !e.body) e.render(dt);
-      this.level.guard.render(alpha, dt);
+      for (const e of this.entities) e.render?.(alpha, dt);
       // lanterns flicker
       for (const l of this.level.lanterns) {
         const f = 0.85 + Math.sin(this.time * 9 + l.phase) * 0.08 + Math.sin(this.time * 23 + l.phase * 2) * 0.05;
