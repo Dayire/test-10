@@ -1,4 +1,5 @@
 // Usage: node tools/gallery.mjs <outdir> name[:yaw:pitch:dist:tag:targetY:dx] ...   (all stations when none given)
+// env: W, H, TIER, QS (extra query, e.g. QS='&procedural' to skip replacement models)
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 const [, , outdir = 'shots/gallery', ...req] = process.argv;
@@ -11,7 +12,7 @@ const logs = [];
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') logs.push(`[${m.type()}] ${m.text()}`); });
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 const t0 = Date.now();
-await page.goto(base + '?dev=assets&tier=' + (process.env.TIER || 'high'), { waitUntil: 'load' });
+await page.goto(base + '?dev=assets&tier=' + (process.env.TIER || 'high') + (process.env.QS || ''), { waitUntil: 'load' });
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000 });
 console.log(`ready in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 const all = await page.evaluate(() => window.__gallery.stations);

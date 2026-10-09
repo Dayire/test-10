@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { createWorld, updateAtmosphere } from '../render/world.js';
 import { Batcher, boxMM, shadeByHeight } from '../assets/geom.js';
-import { crateMesh, barrel, pot, rugRoll, hangingRug, sack, basket, cart, awning, lanternMesh, bracket, eave, stairs, stool } from '../assets/props.js';
+import { crateMesh, barrel, pot, rugRoll, hangingRug, sack, basket, cart, awning, drape, pole, lanternMesh, bracket, eave, stairs, stool } from '../assets/props.js';
+import { Overrides } from '../assets/library.js';
 import { wallWithOpenings, archFrame, zellige, arcade, dome, cornice, spandrels, archBead } from '../assets/architecture.js';
 import { ivyCurtain, ivyPatch, grassTufts } from '../assets/foliage.js';
 import { dressFacade } from '../assets/dressing.js';
@@ -11,12 +12,15 @@ import { Animator } from '../game/animator.js';
 // Asset sheet: every hand-built model on a strip of street, lit exactly like the
 // game (same sky, sun, fog and post chain). Drag to orbit, wheel to zoom,
 // arrows / list to jump between models. `?dev=assets&focus=lantern` or `#assets`.
+// Replacement models from public/assets/models load too (add `&procedural` to
+// see the hand-built versions instead); a station's label names any in use.
 const SPACING = 5;
 
-export function runGallery(canvas, { focus: focusName } = {}) {
+export async function runGallery(canvas, { focus: focusName } = {}) {
   const q = new URLSearchParams(location.search);
   const world = createWorld(canvas, { tier: q.get('tier') || 'high' });
   const { scene, mats, rs, light } = world;
+  if (!q.has('procedural')) await Overrides.load('./assets/models/', world.env, mats);
   const camera = new THREE.PerspectiveCamera(32, rs.cssW / rs.cssH, 0.05, 2000);
   rs.camera = camera;
   const K = new Batcher(mats, { chunk: 1000 });
@@ -28,7 +32,9 @@ export function runGallery(canvas, { focus: focusName } = {}) {
     const x = sx; sx += view.width || SPACING;
     const cx = x + (view.width || SPACING) / 2 - SPACING / 2;
     const tris0 = triCount(K), kids0 = scene.children.length;
+    Overrides.used.clear();
     build(x);
+    if (Overrides.used.size) label += ` · model: ${[...Overrides.used].join(', ')}`;
     let tris = triCount(K) - tris0;
     for (const o of scene.children.slice(kids0)) o.traverse((m) => { if (m.isMesh) tris += (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3; });
     stations.push({ name, label, x: cx, y: view.y ?? 0.6, z: view.z ?? 0, dist: view.dist ?? 3, yaw: view.yaw ?? 0.35, pitch: view.pitch ?? 0.12, tris: Math.round(tris) });
@@ -79,6 +85,11 @@ export function runGallery(canvas, { focus: focusName } = {}) {
     eave(K, { x0: x - 2.0, x1: x + 0.6, y: 3.4, z: -0.8, depth: 0.85, drop: 0.5, soffit: 'wood' });
     awning(K, { x0: x + 0.4, x1: x + 2.1, z0: -0.75, z1: 0.9, y0: 2.4, y1: 1.8, mat: 'fabricTan', sag: 0.14 });
   }, { y: 2.4, dist: 4.8, pitch: -0.12 });
+  station('sails', 'Courtyard shade sail and street drape', (x) => {
+    for (const px of [x - 5.35, x + 5.35]) pole(K, px, 0, 5.1, 0.6, 0.07);
+    drape(K, new THREE.Vector3(x - 5.35, 5.0, 0.6), new THREE.Vector3(x + 5.35, 5.5, 0.6), { width: 5.4, sag: 0.9, mat: 'fabricTan' });
+    drape(K, new THREE.Vector3(x - 4, 4.3, -2.5), new THREE.Vector3(x + 4, 3.9, -2.5), { width: 1.4, sag: 0.85, mat: 'fabricRed' });
+  }, { width: 13, y: 3.6, dist: 11, pitch: -0.2, yaw: 0.25 });
   station('arch', 'Pointed limestone arch with zellige', (x) => {
     const aw = 1.5, ahs = 1.9, ar = 1.0;
     wallWithOpenings(K, { x0: x - 2.2, x1: x + 2.2, y0: 0, y1: 4.2, z: -0.6, depth: 0.6, mat: 'plasterBlue', openings: [{ kind: 'pointed', cx: x, sill: 0, w: aw, hs: ahs, rise: ar, noInterior: false, recess: 1.2 }] });

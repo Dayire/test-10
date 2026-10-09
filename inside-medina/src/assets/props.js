@@ -231,6 +231,7 @@ export function rugRoll(K, x, y, z, { r = 0.16, len = 1.7, upright = true, rot =
 }
 
 export function hangingRug(K, x, y, z, { w = 1.6, h = 2.2, rot = 0 } = {}) {
+  if (Overrides.has('rug_hanging')) return Overrides.place(K, 'rug_hanging', mat4(x, y, z, 0, rot, 0, w / 1.6, h / 2.2, 1));
   const g = new THREE.PlaneGeometry(w, h, 12, 8);
   const pos = g.attributes.position;
   const zAt = (px, py) => Math.sin(px * 4.1) * 0.03 + Math.sin(py * 2.3 + px) * 0.02 * (0.5 - py / h);
@@ -254,7 +255,11 @@ export function hangingRug(K, x, y, z, { w = 1.6, h = 2.2, rot = 0 } = {}) {
 // grain sack resting on its side, used for stacks).
 const SACK_TIE = [[0.2, 0], [0.245, 0.06], [0.268, 0.18], [0.248, 0.3], [0.17, 0.39], [0.075, 0.445], [0.052, 0.475], [0.064, 0.5], [0.1, 0.55], [0.125, 0.57]];
 export function sack(K, x, y, z, { s = 1, rot = 0, mat = 'burlap', kind = 'tied', spice = 'spicePaprika', len = 0.8, hgt = 0.34, wid = 0.46 } = {}) {
-  if (Overrides.has('sack')) return Overrides.place(K, 'sack', mat4(x, y, z, 0, rot, 0, s));
+  const slot = Overrides.has('sack_' + kind) ? 'sack_' + kind : Overrides.has('sack') ? 'sack' : null;
+  if (slot) {
+    const k = slot === 'sack_lying' ? [len / 0.8, hgt / 0.34, wid / 0.46] : [1, 1, 1];
+    return Overrides.place(K, slot, mat4(x, y, z, 0, rot, 0, s * k[0], s * k[1], s * k[2]), { spice, burlap: mat });
+  }
   const m = mat4(x, y, z, 0, rot, 0, s);
   const rnd = rng(Math.floor(Math.abs(x * 97 + z * 53 + y * 11)) + 7);
   const ph = rnd() * 6;
@@ -395,6 +400,21 @@ export function cart(K, x, y, z, { w = 2.4, rot = 0 } = {}) {
 // ---------------------------------------------------------------- awning
 // cloth roof sloping from the wall (at z0, height y0) out to (z1, y1), width along x
 export function awning(K, { x0, x1, z0, z1, y0, y1, mat = 'fabricTan', sag = 0.12, valance = 0.28, poles = true, poleMat = 'woodDark', scallop = true }) {
+  const w = x1 - x0;
+  if (Overrides.has('awning')) {
+    const bays = Math.max(1, Math.round(w / 3.2)), bw = w / bays;
+    for (let i = 0; i < bays; i++) Overrides.place(K, 'awning', mat4(x0 + (i + 0.5) * bw, y0, z0, 0, 0, 0, bw / 2.8, Math.max(0.1, y0 - y1) / 0.55, (z1 - z0) / 1.8), { fabric: mat });
+  } else awningCloth(K, { x0, x1, z0, z1, y0, y1, mat, sag, valance, scallop });
+  if (poles) {
+    for (const px of [x0 + 0.05, x1 - 0.05]) {
+      const pl = new THREE.CylinderGeometry(0.03, 0.035, y1 + 0.05, 8); pl.translate(px, (y1 + 0.05) / 2, z1 - 0.02);
+      shadeByHeight(worldUV(pl), { base: 0, grime: 0.4, grimeAmt: 0.3 });
+      K.add(pl, poleMat);
+    }
+  }
+}
+
+function awningCloth(K, { x0, x1, z0, z1, y0, y1, mat, sag, valance, scallop }) {
   const nx = 16, nz = 8;
   const w = x1 - x0;
   const g = new THREE.PlaneGeometry(1, 1, nx, nz);
@@ -433,17 +453,18 @@ export function awning(K, { x0, x1, z0, z1, y0, y1, mat = 'fabricTan', sag = 0.1
     setColor(vg, 0xffffff);
     K.add(vg, mat);
   }
-  if (poles) {
-    for (const px of [x0 + 0.05, x1 - 0.05]) {
-      const pl = new THREE.CylinderGeometry(0.03, 0.035, y1 + 0.05, 8); pl.translate(px, (y1 + 0.05) / 2, z1 - 0.02);
-      shadeByHeight(worldUV(pl), { base: 0, grime: 0.4, grimeAmt: 0.3 });
-      K.add(pl, poleMat);
-    }
-  }
 }
 
 // a fabric strip hung between two points (drapes, canopies across alleys)
+const CLOTH_SLOTS = { drape: { w: 1.4, span: 8, sag: 0.85 }, sail: { w: 5.4, span: 10.7, sag: 0.9 } };
 export function drape(K, p0, p1, { width = 1.2, sag = 0.6, mat = 'fabricTeal', twist = 0 } = {}) {
+  const slot = width >= 3 ? 'sail' : 'drape';
+  if (Overrides.has(slot)) {
+    const c = CLOTH_SLOTS[slot], d = new THREE.Vector3().subVectors(p1, p0), span = Math.hypot(d.x, d.z);
+    const shape = new THREE.Matrix4().set(width / c.w, 0, 0, 0, 0, sag / c.sag, d.y / c.span, 0, 0, 0, span / c.span, 0, 0, 0, 0, 1);
+    const m = new THREE.Matrix4().makeRotationY(Math.atan2(d.x, d.z)).multiply(shape).setPosition(p0);
+    return Overrides.place(K, slot, m, { fabric: mat });
+  }
   const n = 24;
   const dir = new THREE.Vector3().subVectors(p1, p0);
   const len = dir.length();

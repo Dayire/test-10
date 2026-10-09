@@ -17,7 +17,7 @@ export async function boot(canvas, params) {
   if (P.noauto) world.rs.autoQuality = false;
   ui.progress(0.5, 'raising walls…');
   await nextFrame();
-  const nOverrides = await Overrides.load('./assets/models/', world.env);
+  const nOverrides = P.procedural !== undefined ? 0 : await Overrides.load('./assets/models/', world.env, world.mats);
   if (nOverrides) ui.progress(0.52, `${nOverrides} crafted assets loaded`);
   const input = new Input();
   const audio = new Audio();
