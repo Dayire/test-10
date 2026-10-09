@@ -1,0 +1,160 @@
+{
+  "recorded": "2026-10-09, pre-foundation tree (HEAD 0f7b31b), Chromium + SwiftShader, 4 CPUs, no GPU",
+  "bot": {
+    "url": "?autostart=1&tex=0.1&tier=low&noauto=1 at 480x270",
+    "runs": [
+      {
+        "ok": true,
+        "gameTime": 85.1,
+        "minGuardDist": 3.54,
+        "end": {
+          "x": 187.995,
+          "y": 0,
+          "z": -13.302,
+          "mode": "finale",
+          "cp": 6,
+          "deaths": 0
+        }
+      },
+      {
+        "ok": true,
+        "gameTime": 85.1,
+        "minGuardDist": 3.54,
+        "end": {
+          "x": 187.995,
+          "y": 0,
+          "z": -13.302,
+          "mode": "finale",
+          "cp": 6,
+          "deaths": 0
+        }
+      }
+    ],
+    "gameTime": 85.1,
+    "note": "end-state t differed by 0.01 s between runs (85.38 / 85.37) because rAF frames advanced the sim before the bot started; there was no ?hold"
+  },
+  "boot": {
+    "readyMs": {
+      "cold": 11730,
+      "warm": 9488
+    },
+    "progressValuesPainted": [
+      "5%",
+      "50%",
+      "97%"
+    ]
+  },
+  "info": {
+    "atSpawn_low_480x270": {
+      "calls": 238,
+      "tris": 674624,
+      "geos": 225,
+      "tex": 122,
+      "programs": 43
+    },
+    "lights": {
+      "DirectionalLight": 1,
+      "HemisphereLight": 1,
+      "SpotLight": 1,
+      "PointLight": 6,
+      "note": "4 pool + charLight + guard lantern"
+    },
+    "tour_high_960x540": {
+      "souk": {
+        "x": 5.5,
+        "y": 0,
+        "calls": 275,
+        "tris": 627849
+      },
+      "terrace": {
+        "x": 50,
+        "y": 3.1,
+        "calls": 263,
+        "tris": 742005
+      },
+      "courtyard": {
+        "x": 90,
+        "y": 0,
+        "calls": 252,
+        "tris": 814406
+      },
+      "balcony": {
+        "x": 127,
+        "y": 4.3,
+        "calls": 285,
+        "tris": 961336
+      },
+      "chase": {
+        "x": 160,
+        "y": 0,
+        "calls": 308,
+        "tris": 896516
+      },
+      "alley": {
+        "x": 186.4,
+        "y": 0,
+        "calls": 283,
+        "tris": 691316
+      }
+    }
+  },
+  "titleShot": {
+    "sunShadowTarget": [
+      188,
+      3.01,
+      -8.99
+    ],
+    "cameraLook": [
+      7,
+      6.8,
+      -10
+    ],
+    "note": "bug: shadow focus hard-coded to (188, 3, -9) under any camera override"
+  },
+  "screenshots": {
+    "dir": "docs/baselines/souk/ (tour and title saved as JPEG q90; look480 as PNG)",
+    "tour": "souk, terrace, courtyard, balcony, chase, alley: ?autostart=1&tex=0.5&tier=high&noauto=1 at 960x540, Math.random seeded (LCG 12345), __medina.photo(x, y, 1, 0.4) then 3 frames",
+    "look480": "x 20, y 1.5 at 480x270, same query and seed (LookDirector round-trip reference)",
+    "title": "?tex=0.5&tier=high&noauto=1 at 960x540 after 30 frames (intro shot)"
+  },
+  "negatives": {
+    "spotted by lamp": {
+      "died": true,
+      "kind": "shot",
+      "x": 108.091
+    },
+    "respawn after lamp": {
+      "x": 71.6,
+      "cp": 3,
+      "deaths": 1,
+      "crateA": [
+        41.5,
+        0
+      ]
+    },
+    "caught by guard": {
+      "died": true,
+      "kind": "caught",
+      "gx": 144.76,
+      "x": 145.456
+    },
+    "guard reset on respawn": {
+      "guard": "hidden",
+      "x": 141.5
+    },
+    "fall into ravine": {
+      "died": true,
+      "kind": "fall",
+      "y": -9
+    },
+    "plate with boy only": {
+      "plate": 0.35,
+      "bridge": 1.57
+    },
+    "crate crush": {
+      "died": true,
+      "kind": "crushed"
+    },
+    "note": "tools/negative.mjs printed these and exited 0 regardless (no assertions)"
+  }
+}
