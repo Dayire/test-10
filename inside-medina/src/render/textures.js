@@ -143,7 +143,7 @@ void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out flo
   ao = 1. - crack * .6 - (1. - paintA) * .08;
 }`;
 
-const SURFACES = {
+export const SURFACES = {
   plasterBlue: {
     size: 1024, normalStrength: 2.2,
     glsl: PLASTER('hex(112.,152.,182.)', 'hex(140.,176.,198.)', 'hex(184.,150.,112.)', { peel: '0.31' }),
@@ -610,11 +610,31 @@ void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out flo
 
 export const SURFACE_NAMES = Object.keys(SURFACES);
 
+// chapter-specific surfaces (same schema as SURFACES); existing names are kept
+export function registerSurfaces(defs) {
+  for (const [k, v] of Object.entries(defs)) if (!SURFACES[k]) { SURFACES[k] = v; SURFACE_NAMES.push(k); }
+}
+
 export function bakeAll(baker, names = SURFACE_NAMES, onProgress) {
   const out = {};
   names.forEach((n, i) => {
     out[n] = baker.bake({ name: n, ...SURFACES[n] });
     onProgress && onProgress((i + 1) / names.length, n);
   });
+  return out;
+}
+
+// yield to the browser so it can paint (rAF, with a timer fallback for hidden tabs)
+export const yieldFrame = () => new Promise((r) => { let done = false; const go = () => { if (!done) { done = true; setTimeout(r, 0); } }; requestAnimationFrame(go); setTimeout(go, 50); });
+
+// progressive bake: time-sliced, yielding so the loading bar really paints
+export async function bakeAsync(baker, names, onProgress, out = {}, slice = 40) {
+  let t0 = performance.now();
+  for (let i = 0; i < names.length; i++) {
+    const n = names[i];
+    if (!out[n]) out[n] = baker.bake({ name: n, ...SURFACES[n] });
+    onProgress && onProgress((i + 1) / names.length, n);
+    if (performance.now() - t0 > slice) { await yieldFrame(); t0 = performance.now(); }
+  }
   return out;
 }

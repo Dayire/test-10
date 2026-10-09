@@ -6,10 +6,10 @@ import { CameraRig } from './camera.js';
 import { buildLevel } from './level1.js';
 import { createCharacter, BOY } from '../assets/character.js';
 import { G } from '../render/atmosphere.js';
-import { LOOK } from '../render/look.js';
 import { Shafts } from '../render/shafts.js';
 import { updateAtmosphere } from '../render/world.js';
-import { LightPool } from '../render/lightpool.js';
+import { LightRig } from '../render/lightrig.js';
+import { LookDirector } from '../render/lookdirector.js';
 import { Dust, Flock } from '../render/fx.js';
 
 const STEP = 1 / 120;
@@ -34,6 +34,15 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(34, rs.cssW / rs.cssH, 0.1, 1500);
     rs.camera = this.camera;
     this.camRig = new CameraRig(this.camera);
+    // fixed light rig (sun, hemi, fill, pool, two spots) before anything compiles
+    this.lightRig = new LightRig(this.scene, this.world, { pool: this.params.pool ? +this.params.pool : 6, tier: rs.tier });
+    this.lightPool = this.lightRig.pool;
+    this.charLight = this.lightRig.charLight;
+    const tierCb = rs.onTierChange;
+    rs.onTierChange = (t, q) => { tierCb?.(t, q); this.lightRig.setTier(t); };
+    this.director = new LookDirector(this.world);
+    this.director.pool = this.lightPool;
+    this.director.apply('goldenHour');
     this.player = new Player(this);
     this.rig = createCharacter(BOY, this.mats);
     this.rig.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
@@ -57,11 +66,11 @@ export class Game {
       else if (b.kind === 'crate') { this.sfx('crateImpact', b.x); if (speed > 6) this.camRig.addShake(0.5); this.dust && this.dust.emit(new THREE.Vector3(b.x, b.y, 0), { count: 14, spread: 1.4, up: 0.5, size: 0.9, alpha: 0.35 }); }
     };
     // light shafts & dust
-    this.shafts = new Shafts(this.scene, LOOK.sunDir, G);
+    this.shafts = new Shafts(this.scene, this.director.sunDir, G);
     for (const s of L.shaftSpots) this.shafts.add(s.p, s.o);
     this.shafts.addDust(L.dustRegions, 1400);
+    this.director.shafts = this.shafts;
     // lantern lights: fixed pool reassigned to the nearest lanterns (no shader recompiles)
-    this.lightPool = new LightPool(this.scene, 4);
     for (const s of L.lightSources) this.lightPool.add(s.pos, s.intensity, s.phase);
     // dust puffs and pigeons
     this.dust = new Dust(this.scene, 64);
@@ -69,9 +78,6 @@ export class Game {
       { x: 4.5, y: 0, z: 1.6, w: 2.5, n: 5 }, { x: 26, y: 1.5, z: 0.6, w: 2, n: 3 }, { x: 48.5, y: 3.1, z: -0.6, w: 3, n: 4 },
       { x: 80.5, y: 0, z: 1.8, w: 3, n: 4 }, { x: 160, y: 0, z: 1.5, w: 3, n: 4 }, { x: 188.2, y: 0, z: -19.5, w: 3, n: 7 },
     ]);
-    // subtle character fill light so the boy reads in deep shade
-    this.charLight = new THREE.PointLight(0xffd2a0, 1.2, 4.5, 1.5);
-    this.scene.add(this.charLight);
     // lantern glow sprites
     this.glowTex = makeGlowTexture();
     for (const l of L.lanterns) {
@@ -234,13 +240,10 @@ export class Game {
 
   restartLevel() {
     this.flock && this.flock.reset();
-    G.uFogParams.value.x = LOOK.fogDensity;
-    this.world.rs.post.params.contrast = LOOK.post.contrast; this.world.rs.post.params.saturation = LOOK.post.saturation;
-    if (this.sunFrom) { LOOK.sunDir.copy(this.sunFrom); this.world.light.sunDir.copy(this.sunFrom); this.world.sky.uniforms.uSunDir.value.copy(this.sunFrom); this.world.light.sun.color.set(LOOK.sunColor); this.sunFrom = null; }
+    this.director.restore(); this.sunFrom = null;
     this.cpIndex = 0; this.cpSnap = this.initialSnap;
     this.respawn();
     this.finaleT = 0;
-    this.world.rs.post.params.letterbox = 0;
     this.camRig.clearOverride(0.01);
     this.ui.showEnd(false);
   }
@@ -285,18 +288,17 @@ export class Game {
   updateFinale(dt) {
     this.finaleT += dt;
     const F = this.level.finale;
-    if (!this.sunFrom) this.sunFrom = LOOK.sunDir.clone();
+    const D = this.director, B = D.base;
+    if (!this.sunFrom) this.sunFrom = B.sunDir.clone();
     const ks = smooth(this.finaleT / 7);
-    LOOK.sunDir.copy(this.sunFrom).lerp(F.sunDir, ks).normalize();
-    this.world.light.sunDir.copy(LOOK.sunDir);
-    this.world.sky.uniforms.uSunDir.value.copy(LOOK.sunDir);
-    this.world.light.sun.color.set(LOOK.sunColor).lerp(new THREE.Color('#ffb46e'), ks * 0.6);
-    G.uFogParams.value.x = LOOK.fogDensity * (1 - 0.45 * ks);
-    const P2 = this.world.rs.post.params;
-    P2.contrast = LOOK.post.contrast + 0.08 * ks; P2.saturation = LOOK.post.saturation + 0.1 * ks;
-    const P = this.world.rs.post.params;
     const k = smooth(this.finaleT / 4);
-    P.letterbox = 0.075 * k;
+    D.override({
+      sunDir: this.sunFrom.clone().lerp(F.sunDir, ks).normalize(),
+      sunColor: B.sunColor.clone().lerp(new THREE.Color('#ffb46e'), ks * 0.6),
+      fogDensity: B.fogDensity * (1 - 0.45 * ks),
+      contrast: B.contrast + 0.08 * ks, saturation: B.saturation + 0.1 * ks,
+      letterbox: 0.075 * k, rays: 1.6, bloom: 0.42,
+    });
     const pl = this.player;
     if (!this.finaleDone && pl.z < -13.2) {
       this.finaleDone = true; this.endT = 0;
@@ -358,8 +360,7 @@ export class Game {
       // lanterns flicker
       for (const l of this.level.lanterns) {
         const f = 0.85 + Math.sin(this.time * 9 + l.phase) * 0.08 + Math.sin(this.time * 23 + l.phase * 2) * 0.05;
-        if (l.light) l.light.intensity = (l.baseI ?? (l.baseI = l.light.intensity)) * f;
-        if (l.sprite) l.sprite.material.opacity = 0.5 * f;
+        if (l.sprite) l.sprite.material.opacity = 0.5 * f * this.director.glowMul;
         l.mesh.rotation.z = Math.sin(this.time * 0.8 + l.phase) * 0.03;
       }
       this.charLight.position.set(x + 0.6, this._vy + 1.5, z + 1.6);
@@ -379,9 +380,10 @@ export class Game {
       P.fade = smooth(this.fade); P.fadeColor.copy(this.fadeColor);
       // title
       if (this.titleFade !== undefined) { this.titleFade = Math.max(0, this.titleFade - dt * 0.35); this.ui.titleOpacity(this.titleFade); if (this.titleFade <= 0) { this.ui.showTitle(false); this.titleFade = undefined; } }
-      // god rays: strong in the finale
-      P.rays = this.mode === 'finale' || this.mode === 'end' ? 1.6 : 0.35;
-      P.bloom = this.mode === 'finale' || this.mode === 'end' ? 0.42 : 0.28;
+      // view half-width at the play plane (lamps acquire rig spots near the view)
+      this.viewHalfW = Math.abs(this.camera.position.z) * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) * this.camera.aspect;
+      // time of day (writes sun, sky, fog, post and the lantern pool)
+      this.director.update(x, dt);
       // shadow frustum follows the view
       const focus = new THREE.Vector3(this.camRig.look.x, this.camRig.look.y, this.mode === 'finale' ? -8 : -2);
       if (this.camRig.override) focus.set(188, 3, -9);

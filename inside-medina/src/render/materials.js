@@ -1,19 +1,46 @@
 import * as THREE from 'three';
 import { patchMaterial } from './atmosphere.js';
+import { SURFACES } from './textures.js';
 
 // Material library. Geometry UVs are authored in metres; each material maps
 // one texture tile to `tile` metres through a per-material UV scale.
+// Cached materials live for the whole session (chapters never dispose them).
+// A surface that was not baked yet is baked on first use.
 export class Materials {
   static envScale = 1;
-  constructor(tex, envMap) {
+  constructor(tex, envMap, { baker = null } = {}) {
     this.tex = tex;
     this.envMap = envMap;
+    this.baker = baker;
     this.cache = new Map();
+  }
+
+  // baked texture set for a surface, baking it now if a chapter forgot to list it
+  surface(name) {
+    if (!this.tex[name] && this.baker && SURFACES[name]) {
+      console.warn(`surface ${name} baked on demand (add it to the chapter's needs)`);
+      this.tex[name] = this.baker.bake({ name, ...SURFACES[name] });
+    }
+    return this.tex[name];
+  }
+
+  // chapter-specific material definitions (same schema as MATERIAL_DEFS)
+  register(defs) { for (const [k, v] of Object.entries(defs)) if (!MATERIAL_DEFS[k]) MATERIAL_DEFS[k] = v; }
+
+  // swap the environment map and/or its intensity scale on every cached material
+  setEnv(tex, scale) {
+    if (tex) this.envMap = tex;
+    if (scale !== undefined && scale !== null) Materials.envScale = scale;
+    for (const m of this.cache.values()) {
+      if (!('envMap' in m) || !m.envMap) continue;
+      if (tex) m.envMap = tex;
+      m.envMapIntensity = (m.userData.envInt ?? 1) * Materials.envScale;
+    }
   }
 
   std(name, surf, { tile = 2, color = 0xffffff, rough = 1, metal = 0, normalScale = 1, vertexColors = true, envInt = 1, side, alphaTest, sway, translucency, translucencyColor, emissive, emissiveIntensity, physical, transparent, opacity } = {}) {
     if (this.cache.has(name)) return this.cache.get(name);
-    const t = surf ? this.tex[surf] : null;
+    const t = surf ? this.surface(surf) : null;
     const Ctor = physical ? THREE.MeshPhysicalMaterial : THREE.MeshStandardMaterial;
     const m = new Ctor({
       color, roughness: rough, metalness: metal,
@@ -35,6 +62,7 @@ export class Materials {
     if (transparent) { m.transparent = true; m.opacity = opacity ?? 1; m.depthWrite = false; }
     patchMaterial(m, { uvScale: 1 / tile, sway, translucency, translucencyColor });
     m.name = name;
+    m.userData.envInt = envInt;
     this.cache.set(name, m);
     return m;
   }

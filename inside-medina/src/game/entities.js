@@ -195,13 +195,9 @@ export class Searchlight {
     this.dir = 1; this.pause = 0.5;
     this.state = 'sweep'; this.seen = 0; this.alarmT = 0;
     this.enabled = true;
-    const spot = new THREE.SpotLight(color, 520, 60, 0.11, 0.35, 1.5);
-    spot.castShadow = true; spot.shadow.mapSize.set(1024, 1024); spot.shadow.bias = -0.0004; spot.shadow.normalBias = 0.03;
-    spot.shadow.camera.near = 5; spot.shadow.camera.far = 80;
-    spot.position.copy(this.origin);
-    spot.target.position.copy(this.aim);
-    game.add(spot); game.add(spot.target);
-    this.spot = spot;
+    // the light itself is one of the rig's two shared spots, acquired near the camera
+    this.angle = 0.11; this.power = 520;
+    this.spot = null;
     this.baseColor = new THREE.Color(color);
     // volumetric beam cone (additive)
     const len = 18;
@@ -233,7 +229,7 @@ export class Searchlight {
     const v = this._v.subVectors(p, this.origin);
     const dist = v.length(); v.divideScalar(dist);
     const ang = Math.acos(THREE.MathUtils.clamp(d.dot(v), -1, 1));
-    if (ang > this.spot.angle * 0.92) return false;
+    if (ang > this.angle * 0.92) return false;
     this._ray.set(this.origin, v);
     const hit = new THREE.Vector3();
     for (const b of this.covers) { if (this._ray.intersectBox(b, hit) && hit.distanceTo(this.origin) < dist - 0.05) return false; }
@@ -267,13 +263,33 @@ export class Searchlight {
     }
   }
 
+  // acquire a rig spot within (view half-width + 10 m) of the camera focus, release beyond + 14 m
+  updateSpot() {
+    const g = this.game, rig = g.lightRig;
+    if (!rig) return;
+    const fx = g.camRig ? g.camRig.look.x : this.aim.x, half = g.viewHalfW || 12;
+    const d = Math.max(0, this.x0 - fx, fx - this.x1);
+    if (!this.spot && this.enabled && d < half + 10) {
+      this.spot = rig.acquireSpot(this);
+      if (this.spot) {
+        const s = this.spot;
+        s.angle = this.angle; s.penumbra = 0.35; s.decay = 1.5; s.distance = 60;
+        s.shadow.bias = -0.0004; s.shadow.normalBias = 0.03; s.shadow.camera.near = 5; s.shadow.camera.far = 80;
+      }
+    } else if (this.spot && (!this.enabled || d > half + 14)) { rig.releaseSpot(this); this.spot = null; }
+  }
+  dispose() { if (this.spot) { this.game.lightRig?.releaseSpot(this); this.spot = null; } }
   render(alpha, dt) {
     const alarm = this.state === 'alarm' ? Math.min(1, this.alarmT * 3) : 0;
-    this.spot.target.position.copy(this.aim);
-    this.spot.target.updateMatrixWorld();
     const col = this.baseColor.clone().lerp(new THREE.Color(1.0, 0.45, 0.3), alarm);
-    this.spot.color.copy(col);
-    this.spot.intensity = this.enabled ? 520 * (1 + alarm * 0.4) : 0;
+    this.updateSpot();
+    if (this.spot) {
+      const s = this.spot;
+      s.position.copy(this.origin); s.target.position.copy(this.aim);
+      s.updateMatrixWorld(); s.target.updateMatrixWorld();
+      s.color.copy(col);
+      s.intensity = this.enabled ? this.power * (1 + alarm * 0.4) : 0;
+    }
     this.beamMat.uniforms.uColor.value.set(1.0, 0.86, 0.62).lerp(new THREE.Color(1.0, 0.45, 0.3), alarm);
     this.beamMat.uniforms.uIntensity.value = this.enabled ? 0.55 + alarm * 0.3 : 0;
     // orient beam cone from origin to aim
@@ -306,11 +322,10 @@ export class Guard {
     this.lantern = lanternMesh(game.mats, { s: 1.1, chain: 0.02 });
     this.lantern.position.set(0, -0.07, 0.01);
     this.rig.j.wristR.add(this.lantern);
-    this.light = new THREE.PointLight(0xffa860, 6, 7, 1.6);
-    this.light.position.set(0, this.lantern.userData.glowY, 0.08);
-    this.lantern.add(this.light);
+    // the lantern's light is a priority source in the shared light pool
+    this.light = game.lightPool ? game.lightPool.addDynamic(this, 2, { intensity: 6 }) : null;
     this._wq = new THREE.Quaternion();
-    this.rig.root.visible = false; this.light.intensity = 0;
+    this.rig.root.visible = false; if (this.light) this.light.enabled = false;
     this.body.enabled = false;
     this.steps = 0;
     this.anim.onFootstep = () => this.game.sfx('guardStep', this.body.x);
@@ -321,7 +336,8 @@ export class Guard {
     this.anim.setState('ground', 0.01);
     this.game.sfx('shout', b.x);
   }
-  deactivate() { this.state = 'hidden'; this.rig.root.visible = false; this.light.intensity = 0; this.body.enabled = false; }
+  deactivate() { this.state = 'hidden'; this.rig.root.visible = false; if (this.light) this.light.enabled = false; this.body.enabled = false; }
+  dispose() { if (this.light) this.game.lightPool?.remove(this.light); }
   prestep() { this.prev.set(this.body.x, this.body.y); }
   step(dt) {
     if (this.state === 'hidden') return;
@@ -361,7 +377,7 @@ export class Guard {
     }
   }
   render(alpha, dt) {
-    if (this.state === 'hidden') { this.light.intensity = 0; return; }
+    if (this.state === 'hidden') { if (this.light) this.light.enabled = false; return; }
     const b = this.body;
     const x = lerp(this.prev.x, b.x, alpha), y = lerp(this.prev.y, b.y, alpha);
     this.rig.root.position.set(x, y, 0.15);
@@ -385,12 +401,17 @@ export class Guard {
       // lantern arm held forward
       this.rig.j.shoulderR.rotation.x = -0.5 + Math.sin(this.t * 9) * 0.1; this.rig.j.elbowR.rotation.x = -0.9;
     }
-    this.light.intensity = 6 + Math.sin(this.t * 17) * 0.6 + Math.sin(this.t * 7.3) * 0.4;
     // the lantern hangs plumb from the hand whatever the arm is doing
     this.rig.j.wristR.updateWorldMatrix(true, false);
     this.rig.j.wristR.getWorldQuaternion(this._wq).invert();
     this.lantern.quaternion.copy(this._wq);
     this.lantern.rotateZ(Math.sin(this.t * 6.5) * 0.12 * Math.min(1, Math.abs(this.body.vx) / 2));
+    if (this.light) {
+      this.lantern.updateWorldMatrix(true, false);
+      this.lantern.localToWorld(this.light.pos.set(0, this.lantern.userData.glowY, 0.08));
+      this.light.intensity = 6 + Math.sin(this.t * 17) * 0.6 + Math.sin(this.t * 7.3) * 0.4;
+      this.light.enabled = true;
+    }
   }
   getState() { const b = this.body; return { state: this.state, x: b.x, y: b.y, vx: b.vx, vy: b.vy, t: this.t, facing: this.facing, vault: this.vault && { ...this.vault } }; }
   setState(s) {
