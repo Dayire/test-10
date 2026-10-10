@@ -11,7 +11,8 @@ rs.render(scene, camera, time)
   particles.update · shadow policy (30 Hz maps, snaps, spot culling, small casters)
   scene → rtScene (MSAA, half float; RGBA8 + Reinhard encode without float targets)
          sky dome last among opaques (early-z)          layer 0
-  soft pass → rtScene, scene depth bound as SOFT.uDepth layer BEAMS (3): shafts, beams, particles
+  soft pass → rtScene, scene depth bound as SOFT.uDepth layer BEAMS (3): shafts, beams, particles,
+         drawn through post.softScene (the scene's own children, no lights: see below)
   SSAO (half res, high/ultra) → bloom chain (6 levels) → lens flare → DOF (half res) → god rays
   final grade (ACES, tints, S-curve, lift, gamma, LUT crossfade, vignette, letterbox, fade)
   output pass: FXAA + CAS upscale + grain at canvas resolution (when FXAA is on or scale < 1)
@@ -21,6 +22,20 @@ rs.trackFrame(ms, {paused, hidden}) → dynamic resolution, auto quality
 Every post target is allocated once at the tier's maximum internal size. Dynamic resolution renders
 into a viewport sub-rect of those targets, and every pass maps uv through its source's extent and
 clamps its taps inside it, so a scale change never reallocates or recompiles.
+
+**The soft pass and the light state.** three keys its light state by scene, and the camera's layers
+decide which lights a render collects. Drawing the soft pass through the main scene with the camera on
+`BEAMS` would collect no lights, change the light state twice a frame and send every lit material down the
+program re-validation path (parameters, cache key, a full uniform upload) every frame. So the soft pass
+renders `post.softScene`, a scene that shares the main scene's children array (nothing is re-parented)
+but has a render state of its own: both light states stay constant (`lightsStable` check).
+
+**MSAA resolve on mobile.** With the soft pass on (medium and up), the scene target always resolves its
+multisampled buffers explicitly, also where `WEBGL_multisampled_render_to_texture` exists, so the depth
+texture is never attached to the framebuffer the soft pass draws into. On tiled mobile GPUs that is one
+extra full-size resolve blit per frame on medium (MSAA 2). Low has no MSAA and no soft pass, so it keeps the
+implicit path. If medium proves too heavy on a phone, the cheaper trade is the soft pass off on that device
+class, not MSAA off.
 
 ## Quality tiers (`QUALITY` in `renderer.js`)
 
@@ -52,9 +67,11 @@ old chain), `render(scene, camera, time)`, `tier`, `q`, `w`, `h`, `cssW`, `cssH`
 |---|---|
 | `beginFrame(now) → bool` | Frame cap. `false`: skip this rAF callback entirely. Keeps the phase, so 60 on a 120/144 Hz display is exact. |
 | `trackFrame(ms, {paused, hidden})` | Interval of a rendered frame. Paused and hidden frames (and the two after them) are ignored. Drives dynamic resolution and auto quality. |
-| `applySettings(s)` | Live settings (§7.4): `quality` (auto/low/medium/high/ultra), `renderScale` (50–100 or 0.5–1), `dynres`, `fpsCap` (30/60/'display'), `batterySaver` (30 fps, 0.75 scale, no DOF), `dof`, `grain` (0–100), `brightness` (−3…+3), `motionBlur` (stored; cut), `reduceFlashing` (caps bloom, flare, rays, dirt). |
+| `applySettings(s)` | Live settings (§7.4): `quality` (auto/low/medium/high/ultra), `renderScale` (50–100 or 0.5–1), `dynres`, `fpsCap` (30/60/'display'), `batterySaver` (30 fps, 0.75 scale, no DOF), `dof`, `grain` (0–100), `brightness` (−3…+3), `motionBlur` (stored; cut), `reduceFlashing` (caps bloom, flare, rays, dirt). URL test flags win: under `?noauto`, `quality: 'auto'` and `dynres` are ignored (fixed tier and resolution) unless `?dynres=1`; `?dynres=0` always turns it off. Brightness and grain are applied here only (`userExposure`, `userGamma`, `grainScale` in the final pass); the LookDirector must not scale them again (requests/P.md #4). |
 | `onContextLost(fn)`, `onContextRestored(fn)` | Return an unsubscribe function. While lost, `beginFrame` is false and `render` is a no-op; after a restore the post chain re-applies its state and the shadow maps refresh. Textures baked into render targets must be re-baked by the caller (F reloads the chapter). |
 | `setMenuBackground(on)` | 30 fps at half resolution behind the menus. |
+| `clearEffects()` | Drops every live particle. Also automatic when a direct child subtree of the scene is removed (a chapter root unloading), so effects never carry into the next chapter. |
+| `world.light.setExtent(e)` | Half-width of the sun's shadow frustum (a chapter's `L.shadowExtent`; 22 m otherwise). |
 | `stats` | tier, scale, cap, calls, tris, programs, gpuMs (EXT_disjoint_timer_query_webgl2 when exposed), cpuMs, p90, AA mode, passes, shadow-policy counters. |
 | `particles` | The GPU particle system (also reachable as `particles` from `particles.js`). |
 | `dyn`, `auto`, `cap`, `shadows` | DynRes, AutoQuality, FrameCap, ShadowPolicy (tests and tuning). |
@@ -91,8 +108,12 @@ toBeams(mesh); // mesh.layers.set(LAYERS.BEAMS)
 (`uRes`, `uNearFar`, `uSoftOn` alongside). `softFade(range)` is 0 where the fragment touches geometry
 and 1 once it is `range` metres in front; `softNear(d)` fades volumes closer than `d` to the camera.
 On low (`uSoftOn = 0`) the layer is drawn in the main pass and `softFade` returns 1: hard additive.
-Materials on BEAMS must not use scene lights. Shafts, dust motes and particles use it; L's beams do the
-same (fallback: layer 3 drawn as usual if this file is absent).
+Materials on BEAMS must not use scene lights (the soft pass sees none). Shafts, dust motes and particles
+use it; L's beams do the same (fallback: layer 3 drawn as usual if this file is absent).
+
+**Every custom shader ends with `#include <fog_fragment>`**, on any layer: in the LDR fallback that chunk
+stores the colour Reinhard-encoded and the post chain decodes it; a shader without it is decoded too
+bright there (the Chapter I searchlight cone is the one left, requests/P.md #9).
 
 ## Effects
 
@@ -102,19 +123,25 @@ same (fallback: layer 3 drawn as usual if this file is absent).
   alpha) for every kind, counts scaled by the tier budget. Returns the number emitted.
 - **Dust** (`new Dust(scene, n)`, `emit(pos, opts)`, `update(dt)`, `dispose()`): puffs on the GPU.
 - **Flock** (`new Flock(scene, mats, spots)`, `reset()`, `update(dt, x, y, speed, onScatter)`,
-  `dispose()`): three instanced draws (body, head, wings) for any number of birds.
+  `dispose()`): three instanced draws (body, head, wings) for any number of birds. Only birds within 30 m of
+  the boy or inside the camera's view (`VIEW` in `fx.js`, the play-plane x and half-width the renderer
+  writes every frame) are drawn, so menu, intro and cinematic shots far from the boy still show theirs.
 - **Shafts** (`new Shafts(scene, sunDir, G)`, `add(p, o)`, `addDust(regions, n)`, `setSun(dir, colour,
   intensity?)`, `dispose()`): `setSun` re-aims every shaft from its ground point and tints shafts and
-  dust relative to the golden-hour sun they were authored under.
+  dust relative to the golden-hour sun they were authored under. It allocates nothing and returns at once
+  when the sun has not changed (the LookDirector calls it on every write).
 - **Sky** (`createSky`): uniforms `uNight` (0 = today's look), `uStars`, `uMoonDir`, `uMoonColor`,
-  `uMoonSize` (radians). Night gives a three-layer star field with a faint band, a moon with maria,
-  limb darkening and halo, and clouds as dark silhouettes with moonlit rims. `buildEnvironment` turns
-  the stars off for the PMREM.
+  `uMoonSize` (a multiplier of `MOON_RADIUS` = 0.045 rad, about ten times the real moon for readability;
+  the LookDirector writes the preset's `moonSize × moon`, so 0 hides the moon). Night gives a three-layer
+  star field with a faint band, a moon with maria, limb darkening and halo, and clouds as dark silhouettes
+  with moonlit rims. `buildEnvironment` turns the stars off for the PMREM.
 - **Rim light** (`atmosphere.js`): materials named in `RIM_MATERIALS` (or `userData.rim = true`) get a
   fresnel rim, strongest against the sun; `G.uRimColor` / `G.uRimStrength` can be retinted per preset.
 - **Flare** (`flare.js`, medium+): soft ghosts from a blurred bloom level, a halo ring for the sun only,
-  and a short warm streak on small bright sources (lamps, glints). `params.flare`, `flareThreshold`,
-  `flareStreak`. **Lens dirt** rises with the god rays (the finale) or `params.dirt`.
+  and a short pale-warm streak on small bright sources (lamps, glints). `params.flare`, `flareThreshold`,
+  `flareStreak` (0.5). **Lens dirt** rises with the god rays (the finale) or `params.dirt`.
+- **Output pass** (`fxaa.js`): FXAA, then contrast-adaptive sharpening on luma only (no coloured fringes),
+  at most 0.5 and only when upscaling, then grain at output resolution.
 - **SSAO** (high/ultra): half-res, depth-aware blur; it fades out in direct light and inside the glow
   of lamps (bloom), and is applied before the DOF composite.
 - **LUT** (`lut.js`): `lut(name)` bakes (once, shared) a 32³ 3D look-up table from a colourist-style

@@ -24,6 +24,16 @@ export class Lighting {
     this._mi = new THREE.Matrix4();
   }
 
+  // half-width of the sun's shadow frustum in metres (a chapter's L.shadowExtent; the loader passes 22 otherwise)
+  setExtent(e) {
+    e = +e;
+    if (!(e > 0) || e === this.extent) return;
+    this.extent = e;
+    const s = this.sun.shadow.camera;
+    s.left = -e; s.right = e; s.top = e * 0.8; s.bottom = -e * 0.8;
+    s.updateProjectionMatrix();
+  }
+
   setShadowSize(n) {
     if (this.sun.shadow.mapSize.x === n) return;
     this.sun.shadow.mapSize.set(n, n);

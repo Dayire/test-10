@@ -201,6 +201,7 @@ void main(){
 }`;
 
 const sub = (n, k) => Math.max(1, Math.ceil(n / k));
+const NO_CHILDREN = Object.freeze([]);
 
 export class PostFX {
   constructor(renderer, q) {
@@ -217,7 +218,7 @@ export class PostFX {
       focus: 13, nearRange: 3.5, farStart: 14, farRamp: 60, nearBlur: 10, farBlur: 5,
       sunScreen: new THREE.Vector2(0.5, 1.2), sunVisible: 0,
       // new: lens flare and dirt, ambient occlusion, user brightness / grain
-      flare: 0.3, flareThreshold: 1.2, flareStreak: 1, dirt: 0, ao: 0.55, aoRadius: 0.55,
+      flare: 0.3, flareThreshold: 1.2, flareStreak: 0.5, dirt: 0, ao: 0.55, aoRadius: 0.55,
       userExposure: 1, userGamma: 1, grainScale: 1,
       // colour look-up: lutA → lutB by lutMix, blended in by lut (0 = off); see lut.js
       lut: 0, lutA: null, lutB: null, lutMix: 0,
@@ -229,6 +230,13 @@ export class PostFX {
     this.stats = { aa: '', passes: 0, internal: [1, 1], output: [1, 1], soft: false };
     this._st = new THREE.Vector2();
     this.warmed = false;
+    // the soft pass walks the main scene's children through a scene of its own. three keys its light
+    // state by scene and that pass sees no lights (they are not on BEAMS), so drawing it through the
+    // main scene would change the light state twice a frame and send every lit material down the
+    // program re-validation path; its own scene keeps both light states constant
+    this.softScene = new THREE.Scene();
+    this.softScene.matrixWorldAutoUpdate = false;
+    this.softScene.children = NO_CHILDREN;
     this._build();
   }
 
@@ -250,8 +258,9 @@ export class PostFX {
     this.depthTex.type = THREE.UnsignedIntType;
     this.rtScene = new THREE.WebGLRenderTarget(1, 1, { type: ht, samples: q.msaa, depthTexture: this.depthTex, depthBuffer: true });
     this.rtScene.texture.minFilter = THREE.LinearFilter; this.rtScene.texture.generateMipmaps = false;
-    // keep the explicit resolve path even where multisampled render-to-texture exists, so the depth
-    // texture is never attached to the framebuffer the soft pass draws into
+    // with the soft pass on, keep the explicit resolve path even where multisampled render-to-texture
+    // exists, so the depth texture is never attached to the framebuffer the soft pass draws into (on
+    // tiled mobile GPUs this costs one resolve blit per frame; see docs/systems/graphics.md)
     this._explicitResolve();
     const mk = (type = ht) => new THREE.WebGLRenderTarget(1, 1, { type, depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
     this.levels = 6;
@@ -294,7 +303,7 @@ export class PostFX {
     this.mOut = createOutputMaterial();
   }
 
-  _explicitResolve() { if (this.q.msaa > 0) this.r.properties.get(this.rtScene).__useRenderToTexture = false; }
+  _explicitResolve() { if (this.q.msaa > 0 && this.q.soft) this.r.properties.get(this.rtScene).__useRenderToTexture = false; }
   // after a context restore three's object properties are fresh: re-apply ours, recompile on demand
   restored() { this._explicitResolve(); this.warmed = false; }
 
@@ -349,11 +358,13 @@ export class PostFX {
     if (soft) {
       SOFT.uDepth.value = this.depthTex; SOFT.uSoftOn.value = 1;
       SOFT.uRes.value.set(this.rtScene.width, this.rtScene.height);
-      const sm = r.shadowMap, au = sm.autoUpdate, nu = sm.needsUpdate, ac = r.autoClear, mu = scene.matrixWorldAutoUpdate;
-      sm.autoUpdate = false; sm.needsUpdate = false; r.autoClear = false; scene.matrixWorldAutoUpdate = false;
+      const ss = this.softScene, ac = r.autoClear;
+      ss.children = scene.children; ss.fog = scene.fog; ss.environment = scene.environment;
+      r.autoClear = false;
       camera.layers.set(LAYERS.BEAMS);
-      r.render(scene, camera);
-      sm.autoUpdate = au; sm.needsUpdate = nu; r.autoClear = ac; scene.matrixWorldAutoUpdate = mu;
+      r.render(ss, camera);
+      r.autoClear = ac;
+      ss.children = NO_CHILDREN; ss.fog = null; ss.environment = null;
     }
     camera.layers.mask = mask;
     this.stats.soft = soft;
@@ -478,7 +489,7 @@ export class PostFX {
       // --- output: FXAA + CAS upscale + grain at canvas resolution
       const o = this.mOut.uniforms, ratio = iw / this.outW;
       o.tColor.value = this.rtLdr.texture; o.uMax.value.set(iw / this.rtLdr.width, ih / this.rtLdr.height); o.uTexel.value.set(1 / this.rtLdr.width, 1 / this.rtLdr.height);
-      o.uFxaa.value = q.fxaa ? 1 : 0; o.uSharp.value = ratio < 0.999 ? Math.min(0.8, 0.3 + (1 - ratio) * 1.5) : 0;
+      o.uFxaa.value = q.fxaa ? 1 : 0; o.uSharp.value = ratio < 0.999 ? Math.min(0.5, 0.2 + (1 - ratio) * 1.2) : 0;
       o.uGrain.value = P.grain * P.grainScale; o.uTime.value = time;
       r.setViewport(0, 0, this.outW, this.outH);
       this._pass(this.mOut, null);

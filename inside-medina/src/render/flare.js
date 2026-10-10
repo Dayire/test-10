@@ -46,7 +46,8 @@ void main(){
       vec2 o = vec2(fi * uStreakTexel.x * 2.5 / uStreakMax.x, 0.);
       s += (Sk(vUv + o) + Sk(vUv - o)) * w;
     }
-    acc += s * vec3(1., .78, .55) * .14 * uStreak;
+    // a pale warm white, so the streak reads as lens glare and not as an orange smear over the walls
+    acc += s * vec3(1., .9, .8) * .12 * uStreak;
   }
   gl_FragColor = vec4(acc, 1.);
 }`;

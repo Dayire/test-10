@@ -27,6 +27,9 @@ void main(){
 }`;
 
 const UP = new THREE.Vector3(0, 1, 0);
+// the golden-hour sun the shafts were authored under; setSun tints relative to it
+const REF = new THREE.Color('#ffcf96');
+const _c = new THREE.Color();
 
 export class Shafts {
   constructor(scene, sunDir, globals) {
@@ -38,6 +41,7 @@ export class Shafts {
     this.tint = { value: new THREE.Color(1, 1, 1) };
     this.dustColor = { value: new THREE.Color(1, 0.85, 0.6) };
     this.geos = []; this.mats = [];
+    this._sunColor = REF.clone();
   }
   // p: point on the lit ground end; w,d: cross-section; len: length toward the sun
   add(p, { w = 1.5, d = 1.2, len = 12, intensity = 0.12, color = 0xffd9a0 } = {}) {
@@ -63,12 +67,21 @@ export class Shafts {
   }
   // follow the look's sun: re-aim every shaft from its ground point and tint shafts and dust.
   // colour is the sun colour (null keeps the current tint); intensity scales all shafts.
+  // The LookDirector calls this on every write, so an unchanged sun costs nothing.
   setSun(dir, color = null, intensity = null) {
-    if (dir) { this.sunDir.copy(dir).normalize(); for (const m of this.list) this._place(m); }
+    if (dir) {
+      const l = Math.hypot(dir.x, dir.y, dir.z) || 1, d = this.sunDir;
+      if (Math.abs(d.x - dir.x / l) + Math.abs(d.y - dir.y / l) + Math.abs(d.z - dir.z / l) > 1e-6) {
+        d.set(dir.x / l, dir.y / l, dir.z / l);
+        for (const m of this.list) this._place(m);
+      }
+    }
     if (color !== null && color !== undefined) {
-      const c = new THREE.Color(color);
-      // tint relative to the golden-hour sun the shafts were authored under
-      const ref = new THREE.Color('#ffcf96');
+      const c = color.isColor ? color : _c.set(color);
+      if (c.equals(this._sunColor)) color = null; else this._sunColor.copy(c);
+    }
+    if (color !== null && color !== undefined) {
+      const c = this._sunColor, ref = REF;
       this.tint.value.setRGB(c.r / ref.r, c.g / ref.g, c.b / ref.b);
       const m = Math.max(this.tint.value.r, this.tint.value.g, this.tint.value.b, 1e-3);
       this.tint.value.multiplyScalar(1 / Math.max(1, m));

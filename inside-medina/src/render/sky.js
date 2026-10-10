@@ -6,6 +6,8 @@ import { NOISE3 } from './glsl.js';
 // The dome is drawn after every opaque object (renderOrder) at the far plane, so early-z rejects
 // every covered pixel instead of shading the whole sky first.
 export const SKY_RENDER_ORDER = 1e6;
+// the moon's angular radius at uMoonSize = 1 (radians; about ten times the real moon, for readability)
+export const MOON_RADIUS = 0.045;
 
 export function createSky(params) {
   const uniforms = {
@@ -19,12 +21,13 @@ export function createSky(params) {
     uTime: { value: 0 },
     uExposure: { value: params.exposure ?? 1 },
     uSunDisk: { value: 1 },
-    // night: 0 = day; stars 0..1; moon direction, colour and angular radius (radians)
+    // night: 0 = day; stars 0..1; moon direction, colour and size (a multiplier of MOON_RADIUS: the
+    // presets' moonSize × moon, so 0 hides the moon)
     uNight: { value: params.night ?? 0 },
     uStars: { value: params.stars ?? 0 },
     uMoonDir: { value: (params.moonDir || new THREE.Vector3(-0.12, 0.86, -0.5)).clone().normalize() },
     uMoonColor: { value: new THREE.Color(params.moonColor ?? '#dfe7ff') },
-    uMoonSize: { value: params.moonSize ?? 0.045 },
+    uMoonSize: { value: params.moonSize ?? 1 },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -39,6 +42,7 @@ void main(){
   gl_Position = p.xyww;
 }`,
     fragmentShader: /* glsl */ `
+#define MOON_R ${MOON_RADIUS.toFixed(4)}
 float sat(float x){ return clamp(x, 0., 1.); }
 uniform vec3 uSunDir, uZenith, uHorizon, uGround, uSunColor, uCloudLit, uCloudShade, uMoonDir, uMoonColor;
 uniform float uTime, uExposure, uSunDisk, uNight, uStars, uMoonSize;
@@ -70,19 +74,23 @@ void main(){
   if (uNight > 0.) {
     vec3 md = normalize(uMoonDir);
     float ang = acos(clamp(dot(d, md), -1., 1.));
+    float mr = clamp(uMoonSize, 0., 4.) * MOON_R;
     if (uStars > 0.) {
       float s = starLayer(d, 70., .022, .16) * 2.2 + starLayer(d, 160., .06, .2) + starLayer(d, 340., .12, .22) * .45;
       // a faint milky band
       float band = exp(-pow(dot(d, normalize(vec3(.3, .5, .81))) * 3.2, 2.)) * (.5 + .5 * fbm3(d * 9.));
-      col += (vec3(.9, .95, 1.) * s + vec3(.55, .6, .8) * band * .05) * uStars * smoothstep(.0, .22, el) * smoothstep(uMoonSize * 4., uMoonSize * 9., ang);
+      float moonGlare = mr > 1e-4 ? smoothstep(mr * 4., mr * 9., ang) : 1.;
+      col += (vec3(.9, .95, 1.) * s + vec3(.55, .6, .8) * band * .05) * uStars * smoothstep(.0, .22, el) * moonGlare;
     }
-    // moon disc with maria and a soft halo
-    float disc = smoothstep(uMoonSize, uMoonSize * .9, ang);
-    vec3 t = d - md * dot(d, md);
-    float maria = .78 + .22 * smoothstep(.35, .7, fbm3(t * (9. / uMoonSize) + 4.));
-    float limb = .82 + .18 * sqrt(max(0., 1. - pow(ang / uMoonSize, 2.)));
-    col = mix(col, uMoonColor * 2.2 * maria * limb, disc * uNight);
-    col += uMoonColor * (exp(-ang / (uMoonSize * 2.5)) * .35 + exp(-ang * 3.) * .06) * uNight * (1. - disc);
+    if (mr > 1e-4) {
+      // moon disc with maria and a soft halo
+      float disc = smoothstep(mr, mr * .9, ang);
+      vec3 t = d - md * dot(d, md);
+      float maria = .78 + .22 * smoothstep(.35, .7, fbm3(t * (9. / mr) + 4.));
+      float limb = .82 + .18 * sqrt(max(0., 1. - pow(ang / mr, 2.)));
+      col = mix(col, uMoonColor * 2.2 * maria * limb, disc * uNight);
+      col += uMoonColor * (exp(-ang / (mr * 2.5)) * .35 + exp(-ang * 3.) * .06) * uNight * (1. - disc);
+    }
   }
   if (el > 0.) {
     vec2 p = d.xz / (el + .12) * 1.1 + vec2(uTime * .006, uTime * .002);

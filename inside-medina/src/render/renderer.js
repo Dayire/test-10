@@ -3,6 +3,7 @@ import { PostFX } from './post.js';
 import { FrameCap, DynRes, AutoQuality } from './dynres.js';
 import { ShadowPolicy } from './shadowpolicy.js';
 import { Particles, setActiveParticles } from './particles.js';
+import { VIEW } from './fx.js';
 import { installLdrEncode } from './atmosphere.js';
 import { lut } from './lut.js';
 
@@ -34,9 +35,13 @@ export class RenderSystem {
     this.deviceTier = tier; this.autoMax = tier;
     this.tier = tier;
     this.q = this._q(tier);
-    // test runs (?noauto) keep a fixed resolution unless ?dynres=1 asks for it
-    const dyn = PARAMS.has('dynres') ? PARAMS.get('dynres') !== '0' : !PARAMS.has('noauto');
-    this.user = { renderScale: 1, dynres: dyn, fpsCap: 'display', batterySaver: false, dof: true, grain: 60, brightness: 0, motionBlur: false, reduceFlashing: false, quality: 'auto' };
+    // URL test flags win over saved settings: ?noauto keeps the tier and the resolution fixed (quality
+    // 'auto' and the dynres setting are ignored) unless ?dynres=1 asks for dynamic resolution; ?dynres=0
+    // turns it off whatever the settings say
+    this.noauto = PARAMS.has('noauto');
+    this.urlDyn = PARAMS.has('dynres') ? PARAMS.get('dynres') !== '0' : this.noauto ? false : null;
+    const dyn = this.urlDyn ?? true;
+    this.user = { renderScale: 1, dynres: true, fpsCap: 'display', batterySaver: false, dof: true, grain: 60, brightness: 0, motionBlur: false, reduceFlashing: false, quality: 'auto' };
     this.cap = this._cap = new FrameCap();
     this.dyn = new DynRes(); this.dyn.enabled = dyn;
     this.auto = new AutoQuality();
@@ -45,12 +50,15 @@ export class RenderSystem {
     this.post = new PostFX(r, this.q);
     this._configureTier();
     this.frameTimes = [];
-    this.autoQuality = true;
+    this.autoQuality = !this.noauto;
     this.onTierChange = null;
     this.slowGpu = PARAMS.has('slowgpu') ? +PARAMS.get('slowgpu') || 8 : 0;
     this.coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
     this.menuBackground = false;
     this.lost = false; this._lostCbs = []; this._restoredCbs = [];
+    // a chapter root leaving the scene takes its live particles with it
+    this._fxScene = null;
+    this._onRemoved = (e) => { if (e.child !== this.particles.group && e.child.children.length) this.clearEffects(); };
     this.frameStart = 0; this.cpuMs = 0; this.gpuMs = 0;
     this._initTimer();
     canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.lost = true; for (const f of this._lostCbs) f(e); }, false);
@@ -109,7 +117,11 @@ export class RenderSystem {
     const U = this.user;
     let resize = false;
     if (s.renderScale !== undefined) { const v = +s.renderScale; U.renderScale = Math.min(1, Math.max(0.5, v > 1 ? v / 100 : v)); resize = true; }
-    if (s.dynres !== undefined) { U.dynres = !!s.dynres; this.dyn.enabled = U.dynres; if (!U.dynres) this.dyn.reset(1); }
+    if (s.dynres !== undefined) {
+      U.dynres = !!s.dynres;
+      const on = this.urlDyn ?? U.dynres;
+      if (on !== this.dyn.enabled) { this.dyn.enabled = on; if (!on) this.dyn.reset(1); }
+    }
     if (s.batterySaver !== undefined && !!s.batterySaver !== U.batterySaver) { U.batterySaver = !!s.batterySaver; resize = true; }
     if (s.fpsCap !== undefined) U.fpsCap = s.fpsCap;
     if (s.fpsCap !== undefined || s.batterySaver !== undefined) this.cap.set(this._capFps());
@@ -128,7 +140,7 @@ export class RenderSystem {
     }
     if (s.quality !== undefined) {
       U.quality = s.quality;
-      if (s.quality === 'auto') { this.autoQuality = true; this.autoMax = this.deviceTier; }
+      if (s.quality === 'auto') { if (!this.noauto) { this.autoQuality = true; this.autoMax = this.deviceTier; } }
       else if (QUALITY[s.quality]) { this.autoQuality = false; this.setTier(s.quality); }
     }
     if (resize) this.resize();
@@ -154,6 +166,9 @@ export class RenderSystem {
     const P = this.post.params, L = (x) => (typeof x === 'string' ? lut(x) : x || null);
     P.lutA = L(a); P.lutB = L(b); P.lutMix = mix; P.lut = amount;
   }
+
+  // drop every live particle (a chapter unload; also automatic when a chapter root leaves the scene)
+  clearEffects() { this.particles.clear(); }
 
   onContextLost(fn) { this._lostCbs.push(fn); return () => { this._lostCbs = this._lostCbs.filter((f) => f !== fn); }; }
   onContextRestored(fn) { this._restoredCbs.push(fn); return () => { this._restoredCbs = this._restoredCbs.filter((f) => f !== fn); }; }
@@ -226,7 +241,9 @@ export class RenderSystem {
     const t0 = performance.now();
     this.renderer.info.reset();
     if (this.particles.group.parent !== scene) { this.particles.attach(scene); this.renderer.compile(this.particles.group, camera, scene); }
+    if (this._fxScene !== scene) { this._fxScene?.removeEventListener('childremoved', this._onRemoved); scene.addEventListener('childremoved', this._onRemoved); this._fxScene = scene; }
     this.particles.update(time);
+    VIEW.from(camera);
     this.post.setScale(this.dyn.scale);
     this.shadows.update(scene, camera, t0);
     const tq = this._timerBegin();

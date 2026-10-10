@@ -18,6 +18,8 @@ const shots = arg('shots', null);
 const pick = arg('check', null) ? String(arg('check')).split(',') : null; // run only these checks
 const want = (k) => !pick || pick.includes(k);
 const W = +arg('w', 640), H = +arg('h', 360);
+// FULL_GAME §8.5: draw calls (shadow + main) and triangles per frame, per tier
+const BUDGET = { low: { calls: 130, tris: 400e3 }, medium: { calls: 180, tris: 550e3 }, high: { calls: 240, tris: 700e3 }, ultra: { calls: 280, tris: 900e3 } };
 const SPOTS = [
   { name: 'souk', x: 9, y: 0 }, { name: 'raised', x: 24, y: 1.5 }, { name: 'rooftops', x: 54.8, y: 3.1 },
   { name: 'courtyard', x: 97, y: 0 }, { name: 'balcony', x: 126, y: 4.3 }, { name: 'chase', x: 166, y: 0 },
@@ -67,7 +69,8 @@ function installHooks() {
     const c = r.info.render.calls, t = r.info.render.triangles;
     rr.call(this, s, cam);
     if (!P.cur) return;
-    if (s === scene) { P.cur.sceneCalls += r.info.render.calls - c; P.cur.sceneTris += r.info.render.triangles - t; }
+    // the soft pass draws the scene's own objects through a scene of its own (post.softScene)
+    if (s === scene || s === rs.post.softScene) { P.cur.sceneCalls += r.info.render.calls - c; P.cur.sceneTris += r.info.render.triangles - t; }
     else P.cur.postCalls += r.info.render.calls - c;
   };
   const rsr = rs.render;
@@ -161,7 +164,13 @@ if (only !== 'checks') {
     const flock = await flockStress(page);
     process.stdout.write(`${tier} flock-all-in-view ${JSON.stringify(flock)}\n`);
     const info = await page.evaluate(() => { const rs = window.__medina.game.world.rs; return { fxaa: !!(rs.post.fxaaActive ?? rs.post.q?.fxaa), aa: rs.post.stats?.aa ?? null, msaa: rs.q.msaa, scale: rs.scale ?? rs.q.scale, w: rs.w, h: rs.h }; });
-    result.tiers[tier] = { spots, programsFirstPass: p1, programsSecondPass: p2, flockAllInView: flock, info };
+    // §8.5 budget at a 60 fps cadence (shadow-pass calls averaged over the frames that refresh them or not)
+    const B = BUDGET[tier], budget = {};
+    for (const [k, v] of Object.entries(spots)) {
+      const calls = round(v.shadowCalls60 + v.mainCalls), tris = Math.round(v.shadowTris60 + v.mainTris);
+      budget[k] = { calls, tris, ok: !B || (calls <= B.calls && tris <= B.tris) };
+    }
+    result.tiers[tier] = { spots, programsFirstPass: p1, programsSecondPass: p2, flockAllInView: flock, info, budget };
     await page.context().close();
   }
 }
@@ -216,17 +225,20 @@ if (checks || only === 'checks') {
       rs.applySettings({ fpsCap: 'display' });
       return { fps: r, ok: Math.abs(r['120Hz cap60'] - 60) <= 1 && Math.abs(r['120Hz±1ms cap60'] - 60) <= 1 && Math.abs(r['144Hz cap60'] - 60) <= 1.5 && r['60Hz cap60'] >= 59 && Math.abs(r['60Hz cap30'] - 30) <= 1 && r['120Hz display'] >= 119 };
     });
-    // a real loop driven by a stubbed 120 Hz requestAnimationFrame: beginFrame gates it to 60 fps
-    if (want('capLoop')) result.checks.capLoop = await page.evaluate(async () => {
-      const rs = window.__medina.game.world.rs; rs.applySettings({ fpsCap: 60 });
-      const raf = window.requestAnimationFrame;
-      let t = performance.now(), ok = 0, all = 0; const t0 = t;
-      const stub = (cb) => setTimeout(() => { t += 1000 / 120; cb(t); }, 0);
-      await new Promise((res) => { const loop = (now) => { all++; if (rs.beginFrame(now)) ok++; if (now - t0 < 2000) stub(loop); else res(); }; stub(loop); });
-      window.requestAnimationFrame = raf;
-      rs.applySettings({ fpsCap: 'display' });
-      const fps = +(ok / ((t - t0) / 1000)).toFixed(2);
-      return { stubFrames: all, rendered: ok, fps, ok: Math.abs(fps - 60) <= 1 };
+    // the soft pass leaves the renderer's light state alone: no lit material re-validates its program per frame
+    if (want('lightsStable')) result.checks.lightsStable = await lightsStable(page);
+    // URL test flags win over saved settings: under ?noauto, quality 'auto' and dynres keep the tier and scale fixed
+    if (want('settingsNoauto')) result.checks.settingsNoauto = await page.evaluate(() => {
+      const rs = window.__medina.game.world.rs, snap = () => ({ auto: rs.autoQuality, dyn: rs.dyn.enabled, tier: rs.tier, scale: rs.dyn.scale });
+      const before = snap();
+      rs.applySettings({ quality: 'auto', dynres: true, fpsCap: null, renderScale: 100, grain: 60, brightness: 0, dof: true });
+      const after = snap();
+      // the same settings without the URL flags do turn both on
+      const keep = [rs.noauto, rs.urlDyn, rs.autoMax];
+      rs.noauto = false; rs.urlDyn = null; rs.applySettings({ quality: 'auto', dynres: false }); rs.applySettings({ dynres: true });
+      const free = snap();
+      [rs.noauto, rs.urlDyn] = keep; rs.autoQuality = false; rs.applySettings({ dynres: true }); rs.dyn.enabled = false; rs.dyn.reset(1);
+      return { before, after, withoutFlags: { auto: free.auto, dyn: free.dyn }, ok: !before.auto && !before.dyn && !after.auto && !after.dyn && after.tier === before.tier && free.auto && free.dyn };
     });
     // paused and hidden frames never reach auto quality or dynamic resolution
     if (want('pausedIgnored')) result.checks.pausedIgnored = await page.evaluate(() => {
@@ -241,6 +253,19 @@ if (checks || only === 'checks') {
     });
     // night sky: uNight = 1 shows stars (and a moon); uNight = 0 (today's look) shows none
     if (want('nightSky')) result.checks.nightSky = await nightSky(page);
+    // pigeons in view are drawn even when the boy is far away (menu, intro and cinematic shots)
+    if (want('flockView')) result.checks.flockView = await page.evaluate(async () => {
+      const M = window.__medina, G = M.game, V = G.camera.position.constructor;
+      const frame = () => new Promise((res) => { const n = window.__frames; const t = () => (window.__frames > n + 1 ? res() : requestAnimationFrame(t)); t(); });
+      M.photo(9, 0, 1, 0.2); G.flock.reset();
+      // the camera frames the pigeons at x 160 while the boy stands at x 9
+      G.camRig.setOverride(() => ({ pos: new V(160, 2.5, 12), look: new V(160, 1, 0), fov: 34 }), 0.001); G.camRig.overrideW = 1;
+      await frame(); await frame(); await frame();
+      const fx = G.flock, inView = fx.birds.filter((b) => b.state !== 'gone' && Math.abs(b.pos.x - 160) < 6).length, nearBoy = fx.birds.filter((b) => b.state !== 'gone' && Math.abs(b.pos.x - 9) <= 30).length;
+      const r = { drawn: fx.drawn, inView, nearBoy };
+      G.camRig.override = null; G.camRig.overrideW = 0; G.camRig.overrideTarget = 0;
+      return { ...r, ok: inView > 0 && fx.drawn >= inView + nearBoy };
+    });
     // LUT crossfade: identity changes nothing, a look changes the frame, toggling compiles nothing
     if (want('lut')) result.checks.lut = await lutCheck(page);
     // the shared soft layer, particles, shafts.setSun and the dispose() contracts
@@ -275,12 +300,18 @@ if (checks || only === 'checks') {
       d.dispose(); f.dispose(); await frame();
       out.dispose = { before: g0, withNew: g1, after: r.info.memory.geometries, ok: g1 > g0 && r.info.memory.geometries === g0 };
       rs.setTier('low'); await frame();
-      out.ok = out.softOn.medium && out.softOn.shared && out.softOn.shaftOnBeams && Object.values(emitted).every((n) => n > 0) && pv && out.shafts.moved && out.shafts.restored && out.dispose.ok;
+      // live particles leave with the chapter root they were emitted in (a direct child subtree of the scene)
+      PT.particles.emit('moths', { x: 97, y: 1.5, z: 0.5 }, { count: 10 }); await frame();
+      const aliveBefore = rs.particles.alive, Group = G.flock.group.constructor, g = new Group();
+      g.add(new Group()); G.scene.add(g); G.scene.remove(g);
+      out.particlesClear = { aliveBefore, aliveAfter: rs.particles.alive, ok: aliveBefore && !rs.particles.alive };
+      out.ok = out.softOn.medium && out.softOn.shared && out.softOn.shaftOnBeams && Object.values(emitted).every((n) => n > 0) && pv && out.shafts.moved && out.shafts.restored && out.dispose.ok && out.particlesClear.ok;
       return out;
     });
     await page.context().close();
     // ?slowgpu=8: dynamic resolution drops within 2 s, recovers after 5 s of headroom, <= 1 tier change per 30 s
-    const p2 = await open('tier=medium&slowgpu=8&auto=1');
+    // ?noauto keeps the resolution fixed unless ?dynres=1 asks for dynamic resolution (the settings cannot)
+    const p2 = await open('tier=medium&slowgpu=8&dynres=1');
     if (want('slowgpu')) result.checks.slowgpu = await p2.evaluate(async () => {
       const rs = window.__medina.game.world.rs; rs.autoQuality = true; rs.applySettings({ dynres: true, fpsCap: 60 });
       // the URL turned the synthetic slow GPU on; hold it until frames flow so the timing starts at its onset
@@ -313,19 +344,79 @@ if (checks || only === 'checks') {
     await p2.context().close();
     // LDR fallback (no float targets): RGBA8 chain on the low tier renders the same scene
     if (want('ldr')) result.checks.ldr = await ldrCheck();
+    // the real game loop under a stubbed 120 Hz requestAnimationFrame renders 60 fps with fpsCap 60
+    if (want('capLoop')) result.checks.capLoop = await capLoop();
     // context loss and restore: hooks fire, frames stop while lost and resume after
     if (want('contextLoss')) result.checks.contextLoss = await contextLoss();
   }
+}
+
+async function lightsStable(page) {
+  return page.evaluate(async () => {
+    const M = window.__medina, G = M.game, rs = G.world.rs, r = rs.renderer;
+    const frame = () => new Promise((res) => { const n = window.__frames; const t = () => (window.__frames > n + 1 ? res() : requestAnimationFrame(t)); t(); });
+    rs.setTier('medium'); M.photo(97, 0, 1, 0.3);
+    for (let i = 0; i < 4; i++) await frame();
+    const lit = new Set();
+    G.scene.traverse((o) => { const m = o.material; if (o.isMesh && o.visible && m && !Array.isArray(m) && (m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) lit.add(m); });
+    const mats = [...lit], ver = () => mats.map((m) => r.properties.get(m).lightsStateVersion);
+    const seq = [];
+    for (let i = 0; i < 6; i++) { await frame(); seq.push(ver()); }
+    const drawn = mats.filter((m, i) => seq[0][i] !== undefined).length;
+    const changed = mats.filter((m, i) => seq.some((v) => v[i] !== seq[0][i])).length;
+    // CPU time of the main scene pass, soft pass on and off (median of synchronous frames; informative)
+    const scene = G.scene, rr = r.render, times = [];
+    r.render = function (s, cam) { const t0 = performance.now(); rr.call(this, s, cam); if (s === scene) times.push(performance.now() - t0); };
+    const med = (soft) => { rs.post.q.soft = soft; times.length = 0; for (let i = 0; i < 14; i++) rs.render(scene, G.camera, G.time); const t = times.slice(4).sort((a, b) => a - b); return +t[t.length >> 1].toFixed(2); };
+    const mainMs = { softOn: med(true), softOff: med(false), softOn2: med(true) };
+    r.render = rr; rs.post.q.soft = true;
+    const soft = rs.post.stats.soft;
+    rs.setTier('low'); await frame();
+    return { tier: 'medium', soft, litMaterials: mats.length, drawn, changed, versions: [...new Set(seq.flat().filter((v) => v !== undefined))], mainMs, ok: soft && drawn > 10 && changed === 0 };
+  });
+}
+
+// the real boot loop under a stubbed 120 Hz requestAnimationFrame (installed before the page runs)
+async function capLoop() {
+  const context = await browser.newContext({ viewport: { width: W, height: H } });
+  await context.addInitScript(() => {
+    const raf = window.requestAnimationFrame.bind(window);
+    const S = window.__rafStub = { on: false, calls: 0, t: 0 };
+    window.requestAnimationFrame = (cb) => (S.on ? setTimeout(() => { S.t += 1000 / 120; S.calls++; cb(S.t); }, 0) : raf(cb));
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(600000);
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${BASE}?autostart=1&tex=0.1&noauto=1&nosave=1&tier=low`);
+  await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000 });
+  const r = await page.evaluate(async () => {
+    const rs = window.__medina.game.world.rs, S = window.__rafStub;
+    let begins = 0; const bf = rs.beginFrame.bind(rs); rs.beginFrame = (now) => { begins++; return bf(now); };
+    rs.applySettings({ fpsCap: 60 });
+    S.t = performance.now(); S.on = true;
+    await new Promise((res) => setTimeout(res, 500));
+    const f0 = window.__frames, c0 = S.calls, b0 = begins, t0 = S.t;
+    await new Promise((res) => { const f = () => (S.calls - c0 >= 120 ? res() : setTimeout(f, 20)); f(); });
+    const frames = window.__frames - f0, sec = (S.t - t0) / 1000, wired = begins - b0 > 0;
+    S.on = false; rs.applySettings({ fpsCap: 'display' });
+    return { stubCalls: S.calls - c0, frames, stubSec: +sec.toFixed(3), fps: +(frames / sec).toFixed(2), wired };
+  });
+  await context.close();
+  // P's own branch predates the foundation's boot loop: until it calls rs.beginFrame (requests/P.md #1) the
+  // cap cannot act on the loop, which is reported as pending rather than passed
+  if (!r.wired) return { ...r, pending: 'the boot loop never calls rs.beginFrame (docs/requests/P.md #1)', ok: null };
+  return { ...r, ok: Math.abs(r.fps - 60) <= 1.5 };
 }
 
 async function nightSky(page) {
   const take = async (night) => {
     await page.evaluate((night) => {
       const M = window.__medina, G = M.game, u = G.world.sky.uniforms;
-      if (!window.__skySave) window.__skySave = { z: u.uZenith.value.clone(), h: u.uHorizon.value.clone(), n: u.uNight.value, s: u.uStars.value, sun: G.world.light.sun.intensity };
+      if (!window.__skySave) window.__skySave = { z: u.uZenith.value.clone(), h: u.uHorizon.value.clone(), n: u.uNight.value, s: u.uStars.value, m: u.uMoonSize.value, sun: G.world.light.sun.intensity };
       const S = window.__skySave;
-      if (night) { u.uZenith.value.set('#070b1a'); u.uHorizon.value.set('#1c2540'); u.uNight.value = 1; u.uStars.value = 1; G.world.light.sun.intensity = 0.9; }
-      else { u.uZenith.value.copy(S.z); u.uHorizon.value.copy(S.h); u.uNight.value = S.n; u.uStars.value = S.s; G.world.light.sun.intensity = S.sun; }
+      // the values the LookDirector writes for the night preset: uNight = night, uStars = stars, uMoonSize = moonSize (1) × moon (1)
+      if (night) { u.uZenith.value.set('#070b1a'); u.uHorizon.value.set('#1c2540'); u.uNight.value = 1; u.uStars.value = 1; u.uMoonSize.value = 1 * 1; G.world.light.sun.intensity = 0.9; }
+      else { u.uZenith.value.copy(S.z); u.uHorizon.value.copy(S.h); u.uNight.value = S.n; u.uStars.value = S.s; u.uMoonSize.value = S.m; G.world.light.sun.intensity = S.sun; }
       M.photo(60, 0, 1, 0.2);
     }, night);
     // look up at the sky above the rooftops
@@ -337,6 +428,18 @@ async function nightSky(page) {
     return page.evaluate(async (b64) => {
       const img = await createImageBitmap(await (await fetch('data:image/png;base64,' + b64)).blob());
       const c = new OffscreenCanvas(img.width, img.height), x = c.getContext('2d'); x.drawImage(img, 0, 0);
+      // the moon: where it projects, its expected radius in pixels, and how its disc stands out of the sky
+      const G = window.__medina.game, cam = G.camera, u = G.world.sky.uniforms;
+      const p = cam.position.clone().addScaledVector(u.uMoonDir.value.clone().normalize(), 500).project(cam);
+      const mx = (p.x * 0.5 + 0.5) * img.width, my = (0.5 - p.y * 0.5) * img.height;
+      const rPx = (0.045 * u.uMoonSize.value) / (cam.fov * Math.PI / 180) * img.height;
+      const full = x.getImageData(0, 0, img.width, img.height).data;
+      const lumAt = (px, py) => { const i = (Math.round(py) * img.width + Math.round(px)) * 4; return (0.2126 * full[i] + 0.7152 * full[i + 1] + 0.0722 * full[i + 2]) / 255; };
+      const ring = (r0, r1) => { let s = 0, n = 0; for (let a = 0; a < 64; a++) for (let rr = r0; rr <= r1; rr += 0.5) { const px = mx + Math.cos(a / 64 * 6.283) * rr, py = my + Math.sin(a / 64 * 6.283) * rr; if (px >= 0 && py >= 0 && px < img.width && py < img.height) { s += lumAt(px, py); n++; } } return n ? s / n : null; };
+      let bright = 0; const R = Math.ceil(rPx * 3);
+      for (let yy = -R; yy <= R; yy++) for (let xx = -R; xx <= R; xx++) { const px = mx + xx, py = my + yy; if (px >= 0 && py >= 0 && px < img.width && py < img.height && lumAt(px, py) > 0.55) bright++; }
+      const onScreen = p.z < 1 && mx > rPx && my > rPx && mx < img.width - rPx && my < img.height - rPx;
+      const moon = { onScreen, x: Math.round(mx), y: Math.round(my), rPx: +rPx.toFixed(1), disc: onScreen ? +ring(0, rPx * 0.6).toFixed(3) : null, around: onScreen ? +ring(rPx * 2.5, rPx * 3.5).toFixed(3) : null, brightRadius: +Math.sqrt(bright / Math.PI).toFixed(1) };
       const w = img.width, h = Math.floor(img.height * 0.45), d = x.getImageData(0, 0, w, h).data;
       const L = (i) => (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
       let stars = 0, sum = 0;
@@ -347,12 +450,14 @@ async function nightSky(page) {
         // a star: a local peak standing out of a dark sky background
         if (peak && l > 0.2 && m / 4 < 0.3 && l > m / 4 + 0.1) stars++;
       }
-      return { stars, meanSkyLum: +(sum / (w * h)).toFixed(3) };
+      return { stars, meanSkyLum: +(sum / (w * h)).toFixed(3), moon };
     }, png.toString('base64'));
   };
   const night = await take(true), day = await take(false);
   await page.evaluate(() => { const G = window.__medina.game; G.camRig.override = null; G.camRig.overrideW = 0; G.camRig.overrideTarget = 0; });
-  return { night, day, ok: night.stars >= 30 && night.stars > day.stars * 5 && night.meanSkyLum < day.meanSkyLum };
+  // stars, a dark sky, and a moon disc of about the expected size standing out of it
+  const m = night.moon, moonOk = m.onScreen && m.disc > m.around + 0.3 && m.brightRadius > m.rPx * 0.5 && m.brightRadius < m.rPx * 1.6;
+  return { night, day, moonOk, ok: night.stars >= 30 && night.stars > day.stars * 5 && night.meanSkyLum < day.meanSkyLum && night.meanSkyLum < 0.2 && moonOk };
 }
 
 async function lutCheck(page) {
@@ -460,11 +565,18 @@ if (compare && fs.existsSync(compare) && Object.keys(result.tiers).length) {
       `, programs ${A.programsFirstPass}/${A.programsSecondPass} → ${B.programsFirstPass}/${B.programsSecondPass}`);
   }
 }
+if (Object.keys(result.tiers).length) {
+  console.log('\n§8.5 budget (calls shadow + main, triangles; per frame at 60 fps):');
+  for (const [tier, T] of Object.entries(result.tiers)) {
+    const B = BUDGET[tier], over = Object.entries(T.budget || {}).filter(([, v]) => !v.ok);
+    console.log(` ${tier.padEnd(7)} budget ${B ? `${B.calls} calls / ${B.tris / 1000}k tris` : 'n/a'}: ` + Object.entries(T.budget || {}).map(([k, v]) => `${k} ${v.calls}/${Math.round(v.tris / 1000)}k${v.ok ? '' : ' OVER'}`).join(', ') + (over.length ? `  (WARN ${over.length} spot${over.length > 1 ? 's' : ''} over)` : ''));
+  }
+}
 if (Object.keys(result.checks).length) {
   const brief = JSON.parse(JSON.stringify(result.checks));
   if (brief.slowgpu?.trace) brief.slowgpu.trace = brief.slowgpu.trace.filter((e, i) => i % 4 === 0);
   console.log('\nchecks', JSON.stringify(brief, null, 1));
-  for (const [k, v] of Object.entries(result.checks)) if (v && typeof v === 'object' && 'ok' in v) console.log(`${v.ok ? 'PASS' : 'FAIL'} ${k}`);
+  for (const [k, v] of Object.entries(result.checks)) if (v && typeof v === 'object' && 'ok' in v) console.log(`${v.ok === null ? 'PENDING' : v.ok ? 'PASS' : 'FAIL'} ${k}${v.pending ? ` (${v.pending})` : ''}`);
 }
 if (errors.length) console.log('\nerrors:\n' + [...new Set(errors)].slice(0, 20).join('\n'));
 await browser.close();

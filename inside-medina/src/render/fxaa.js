@@ -31,11 +31,11 @@ void main(){
     col = (lb < lMin || lb > lMax) ? a : b;
   }
   if (uSharp > 0.) {
-    // CAS: sharpen less where local contrast is already high
-    vec3 mn = min(M, min(min(NW, NE), min(SW, SE))), mx = max(M, max(max(NW, NE), max(SW, SE)));
-    vec3 amp = sqrt(clamp(min(mn, 2. - mx) / max(mx, vec3(1e-4)), 0., 1.));
-    vec3 w = amp * (-1. / mix(8., 5., uSharp));
-    col = clamp(((NW + NE + SW + SE) * w + col) / (1. + 4. * w), 0., 1.);
+    // CAS on luma only (no coloured fringes): sharpen less where local contrast is already high
+    float amp = sqrt(clamp(lMin / max(lMax, 1e-4), 0., 1.));
+    float w = amp * (-1. / mix(8., 5., uSharp)), lc = lum(col);
+    float ls = ((lNW + lNE + lSW + lSE) * w + lc) / (1. + 4. * w);
+    col = clamp(col + (ls - lc), 0., 1.);
   }
   float n = h12(gl_FragCoord.xy + fract(uTime) * 917.) - .5;
   float n2 = h12(gl_FragCoord.xy * 1.37 + fract(uTime * 1.3) * 331.) - .5;

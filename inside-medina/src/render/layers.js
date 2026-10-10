@@ -3,11 +3,16 @@ import * as THREE from 'three';
 // Render layers. Objects on BEAMS (beams, sun shafts, haze, soft particles) are drawn after
 // the opaque scene in a second "soft" pass that can read the scene depth, so additive
 // volumes fade where they meet geometry instead of cutting hard lines into it.
-// Materials on BEAMS must not use scene lights (ShaderMaterial / MeshBasicMaterial).
+// Materials on BEAMS must not use scene lights (ShaderMaterial / MeshBasicMaterial): the soft pass
+// draws through a scene of its own that sees no lights.
+// Every custom shader, on any layer, ends its fragment shader with `#include <fog_fragment>`: in the
+// LDR fallback (no float render targets) that chunk stores the colour Reinhard-encoded and the post
+// chain decodes it, so a shader without it comes out too bright there.
 export const LAYERS = { DEFAULT: 0, BEAMS: 3 };
 
 // Shared uniforms of the soft pass, updated by PostFX every frame. Spread them into a
-// ShaderMaterial's uniforms ({ ...SOFT, uColor: … }) and include SOFT_GLSL in its fragment shader.
+// ShaderMaterial's uniforms ({ ...SOFT, uColor: … }) and include SOFT_GLSL in its fragment shader:
+//   `${SOFT_GLSL} void main(){ … gl_FragColor = vec4(c * softFade(.6), 1.); #include <fog_fragment> }`
 // uDepth is null (an empty texture) whenever the soft pass is off, so no material ever samples
 // a depth texture that is attached to the framebuffer it draws into.
 export const SOFT = {

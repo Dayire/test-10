@@ -37,9 +37,26 @@ const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vect
 const _e = new THREE.Euler(), _w = new THREE.Matrix4(), _h = new THREE.Matrix4(), _mir = new THREE.Matrix4().makeScale(-1, 1, 1);
 const Y = new THREE.Vector3(0, 1, 0);
 
+// The camera's view on the play plane (z = 0), written by the renderer every frame: the x it looks at and
+// the half-width it sees there. Systems that draw only what is near use it, so menu, intro and cinematic
+// shots far from the boy still show what is in frame.
+const _vd = new THREE.Vector3();
+export const VIEW = {
+  x: 0, half: 0, valid: false,
+  from(camera) {
+    camera.getWorldDirection(_vd);
+    const p = camera.position, t = _vd.z < -0.05 ? -p.z / _vd.z : 0;
+    this.x = p.x + _vd.x * Math.min(t, 400);
+    const depth = Math.max(Math.abs(p.z), Math.hypot(this.x - p.x, p.z));
+    this.half = camera.isPerspectiveCamera ? depth * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.aspect : 30;
+    this.valid = true;
+  },
+};
+
 // Pigeons: three instanced draws (body, head, wings) for the whole flock. Each frame the birds within
-// RANGE metres of the boy are packed at the front of the instance buffers and the draw count is cut to
-// them, with bounds around just those, so a stretch of the level without birds costs no draw at all.
+// RANGE metres of the boy, or inside the camera's view, are packed at the front of the instance buffers
+// and the draw count is cut to them, with bounds around just those, so a stretch of the level without
+// birds costs no draw at all.
 const RANGE = 30;
 export class Flock {
   constructor(scene, mats, spots) {
@@ -107,8 +124,9 @@ export class Flock {
   write() {
     const { body, head, wings } = this;
     let k = 0;
+    const vx = VIEW.x, vh = VIEW.valid ? VIEW.half + 4 : -1;
     for (const b of this.birds) {
-      if (b.state === 'gone' || Math.abs(b.pos.x - this.focusX) > RANGE) continue;
+      if (b.state === 'gone' || (Math.abs(b.pos.x - this.focusX) > RANGE && Math.abs(b.pos.x - vx) > vh)) continue;
       _q.setFromAxisAngle(Y, b.yaw);
       _m.compose(b.pos, _q, _s);
       body.setMatrixAt(k, _m); body.setColorAt(k, b.color);
