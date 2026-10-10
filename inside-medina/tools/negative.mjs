@@ -11,7 +11,7 @@ if (!exists(`tools/neg/${suite}.mjs`)) { console.log(`no negative suite for ${su
 const mod = await import(new URL(`./neg/${suite}.mjs`, import.meta.url));
 let scenarios = mod.scenarios.filter((s) => !s.optIn || o[s.optIn]);
 if (o.only) scenarios = scenarios.filter((s) => s.name.includes(o.only));
-if (!scenarios.length) { console.log(`no scenario of ${suite} matches${o.only ? ` --only ${o.only}` : ''}`); process.exit(1); }
+if (!scenarios.length && !o.selftestFail) { console.log(`no scenario of ${suite} matches${o.only ? ` --only ${o.only}` : ''}`); process.exit(1); }
 if (o.selftestFail) scenarios.push({ name: 'selftest: broken assertion', cp: 0, run: async ({ page }) => page.evaluate(() => __medina.state().x), check: (x) => (x === -12345 ? true : `x is ${x}, the selftest expects -12345`) });
 
 const browser = await launch();
