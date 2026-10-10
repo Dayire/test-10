@@ -90,25 +90,27 @@ export const scenarios = [
         { cp: 11, mirror: 'MM', lock: 'ML', right: -45, park: 312.5, pre: () => get('MM').setState({ x: 330, y: 0, alpha: 15 }) },
         { cp: 12, mirror: 'F1', lock: 'LD1', right: 30, park: 346.5 },
       ];
-      const out = [];
+      const out = [], odd = [];
       for (const R of rooms) {
         const lit = [];
         for (let n = -6; n < 6; n++) {
           const a = n * 15;
-          M.checkpoint(R.cp); R.pre?.(); M.teleport(R.park, R.park > 176 && R.park < 200 ? 0 : 0, 1);
+          M.checkpoint(R.cp); R.pre?.(); M.teleport(R.park, 0, 1);
           get(R.mirror).setState({ ...get(R.mirror).getState(), alpha: a });
           let max = 0;
           for (let i = 0; i < 20; i++) { sim(0.5, { x: 0 }); max = Math.max(max, get(R.lock).level); }
           if (get(R.lock).done || max >= 1) lit.push(a);
+          if (G.mode !== 'play' || G.player.dead) odd.push({ lock: R.lock, a, mode: G.mode, dead: G.player.dead });
         }
         out.push({ lock: R.lock, lit });
       }
-      return out;
+      return { out, odd };
     }); },
     check: (r) => {
       const want = { L4: [-45], LJ: [0], L7: [45], L8: [60], ML: [-45], LD1: [30] };
-      const bad = r.filter((x) => JSON.stringify(x.lit) !== JSON.stringify(want[x.lock]));
-      return bad.length ? `locks lit by other notches: ${JSON.stringify(bad)}` : true;
+      const bad = r.out.filter((x) => JSON.stringify(x.lit) !== JSON.stringify(want[x.lock]));
+      // no setting of a lab mirror may end the chapter or kill the boy (a ray sent back into the fortress eye did)
+      return bad.length || r.odd.length ? `locks lit by other notches: ${JSON.stringify(bad)} odd: ${JSON.stringify(r.odd.slice(0, 4))}` : true;
     },
   },
   {
@@ -220,8 +222,8 @@ export const scenarios = [
     run: async ({ page }) => { await prep(page); return page.evaluate(() => {
       const { M, G, get, until, walkTo } = __neg;
       const m = get('M1');
-      // from its right side, pull... push it left out of the room
-      walkTo(m.body.x + 0.55); until(() => G.player.facing === -1, { x: -0.15 }, 1);
+      // from its right side, push it left out of the room
+      M.teleport(m.body.x + 0.55, 0, -1); M.sim(0.1, { x: 0 });
       until(() => !!G.player.grip, { x: 0, grab: true }, 1);
       const tLost = until(() => m.lostT > 0, { x: -1, grab: true }, 12);
       let t = 0; while (m.lostT > 0 && t < 5) { M.sim(1 / 120, { x: 0 }); t += 1 / 120; }
@@ -295,8 +297,8 @@ export const scenarios = [
       const { M, G, get, until } = __neg;
       const cap = get('captain');
       get('LD1').setState({ level: 1, done: true }); get('G12').setState({ open: 1 });
-      M.teleport(382, 0, 1);
-      cap.activate(386);
+      M.teleport(401, 0, 1);
+      cap.activate(388);
       const states = new Set(); let stuns = 0, prev = cap.state;
       for (let i = 0; i < 120 * 6; i++) { M.sim(1 / 120, { x: 0 }); if (cap.state === 'stunned' && prev !== 'stunned') stuns++; prev = cap.state; states.add(cap.state); }
       return { stuns, states: [...states], dead: G.player.dead, kind: G.player.deathKind };

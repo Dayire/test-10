@@ -82,10 +82,12 @@ export class Plate {
 
 // ------------------------------------------------------------------ gate (portcullis)
 export class Gate {
-  constructor(game, { x, y0, h, w = 2.2, thick = 0.4, lift = 2.4, kind = 'pointed', z = 0 }) {
+  // a lattice portcullis lets light through (light: 'block' for a solid door); lifted, it slides up past the
+  // window above it, which would otherwise shut the ray that holds a sun-bolt (FULL_GAME §3.2 II-C2)
+  constructor(game, { x, y0, h, w = 2.2, thick = 0.4, lift = 2.4, kind = 'pointed', z = 0, light = 'pass' }) {
     this.game = game;
     this.x = x; this.y0 = y0; this.h = h; this.lift = lift;
-    this.solid = game.phys.addSolid(x - thick / 2, y0, x + thick / 2, y0 + h, { ledges: false, surface: 'wood', kind: 'gate' });
+    this.solid = game.phys.addSolid(x - thick / 2, y0, x + thick / 2, y0 + h, { ledges: false, surface: 'wood', kind: 'gate', light });
     this.open = 0; this.target = 0; this.vel = 0;
     this.source = null;
     // lattice portcullis mesh

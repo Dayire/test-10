@@ -1,4 +1,4 @@
-import { LightWorld, ALL, BLOCKERS, TARGET, MIRROR, BODY, NONE, KIND_NAME, notchOf } from './trace.js';
+import { LightWorld, ALL, BLOCKERS, TARGET, MIRROR, BODY, NONE, KIND_NAME, notchOf, DEG } from './trace.js';
 import { BeamRenderer } from './beams.js';
 import { SearchlightSource } from './sources.js';
 import { LampEye } from './targets.js';
@@ -116,7 +116,7 @@ export class LightSystem {
       W.trace(src.ox, src.oy, src.theta, src.I, { maxSeg: this.maxSeg, minI: this.minI, out: R, skip: src.skip || null });
       segs += R.n;
       for (const h of R.hits) {
-        if (h.kind === TARGET) { const g = h.obj; g._I += h.I; if (h.seg > 0) g._Ir += h.I; if (!g._hit || h.I > g._hit.I) g._hit = h; }
+        if (h.kind === TARGET) { const g = h.obj; g._I += h.I; if (h.seg > 0 && (g.face == null || Math.cos((h.theta - g.face) * DEG) < 0)) g._Ir += h.I; if (!g._hit || h.I > g._hit.I) g._hit = h; }
         else if (h.kind === MIRROR) { const m = h.obj; m._lit += h.I; if (h.I > m._bestI) { m._bestI = h.I; m._inTheta = h.theta; } }
         else if (h.kind === BODY) { const o = h.obj.owner; if (o?.onLight) { o._lightI = (this.lit.has(o) ? o._lightI : 0) + h.I; this.lit.add(o); } }
       }

@@ -324,7 +324,7 @@ export function* buildLab(game, kit) {
   const fortGlow = new THREE.Sprite(glowMat); fortGlow.scale.setScalar(5); fortGlow.position.set(420, 8.0, -4); game.add(fortGlow);
   const fortSrc = game.lightPool?.addDynamic(fortGlow, 2, { intensity: 6, color: 0xffa860, distance: 14, decay: 1.4 });
   const fortState = { hit: false, t: 0 };
-  const eye = add(new LampEye(game, { id: 'fortress', x: 420, y: 8.0, z: -4, r: 1.5, hold: 0.5, onHit: () => { if (fortState.hit) return; fortState.hit = true; fortState.t = 0; game.sfx('answeredLight', 420); game.audio?.stinger?.('answeredLight'); game.emit('fortressOut', {}); } }));
+  const eye = add(new LampEye(game, { id: 'fortress', x: 420, y: 8.0, z: -4, r: 1.5, hold: 0.5, face: 0, onHit: () => { if (fortState.hit) return; fortState.hit = true; fortState.t = 0; game.sfx('answeredLight', 420); game.audio?.stinger?.('answeredLight'); game.emit('fortressOut', {}); } }));
   L.entities.push({ id: 'fortressLamp', step(dt) { if (!fortState.hit) return; const was = fortState.t; fortState.t += dt; if (was < 2.4 && fortState.t >= 2.4) game.completeChapter(); },
     render() { const t = fortState.t, k = fortState.hit ? (t < 0.5 ? 1 + t * 6 : Math.max(0, 4 - (t - 0.5) * 3)) : 1; fortGlow.material.opacity = 0.9 * Math.min(1, k); fortGlow.scale.setScalar(5 * Math.max(0.2, k)); if (fortSrc) { fortSrc.enabled = k > 0.05; fortSrc.pos.set(420, 8.0, -3); fortSrc.intensity = 6 * k; } },
     getState: () => ({ ...fortState }), setState: (s) => { fortState.hit = s.hit; fortState.t = s.t; }, dispose() { if (fortSrc) game.lightPool?.remove(fortSrc); } });

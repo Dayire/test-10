@@ -112,11 +112,12 @@ export class Photocell extends SunLock {
 
 // A lamp's eye (FULL_GAME §6.2): a circle at the lamp; reflected light (not the lamp's own beam, and not a
 // direct ray) held on it for 0.1 s dazzles the lamp (7 s, +50 % with assist) or calls onHit. It re-arms
-// once the reflection has left it for half a second.
+// once the reflection has left it for half a second. `face` (deg): an eye behind a window that looks that way only
+// sees light travelling toward it (the fortress lamp looks east, so a ray sent back west-to-east never counts).
 export class LampEye {
-  constructor(game, { id, x, y, z = -8, r = 0.8, lamp = null, onHit = null, hold = 0.1, dazzle = 7 } = {}) {
+  constructor(game, { id, x, y, z = -8, r = 0.8, lamp = null, onHit = null, hold = 0.1, dazzle = 7, face = null } = {}) {
     this.game = game; if (id !== undefined) this.id = id;
-    this.x = x; this.y = y; this.z = z; this.r = r; this.lamp = lamp; this.onHit = onHit; this.hold = hold; this.dazzle = dazzle;
+    this.x = x; this.y = y; this.z = z; this.r = r; this.lamp = lamp; this.onHit = onHit; this.hold = hold; this.dazzle = dazzle; this.face = face;
     this.isTarget = true; this.shape = 'circle'; this.kind = 'eye';
     this.t = 0; this.off = 0; this.fired = false; this.I = 0; this.lit = false; this.level = 0;
     this.wantsLight = !!(lamp || onHit);
