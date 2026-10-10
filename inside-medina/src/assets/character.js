@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { lathe, gridGeom } from './geom.js';
+import { SHADOW_PASS } from '../render/shadowpolicy.js';
+
+// the merged character casts through one mesh of every part (materials do not matter to a depth pass): it draws
+// in the shadow passes only, and the per-material meshes in every other pass
+const _inFrustum = THREE.Mesh.prototype.intersectsFrustum;
+function shadowOnly(frustum) { return SHADOW_PASS.on && _inFrustum.call(this, frustum); }
+function notInShadow(frustum) { return !SHADOW_PASS.on && _inFrustum.call(this, frustum); }
 
 // Procedural, jointed characters. Local space: facing +Z, up +Y, left = +X.
 // Every limb segment is a smooth tapered capsule parented to its joint.
@@ -53,9 +60,11 @@ export class Rig {
   }
 
   // Every part is rigid on its joint, so the parts of one material merge into a single skinned
-  // mesh whose vertices each follow one joint with weight 1: the pose is exactly the jointed one, in 5-7 draws per
-  // pass instead of 20 or more (FULL_GAME §8.5). The joints stay plain groups (the skeleton's bones), so the
-  // animator and anything hung on a joint (the guard's lantern) work unchanged; this.meshes lists the merged meshes.
+  // mesh whose vertices each follow one joint with weight 1: the pose is exactly the jointed one, in 5-7 draws
+  // instead of 20 or more (FULL_GAME §8.5), and one or two in each shadow pass (this.shadowMeshes: every casting part,
+  // by material side, as a depth pass culls faces by its material's side). The
+  // joints stay plain groups (the skeleton's bones), so the animator and anything hung on a joint (the guard's
+  // lantern) work unchanged; this.meshes lists the per-material meshes.
   merge() {
     const root = this.root, bones = Object.values(this.j);
     root.updateMatrixWorld(true);
@@ -68,6 +77,7 @@ export class Rig {
     }
     // bind pose in the root's space, wherever the root stands
     const skeleton = new THREE.Skeleton(bones, bones.map((b) => new THREE.Matrix4().multiplyMatrices(toRoot, b.matrixWorld).invert())), out = [];
+    const casters = new Map(); // material side -> geometries (a depth pass culls faces by its material's side)
     for (const g of groups.values()) {
       const geos = g.parts.map((m) => {
         const src = m.geometry, geo = new THREE.BufferGeometry();
@@ -83,6 +93,13 @@ export class Rig {
         return geo;
       });
       const merged = mergeGeometries(geos, false);
+      if (g.cast) {
+        const c = new THREE.BufferGeometry();
+        for (const k of ['position', 'skinIndex', 'skinWeight']) c.setAttribute(k, merged.attributes[k]);
+        c.setIndex(merged.index);
+        if (!casters.has(g.mat.side)) casters.set(g.mat.side, []);
+        casters.get(g.mat.side).push(c);
+      }
       for (const geo of geos) geo.dispose();
       const sm = new THREE.SkinnedMesh(merged, g.mat);
       sm.name = `${this.spec.name}:${g.mat.name || 'part'}`;
@@ -91,7 +108,20 @@ export class Rig {
       sm.bind(skeleton, new THREE.Matrix4());
       // culling uses the rest pose's sphere: widen it for reaching arms, hanging and crawling
       sm.computeBoundingSphere(); sm.boundingSphere.radius += 0.6 * this.spec.hipH;
+      sm.intersectsFrustum = notInShadow;
       out.push(sm);
+    }
+    this.shadowMeshes = [];
+    for (const [side, list] of casters) {
+      const geo = mergeGeometries(list, false);
+      const mat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side });
+      mat.name = `${this.spec.name}:shadow`;
+      const sh = new THREE.SkinnedMesh(geo, mat);
+      sh.name = mat.name; sh.castShadow = true; sh.receiveShadow = false;
+      root.add(sh); sh.bind(skeleton, new THREE.Matrix4());
+      sh.computeBoundingSphere(); sh.boundingSphere.radius += 0.6 * this.spec.hipH;
+      sh.intersectsFrustum = shadowOnly;
+      this.shadowMeshes.push(sh);
     }
     for (const m of this.meshes) { m.removeFromParent(); m.geometry.dispose(); }
     this.meshes = out;

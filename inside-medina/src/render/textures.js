@@ -191,7 +191,7 @@ export class TextureBaker {
   bake(def, into = null) { return this.run(this.prepare(def, into)); }
 
   // after a lost and restored GL context: render every baked surface again into its own targets
-  rebakeAll() { this._finishCompiled = false; for (const j of this.jobs || []) this.bake(j.def, j); return (this.jobs || []).length; }
+  rebakeAll() { this._finishCompiled = false; for (const j of this.jobs || []) this.bake(j.def, j); this.releaseScratch(); return (this.jobs || []).length; }
   // the float scratch targets are only needed while baking
   releaseScratch() { for (const rt of this.scratch.values()) rt.dispose(); this.scratch.clear(); }
 }

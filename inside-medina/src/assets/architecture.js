@@ -7,8 +7,8 @@ import { Overrides } from './library.js';
 // ---------------------------------------------------------------------------
 export function archOutline(kind, w, hs, rise, grow = 0, n = 20) {
   const a = w / 2;
+  if (kind === 'pointed') return pointedArchPoints(w, hs, rise, n, grow); // halves n itself on lite geometry
   if (DETAIL.lite) n = Math.max(4, Math.round(n / 2));
-  if (kind === 'pointed') return pointedArchPoints(w, hs, rise, n, grow);
   if (kind === 'horseshoe') {
     const e = 0.38;
     const R0 = a / Math.cos(e);
