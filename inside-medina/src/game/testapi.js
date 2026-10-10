@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CHAPTERS } from '../chapters/index.js';
 
 // window.__medina: the generic test API every bot, negative suite and tool
 // uses. state() is the chapter-independent core plus L.extraState() under
@@ -12,6 +13,9 @@ export function installTestApi(g) {
     game: g,
     ext: g.ext,
     chapter: () => g.chapterId,
+    // the chapter registry the loader reads (tests add or patch entries here: a dev server may serve the module
+    // under a versioned URL, so importing it again can give another instance)
+    registry: CHAPTERS,
     loadChapter: (id, cp = 0, opts = {}) => g.loadChapter(id, cp, { reason: 'select', ...opts }).then(() => M.state()),
     state: () => {
       const p = g.player;
@@ -39,7 +43,8 @@ export function installTestApi(g) {
       return M.state();
     },
     teleport: (x, y = 0, facing = 1) => { g.player.spawn(x, y, facing); g.camRig.snapNext = true; return M.state(); },
-    checkpoint: (i) => { g.cpIndex = i; g.level.prepare?.(i, g); g.cpSnap = g.snapshot(); g.respawn(); return M.state(); },
+    // the chapter as a fresh load at checkpoint i leaves it (initial snapshot, prepare(i), spawn)
+    checkpoint: (i) => { g.restore(g.initialSnap); g.placeAt(i); g.respawn(); return M.state(); },
     // jump to the chapter's scripted finale (L.finale.from = [x, y])
     finale: () => {
       const F = g.level?.finale;

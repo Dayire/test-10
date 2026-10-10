@@ -31,9 +31,9 @@ export class LightPool {
     this.sources.push(s);
     return s;
   }
-  remove(src) { const i = this.sources.indexOf(src); if (i < 0) return; this.sources.splice(i, 1); for (const l of this.lights) { if (l.userData.src === src) l.userData.src = undefined; } }
-  clear() { this.sources.length = 0; for (const l of this.lights) { l.userData.src = undefined; l.intensity = 0; this.style(l, null); } }
-  setColor(c) { this.color.set(c); for (const l of this.lights) if (!l.userData.src?.color) l.color.copy(this.color); }
+  remove(src) { const i = this.sources.indexOf(src); if (i < 0) return; this.sources.splice(i, 1); for (const l of this.lights) { if (l.userData.src === src) { l.userData.src = undefined; l.userData.was = src; } } }
+  clear() { this.sources.length = 0; for (const l of this.lights) { l.userData.src = undefined; l.userData.was = undefined; l.intensity = 0; this.style(l, null); } }
+  setColor(c) { this.color.set(c); for (const l of this.lights) if (!(l.userData.src || l.userData.was)?.color) l.color.copy(this.color); }
   // a light takes its source's own look, or the pool's
   style(l, s) { l.color.copy(s?.color || this.color); l.distance = s?.distance ?? this.distance; l.decay = s?.decay ?? this.decay; }
   setMul(m) { this.mul = m; }
@@ -51,24 +51,32 @@ export class LightPool {
     order.sort((a, b) => (b.rank - a.rank) || (a.d - b.d));
     const n = this.lights.length;
     const want = order.length > n ? order.slice(0, n) : order;
-    // keep lights on sources that are still wanted to avoid popping
+    // keep lights on sources that are still wanted to avoid popping; a released light keeps its source's look
+    // (colour, reach) where it was until it has faded out
     const taken = new Set();
     for (const l of this.lights) {
       const s = l.userData.src;
       if (s && want.includes(s)) taken.add(s);
-      else if (s) { l.userData.src = undefined; if (s.color || s.distance !== undefined || s.decay !== undefined) this.style(l, null); }
+      else if (s) { l.userData.src = undefined; l.userData.was = s; }
     }
     for (const s of want) {
       if (taken.has(s)) continue;
-      const free = this.lights.find((l) => l.userData.src === undefined);
+      // the dimmest free light: a static source waits until one has faded out (no cut); a priority one takes it now
+      let free = null;
+      for (const l of this.lights) if (l.userData.src === undefined && (!free || l.intensity < free.intensity)) free = l;
       if (!free) break;
-      free.userData.src = s; free.position.copy(s.pos); free.intensity = 0; taken.add(s);
+      if (!s.dynamic && free.intensity > 0.05) continue;
+      free.userData.src = s; free.userData.was = undefined; free.position.copy(s.pos); free.intensity = 0; taken.add(s);
       this.style(free, s);
     }
     const k = 1 - Math.exp(-6 * dt);
     for (const l of this.lights) {
       const s = l.userData.src;
-      if (s === undefined) { l.intensity += (0 - l.intensity) * k; continue; }
+      if (s === undefined) {
+        l.intensity += (0 - l.intensity) * k;
+        if (l.userData.was && l.intensity < 0.01) { l.intensity = 0; l.userData.was = undefined; this.style(l, null); }
+        continue;
+      }
       if (s.dynamic) { l.position.copy(s.pos); l.intensity = s.intensity * this.mul; continue; }
       const flick = 0.88 + Math.sin(time * 9 + s.phase) * 0.07 + Math.sin(time * 23 + s.phase * 2) * 0.05;
       l.intensity += (s.intensity * this.mul * flick - l.intensity) * k;

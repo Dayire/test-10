@@ -209,7 +209,7 @@ export const scenarios = [
     name: 'loader serialises and recovers', chapter: 'lab', cp: 0,
     run: ({ page }) => page.evaluate(async () => {
       const M = __medina, G = M.game, Ld = G.loader;
-      const { CHAPTERS } = await import('/src/chapters/index.js');
+      const CHAPTERS = M.registry;
       const out = {};
       // 1. three loads at once
       const orig = Ld._load; let active = 0, maxActive = 0;
@@ -260,6 +260,122 @@ export const scenarios = [
       if (!i.e1 || i.chapter !== 'lab' || i.mode !== 'play' || !i.level || i.card || i.fadeTarget !== 0 || i.suspended) return `failed import: ${JSON.stringify(i)}`;
       const b = r.buildFail;
       if (!b.e2 || b.chapter !== 'souk' || b.mode !== 'intro' || !b.title || b.card || b.errs.join() !== 'brokenImport,brokenBuild') return `failed build: ${JSON.stringify(b)}`;
+      return true;
+    },
+  },
+  {
+    // a chain whose next chapter cannot be imported (a flaky network, a redeploy) never strands the boy in the ended
+    // chapter: the import is retried behind the card, then the title comes up in place over that chapter, where
+    // pause, play and the finale work again; replaying the finale chains once the import succeeds
+    name: 'chain import fails: retry, then title', cp: 6,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game, D = G.director, P = G.world.rs.post.params;
+      const CHAPTERS = M.registry;
+      const until = (f, ms) => new Promise((r) => { const t0 = performance.now(); const k = () => (f() || performance.now() - t0 > ms ? r() : setTimeout(k, 50)); k(); });
+      const card = () => !document.getElementById('card').classList.contains('hidden');
+      const def = CHAPTERS.find((c) => c.id === 'sundown'), load = def.load;
+      let fails = Infinity, imports = 0;
+      def.load = () => { imports++; return fails-- > 0 ? Promise.reject(new TypeError('Failed to fetch dynamically imported module: /src/chapters/sundown/index.js')) : load(); };
+      const errs = [];
+      const off = G.events.on('loadError', (d) => errs.push(`${d.id}:${d.attempt}`));
+      G.params.autostart = undefined; // the title waits for input, as in a real session
+      // 1. the import never succeeds
+      M.finale();
+      for (let i = 0; i < 40 * 120 && G.mode !== 'chapterEnd'; i++) M.sim(1 / 120, { x: 0 });
+      const ended = G.mode;
+      await until(() => errs.length >= 1, 20000);
+      const during = { mode: G.mode, suspended: G.suspended, card: card() };
+      G.setPaused(true); during.paused = G.paused; // refused while the card waits for the retry
+      await until(() => G.mode === 'intro' && G.titleShown && !card(), 30000);
+      await new Promise((r) => setTimeout(r, 300));
+      const t = { errs: [...errs], imports, mode: G.mode, title: G.titleShown, chapter: M.chapter(), x: M.state().x, z: M.state().z, cinema: !!G.cinema, scripted: !!G.player.scripted, suspended: G.suspended, fadeTarget: G.fadeTarget, card: card(), titleEl: !document.getElementById('title').classList.contains('hidden'), letterbox: P.letterbox, ov: Object.keys(D.ov).length, save: { chapter: M.save().chapter, cp: M.save().cp } };
+      G.setPaused(true); t.pause = G.paused; G.setPaused(false);
+      G.beginPlay(); M.sim(0.6, { x: -1 });
+      t.play = { mode: G.mode, x: M.state().x };
+      // 2. the player walks into the finale again; the import fails once more, then succeeds on the retry
+      fails = 1; errs.length = 0;
+      M.finale();
+      for (let i = 0; i < 40 * 120 && G.mode !== 'chapterEnd'; i++) M.sim(1 / 120, { x: 0 });
+      await until(() => M.chapter() === 'sundown' && G.mode === 'play' && !card(), 60000);
+      off(); def.load = load; G.params.autostart = '1';
+      const r2 = { errs: [...errs], chapter: M.chapter(), mode: G.mode, card: card(), suspended: G.suspended, save: { chapter: M.save().chapter, cp: M.save().cp } };
+      return { ended, during, t, r2 };
+    }),
+    check: ({ ended, during, t, r2 }) => {
+      if (ended !== 'chapterEnd') return `the finale never ended: ${ended}`;
+      if (during.mode !== 'chapterEnd' || !during.suspended || !during.card || during.paused) return `while retrying: ${JSON.stringify(during)}`;
+      if (t.errs.join() !== 'sundown:0,sundown:1,sundown:2' || t.imports !== 3) return `retries: ${JSON.stringify(t.errs)} (${t.imports} imports)`;
+      if (t.mode !== 'intro' || !t.title || !t.titleEl || t.chapter !== 'souk' || Math.abs(t.x - 186.2) > 0.2 || t.z !== 0 || t.cinema || t.scripted || t.suspended || t.fadeTarget !== 0 || t.card || t.letterbox !== 0 || t.ov) return `no title over the ended chapter: ${JSON.stringify(t)}`;
+      if (!t.pause) return 'pause refused over the fallback title';
+      if (t.play.mode !== 'play' || !(t.play.x < 185.5)) return `the boy takes no input after the fallback: ${JSON.stringify(t.play)}`;
+      if (t.save.chapter !== 'sundown' || t.save.cp !== 0) return `the save no longer points at the next chapter: ${JSON.stringify(t.save)}`;
+      if (r2.errs.join() !== 'sundown:0' || r2.chapter !== 'sundown' || r2.mode !== 'play' || r2.card || r2.suspended) return `a retry that succeeds: ${JSON.stringify(r2)}`;
+      return true;
+    },
+  },
+  {
+    // restart chapter is a fresh start: prepare(0) runs again over the initial snapshot (it used to be skipped,
+    // so a chapter whose prepare(0) moves anything restarted, and then respawned, in the built state)
+    name: 'restart chapter equals a fresh start', chapter: 'lab', cp: 0,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game;
+      const CHAPTERS = M.registry;
+      const { Crate } = await import('/src/game/entities.js');
+      const base = { id: 'prepared', n: 9, numeral: 'P', glyph: 'rosette', label: 'prepared', next: null, dev: true, exit: '#000000', tone: '#000000' };
+      CHAPTERS.push({ ...base, load: async () => ({ default: { ...base, look: 'goldenHour', needs: ['cobbles', 'wood'], build: (g, kit) => {
+        kit.ground(-20, 40); kit.cp(-100, 1.5, 0, 1); kit.cp(10, 10.5, 0, 1);
+        const c = new Crate(g, 20, 0, 1.0, { id: 'c' });
+        kit.L.entities.push(c);
+        kit.L.prepare = (i) => { c.setState({ x: i === 0 ? 6 : 14, y: 0 }); };
+        kit.L.extraState = () => ({ crate: +c.body.x.toFixed(2) });
+        kit.L.dustRegions.push({ x0: -3, x1: 20, y0: 0.2, y1: 4, z0: -1, z1: 1 });
+        return kit.L;
+      } } }) });
+      const crate = () => M.state().extra.crate;
+      const die = () => { G.player.die('fall'); M.sim(3, { x: 0 }); return { crate: crate(), mode: G.mode, x: M.state().x }; };
+      const moved = () => G.level.entities[0].setState({ x: 25, y: 0 }); // play moved it
+      await G.loadChapter('prepared', 0, { reason: 'restart' });
+      const out = { fresh: crate() };
+      moved(); out.freshDeath = die();
+      moved(); await G.restartChapter(); out.restart = crate();
+      moved(); out.restartDeath = die();
+      moved(); M.checkpoint(0); out.checkpoint0 = crate();
+      M.checkpoint(1); out.checkpoint1 = crate();
+      await G.loadChapter('prepared', 1, { reason: 'restart' }); out.fresh1 = crate();
+      await G.loadChapter('lab', 0, { reason: 'restart' });
+      return out;
+    }),
+    check: (r) => (r.fresh === 6 && r.freshDeath.crate === 6 && r.freshDeath.mode === 'play' && r.restart === 6 && r.restartDeath.crate === 6 && r.restartDeath.mode === 'play' && r.checkpoint0 === 6 && r.checkpoint1 === 14 && r.fresh1 === 14 ? true : `restart vs fresh: ${JSON.stringify(r)}`),
+  },
+  {
+    // over the title the searchlight keeps sweeping for show and never detects; play resumes from the checkpoint's
+    // aim and the shown beam swings back onto it. Restart from checkpoint over the title resumes.
+    name: 'title over the courtyard: live, harmless', cp: 3, query: { autostart: null },
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game, S = G.level.searchlight;
+      const frames = (n) => new Promise((r) => { const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+      const snap = G.cpSnap.ents[S.id];
+      const Z = { x: 0, y: 0, jump: false, grab: false, pause: false, any: false, pointer: null };
+      const shown = [];
+      // exactly what frame() runs under the title (?hold=1 keeps rAF from stepping)
+      for (let i = 0; i < 12 * 120; i++) { G.fixed(1 / 120, Z, true); G.time += 1 / 120; if (i % 60 === 0) shown.push(+S.show.aim.x.toFixed(2)); }
+      await frames(2);
+      const title = { mode: G.mode, held: G.held, aim: +S.aim.x.toFixed(2), snapX: +snap.x.toFixed(2), state: S.state, view: +S.viewAim.x.toFixed(2), show: +S.show.aim.x.toFixed(2), deaths: G.stats.deaths, dead: G.player.dead, x: M.state().x };
+      const span = Math.max(...shown) - Math.min(...shown);
+      G.setPaused(true);
+      const rc = G.restartCheckpoint();
+      const resumed = { rc, paused: G.paused, mode: G.mode, title: G.titleShown };
+      G.beginPlay();
+      const t0 = performance.now();
+      while (Math.abs(S.viewAim.x - S.aim.x) > 0.01 && performance.now() - t0 < 20000) await frames(1);
+      const play = { mode: G.mode, aim: +S.aim.x.toFixed(2), view: +S.viewAim.x.toFixed(2), sec: +((performance.now() - t0) / 1000).toFixed(1) };
+      return { title, span, resumed, play };
+    }),
+    check: ({ title, span, resumed, play }) => {
+      if (title.mode !== 'intro' || !title.held || title.aim !== title.snapX || title.state !== 'sweep' || title.deaths || title.dead) return `the title moved the real lamp or killed: ${JSON.stringify(title)}`;
+      if (!(span > 10) || Math.abs(title.view - title.show) > 0.01) return `no live sweep under the title (span ${span}): ${JSON.stringify(title)}`;
+      if (!resumed.rc || resumed.paused || resumed.mode !== 'intro' || !resumed.title) return `restart checkpoint over the title: ${JSON.stringify(resumed)}`;
+      if (play.mode !== 'play' || Math.abs(play.view - play.aim) > 0.02 || play.aim !== title.snapX) return `play did not resume from the checkpoint's aim: ${JSON.stringify(play)}`;
       return true;
     },
   },
@@ -391,8 +507,9 @@ export const scenarios = [
   {
     // §11.2 acceptance 10: boot to __ready within the baseline + 10 %, and the loading bar paints at least 10 values.
     // The machine is shared, so by default the pre-foundation tree is served alongside (or --base-port N names a
-    // running server of it) and the two trees boot alternately under the same load: the budget is the base median
-    // + 10 %. --absolute times against the recorded baseline instead (an idle machine only).
+    // running server of it) and the two trees boot alternately under the same load, after one warm-up boot each:
+    // five rounds, so one slow boot on either side moves neither median; the budget is the base median + 10 %.
+    // --absolute times against the recorded baseline instead (an idle machine only).
     name: 'boot budget and loading bar', url: false,
     run: async ({ page, o }) => {
       await page.addInitScript(() => {
@@ -412,7 +529,7 @@ export const scenarios = [
       try {
         if (ab) { await boot(ab); await boot(0); }
         const cur = [], base = [];
-        for (let k = 0; k < 3; k++) { if (ab) base.push(await boot(ab)); cur.push(await boot(0)); }
+        for (let k = 0; k < (+o.rounds || 5); k++) { if (ab) base.push(await boot(ab)); cur.push(await boot(0)); }
         const budget = Math.round((ab ? med(base) : baseline.boot.readyMs.warm) * 1.1);
         return { readyMs: cur.map((x) => x.ms), median: med(cur), budget, against: ab ? `base tree${srv ? ' ' + srv.ref : ''} on ${ab}: ${base.map((x) => x.ms).join(' ')}` : `recorded warm ${baseline.boot.readyMs.warm}`, painted: cur[1].painted.length, values: cur[1].painted.join(' ') };
       } finally { srv?.stop(); }

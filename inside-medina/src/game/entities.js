@@ -195,6 +195,11 @@ export class Searchlight {
     this.dir = 1; this.pause = 0.5;
     this.state = 'sweep'; this.seen = 0; this.alarmT = 0;
     this.enabled = true;
+    // under the title the lamp keeps sweeping for show on its own aim and never detects; play resumes from the
+    // real aim (the checkpoint's), and the shown beam swings back onto it
+    this.liveUnderTitle = true;
+    this.show = { aim: this.aim.clone(), dir: 1, pause: 0 }; this.showing = false;
+    this.off = new THREE.Vector3(); this._view = new THREE.Vector3();
     // the light itself is one of the rig's two shared spots, acquired near the camera
     this.angle = 0.11; this.power = 520;
     this.spot = null;
@@ -236,17 +241,31 @@ export class Searchlight {
     return true;
   }
 
+  // move an aim {aim, dir, pause} along the sweep
+  sweep(s, dt) {
+    if (s.pause > 0) s.pause -= dt;
+    else {
+      s.aim.x += s.dir * this.speed * dt;
+      if (s.aim.x > this.x1) { s.aim.x = this.x1; s.dir = -1; s.pause = this.pauseT; }
+      if (s.aim.x < this.x0) { s.aim.x = this.x0; s.dir = 1; s.pause = this.pauseT; }
+    }
+    s.aim.y = this.aimY + Math.sin(this.game.time * 0.9) * 0.25;
+  }
+  // the aim the beam shows (the title's sweep, easing back onto the real aim after it)
+  get viewAim() { return this._view.addVectors(this.aim, this.off); }
+
   step(dt) {
     if (!this.enabled) return;
+    if (this.game.held) {
+      const S = this.show;
+      if (!this.showing) { this.showing = true; S.aim.copy(this.aim); S.dir = this.dir; S.pause = this.pause; }
+      this.sweep(S, dt);
+      return;
+    }
+    this.showing = false;
     const pl = this.game.player;
     if (this.state === 'sweep') {
-      if (this.pause > 0) this.pause -= dt;
-      else {
-        this.aim.x += this.dir * this.speed * dt;
-        if (this.aim.x > this.x1) { this.aim.x = this.x1; this.dir = -1; this.pause = this.pauseT; }
-        if (this.aim.x < this.x0) { this.aim.x = this.x0; this.dir = 1; this.pause = this.pauseT; }
-      }
-      this.aim.y = this.aimY + Math.sin(this.game.time * 0.9) * 0.25;
+      this.sweep(this, dt);
       if (!pl.dead && pl.body.x > this.x0 - 3 && pl.body.x < this.x1 + 3) {
         const head = new THREE.Vector3(pl.body.x, pl.body.y + pl.body.h * 0.85, 0);
         const chest = new THREE.Vector3(pl.body.x, pl.body.y + pl.body.h * 0.5, 0);
@@ -280,12 +299,18 @@ export class Searchlight {
   }
   dispose() { if (this.spot) { this.game.lightRig?.releaseSpot(this); this.spot = null; } }
   render(alpha, dt) {
+    if (this.showing && this.game.held) this.off.subVectors(this.show.aim, this.aim);
+    else if (this.off.lengthSq() > 0) {
+      const d = this.off.length(), n = d - Math.min(14 * dt, d * (1 - Math.exp(-4 * dt)));
+      if (n < 1e-3) this.off.set(0, 0, 0); else this.off.multiplyScalar(n / d);
+    }
+    const aim = this.viewAim;
     const alarm = this.state === 'alarm' ? Math.min(1, this.alarmT * 3) : 0;
     const col = this.baseColor.clone().lerp(new THREE.Color(1.0, 0.45, 0.3), alarm);
     this.updateSpot();
     if (this.spot) {
       const s = this.spot;
-      s.position.copy(this.origin); s.target.position.copy(this.aim);
+      s.position.copy(this.origin); s.target.position.copy(aim);
       s.updateMatrixWorld(); s.target.updateMatrixWorld();
       s.color.copy(col);
       s.intensity = this.enabled ? this.power * (1 + alarm * 0.4) : 0;
@@ -293,13 +318,13 @@ export class Searchlight {
     this.beamMat.uniforms.uColor.value.set(1.0, 0.86, 0.62).lerp(new THREE.Color(1.0, 0.45, 0.3), alarm);
     this.beamMat.uniforms.uIntensity.value = this.enabled ? 0.55 + alarm * 0.3 : 0;
     // orient beam cone from origin to aim
-    const d = new THREE.Vector3().subVectors(this.aim, this.origin).normalize();
+    const d = new THREE.Vector3().subVectors(aim, this.origin).normalize();
     this.beam.position.copy(this.origin);
     this.beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), d);
-    this.lamp.lookAt(this.aim);
+    this.lamp.lookAt(aim);
   }
   getState() { return { x: this.aim.x, dir: this.dir, pause: this.pause }; }
-  setState(s) { this.aim.x = s.x; this.dir = s.dir; this.pause = 1.5; this.state = 'sweep'; this.seen = 0; this.alarmT = 0; }
+  setState(s) { this.aim.x = s.x; this.dir = s.dir; this.pause = 1.5; this.state = 'sweep'; this.seen = 0; this.alarmT = 0; this.off.set(0, 0, 0); this.showing = false; }
 }
 
 // ------------------------------------------------------------------ guard

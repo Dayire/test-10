@@ -7,6 +7,10 @@ import { registerSurfaces, yieldFrame } from '../render/textures.js';
 import { createLevelKit } from './levelkit.js';
 import { getChapter, meta } from '../chapters/index.js';
 
+// backoff before each retry of a chain's import (a flaky network, a redeploy)
+const RETRY_MS = [1200, 3000];
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // Loads and unloads chapters. Everything a chapter builds hangs under one
 // root group (game.root), so unloading is one sweep: geometries, non-cached
 // materials and their textures, sprite materials and the FX built on the
@@ -66,15 +70,19 @@ export class ChapterLoader {
   }
 
   // loadChapter(id, cp, {reason, onProgress}) -> promise of L. reason: boot | start | chain | continue | select | restart | title
-  // Loads run one at a time, in call order. A failure before the old chapter is disposed uncovers it again;
-  // a failure after falls back to the souk under the title (unless the souk itself failed).
+  // Loads run one at a time, in call order. A failure before the old chapter is disposed uncovers it again, unless
+  // that chapter has ended (a chain, the credits: it can take no input): then the import is retried behind the card
+  // with a backoff, and if it keeps failing the title comes up in place over the ended chapter (no fetch needed).
+  // A failure after the unload falls back to the souk under the title (unless the souk itself failed).
   load(id, cp = 0, opts = {}) {
     const run = async () => {
-      try { return await this._load(id, cp, opts); }
-      catch (e) {
+      try {
+        if (opts.delay) await wait(opts.delay);
+        return await this._load(id, cp, opts);
+      } catch (e) {
         console.error(e);
-        this.game.emit('loadError', { id, cp, message: String(e?.message || e) });
-        this.recover(id, e, opts);
+        this.game.emit('loadError', { id, cp, message: String(e?.message || e), attempt: opts.attempt || 0 });
+        this.recover(id, cp, e, opts);
         throw e;
       }
     };
@@ -85,21 +93,35 @@ export class ChapterLoader {
     return p;
   }
 
-  recover(id, e, { reason = 'start' } = {}) {
-    const g = this.game, card = this.card;
+  recover(id, cp, e, opts = {}) {
+    const g = this.game, card = this.card, { reason = 'start', attempt = 0 } = opts;
+    const hide = () => { if (card) Promise.resolve(card.hide?.()).catch(() => {}); };
     this.card = null;
-    g.suspended = false;
     if (e?.stage === 'cover') {
-      // nothing was disposed: the old chapter carries on where it was
-      if (card) Promise.resolve(card.hide?.()).catch(() => {});
+      // nothing was disposed. A chapter that has ended cannot take control back: retry, then the title over it
+      const ended = reason === 'chain' || g.mode === 'chapterEnd' || g.mode === 'credits';
+      if (ended && g.level) {
+        if (attempt < RETRY_MS.length) {
+          g.suspended = true;
+          this.load(id, cp, { ...opts, attempt: attempt + 1, delay: RETRY_MS[attempt], card }).catch(() => {});
+        } else {
+          g.suspended = false;
+          try { g.titleHere(); } catch (err) { console.error(err); }
+          hide();
+        }
+        return;
+      }
+      g.suspended = false;
+      hide();
       if (g.level) { g.fadeTarget = 0; g.fadeSpeed = 1.2; }
       return;
     }
+    g.suspended = false;
     if (id === 'souk' || reason === 'boot') return; // nothing safer to fall back to (boot reports the error)
-    this.load('souk', 0, { reason: 'title' }).then(() => card && card.hide?.(), () => card && card.hide?.()).catch(() => {});
+    this.load('souk', 0, { reason: 'title' }).then(hide, hide).catch(() => {});
   }
 
-  async _load(id, cp, { reason = 'start', onProgress = null } = {}) {
+  async _load(id, cp, { reason = 'start', onProgress = null, card: keepCard = null } = {}) {
     const g = this.game, t0 = performance.now();
     const prog = (p, msg) => { try { onProgress?.(p, msg); } catch { /* ui gone */ } };
     const phases = {}; let tp = t0;
@@ -116,7 +138,9 @@ export class ChapterLoader {
         const exit = reason === 'chain' && g.def ? (meta(g.def.id)?.exit || '#000000') : '#000000';
         if (g.paused) g.setPaused(false);
         if (g.fade < 0.999) await g.fadeTo(1, { color: exit, sec: reason === 'restart' ? 0.35 : 0.8 });
-        if (g.hooks.card && reason !== 'restart' && reason !== 'title') this.card = await g.hooks.card(m, { reason, from: g.def?.id ?? null });
+        // a retry keeps the card that is already up
+        if (keepCard) this.card = keepCard;
+        else if (g.hooks.card && reason !== 'restart' && reason !== 'title') this.card = await g.hooks.card(m, { reason, from: g.def?.id ?? null });
       }
       mark('cover');
       def = await getChapter(id);

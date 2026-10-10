@@ -130,10 +130,14 @@ Loads are queued: each runs after the previous one settles, in call order.
 10. `renderer.compileAsync` with hidden objects made visible, one warm-up render;
 11. `enterChapter`: `save.begin`, `audio.setChapter?.()`, `chapterStart`, the opening shot (title on boot), fade in, the mix faded back in (`audioIn`), card hidden, `suspended` cleared. `openingShot()`: under the title a `menuShot` whose `cp` is this checkpoint; otherwise `intro` at checkpoint 0 only. A start at a later checkpoint has no establishing shot (it would frame the wrong place): the title shows the rail camera on the boy at his checkpoint, and without the title play begins at once.
 
-**Failures** emit `loadError` and reject. A failure while covering (unknown id, the import) leaves the old
-chapter in place: the card hides and the screen fades back in. A failure after the unload (the bake or the build)
-loads the souk under the title instead (unless the souk itself failed, or it was the boot load, which reports the
-error).
+**Failures** emit `loadError {id, cp, message, attempt}` and reject. A failure while covering (unknown id, the
+import) leaves the old chapter in place: the card hides and the screen fades back in. When that chapter has ended
+(a chain, the credits: modes `chapterEnd` and `credits` take no input) it cannot take control back: the import is
+retried twice behind the card (after 1.2 s and 3 s; the sim waits and pausing is refused), and if it still fails
+`game.titleHere()` puts the title up in place over the ended chapter at its checkpoint (no fetch needed; the save
+still points at the next chapter, so Continue, or replaying the finale, tries again). `completeChapter()` never
+rejects. A failure after the unload (the bake or the build) loads the souk under the title instead (unless the souk
+itself failed, or it was the boot load, which reports the error).
 
 ## 5. Game (`src/game/game.js`)
 
@@ -144,8 +148,9 @@ Input reaches the boy in `play` and `finale`; the simulation runs in every mode 
 and the physics step, entities and systems do not (no prestep, step, crush or kill-zone test), so nothing can
 threaten him while the menu waits; rendering (lanterns, flock, dust, shafts, entity `render`) stays live. An
 entity or system that cannot threaten the boy and should animate under the title (a light tracer drawing its
-beams, a lamp that is blind) sets `liveUnderTitle: true` and keeps stepping. A
-chapter's own intro (no title) runs live. `setMode(m)` emits `mode`.
+beams, a lamp that is blind) sets `liveUnderTitle: true` and keeps stepping. The searchlight does: under the title
+it sweeps a separate show aim and never detects; play resumes from its real (checkpoint) aim, and the shown beam
+swings back onto it within about a second. A chapter's own intro (no title) runs live. `setMode(m)` emits `mode`.
 
 **Fixed step (120 Hz)**: pin → entity `prestep` → system `prestep` → `player.step` → entity `step` →
 `phys.stepBodies` → crush test (`body.crushes`) → system `step` → kill zones → (play) triggers and checkpoints →
@@ -158,7 +163,10 @@ aimTarget` (the pointer's ray on z = 0 while `pointer.active`, or a scripted `{x
 `completeChapter()` (save, `chapterEnd`, `L.onComplete`, then the next chapter behind its card or the credits; a
 dev chapter such as the lab never touches the save or rolls the credits: `chapterEnd {id, next: null, dev: true}`,
 a dip to black and `restartChapter()`), `rollCredits()`, `restartCheckpoint()` (no death counted, fade out 0.25 s
-and in 0.3 s), `restartChapter()` (in place from the initial snapshot), `toTitle()` (the save's chapter at its
+and in 0.3 s; over the title or a chapter intro it only resumes, the chapter already stands at its checkpoint),
+`restartChapter()` (in place, exactly as a fresh load at checkpoint 0: the initial snapshot, then `placeAt(0)`, which
+runs `prepare(0)`, takes the checkpoint snapshot and spawns), `titleHere()` (the title in place over this chapter at
+its checkpoint), `toTitle()` (the save's chapter at its
 checkpoint, loaded if it is another one; otherwise a 0.4 s dip to black while the sim waits, the chapter back at its
 checkpoint snapshot exactly as a respawn leaves it, the look and mix restored, the opening shot cut in, the title
 shown and the chapter held; emits `title`), `setPaused(p)` (freeze-frame: one dimmed frame, then no rendering;
@@ -238,8 +246,9 @@ every chapter. A searchlight takes a spot within view half-width + 10 m of the c
 **Light pool** (`game.lightPool`): `add(pos, intensity, phase)` (static, flickers), `addDynamic(owner, priority,
 {intensity, color?, distance?, decay?})` (the owner moves it every frame; it wins a light ahead of static sources
 while it is within view half-width + 6 m of the camera's look, and competes by distance like any source beyond;
-its own colour, distance and decay apply while it holds a light), `update(focus, time, dt, {range})`, `remove`,
-`clear`, `setColor`, `setMul`.
+its own colour, distance and decay apply while it holds a light, and stay on a released light until it has faded
+out), `update(focus, time, dt, {range})`, `remove`, `clear`, `setColor`, `setMul`. A static source takes a light
+only once one has faded out (no cut); a priority source takes the dimmest free light at once.
 
 **Materials and surfaces**: `mats.register(defs)`, `mats.setEnv(tex, scale)`, `registerSurfaces(defs)`,
 `SURFACES`, `bakeAsync(baker, names, onProgress, out, slice)`, `world.bake(names, onProgress)`,
@@ -272,9 +281,11 @@ loads `{chapter, cp}` and the chapter's `prepare(cp)`. A turning rosette (top ri
 
 ## 11. Test API and tools
 
-`window.__medina`: `game, chapter(), loadChapter(id, cp) → Promise<state>, state() → {x, y, z, st, crawl, dead,
-mode, cp, t, deaths, chapter, extra}, sim(sec, input | fn(state)) (input may carry aimTarget or pointer),
-teleport(x, y, facing), checkpoint(i), finale(), restartCheckpoint(), setInput(o), closeup(pose), photo(x, y,
+`window.__medina`: `game, chapter(), registry (the chapter list the loader reads: tests add or patch entries there,
+since a dev server may serve the module under a versioned URL), loadChapter(id, cp) → Promise<state>, state() →
+{x, y, z, st, crawl, dead, mode, cp, t, deaths, chapter, extra}, sim(sec, input | fn(state)) (input may carry
+aimTarget or pointer), teleport(x, y, facing), checkpoint(i) (the chapter as a fresh load at checkpoint i leaves it),
+finale(), restartCheckpoint(), setInput(o), closeup(pose), photo(x, y,
 facing, sim), pause(p), events(n) (ring buffer of {name, t, data}), lights() (census), save(), info() (renderer
 counts), ext{}`. `window.__info()` adds the state to `info()`.
 
@@ -282,7 +293,7 @@ counts), ext{}`. `window.__info()` adds the state to `info()`.
 |---|---|
 | `node tools/playtest.mjs --chapter souk [--cp N] [--from step] [--to step] [--runs 2]` | the chapter bot (`tools/bots/<chapter>.js` on `tools/bots/lib.js`); exit 0 on pass; several runs must agree on the end-state hash |
 | `node tools/negative.mjs --chapter souk` | `tools/neg/<chapter>.mjs` as assertions; `--selftest-fail` must exit 1 |
-| `node tools/negative.mjs --suite foundation [--artifact] [--base-port N \| --absolute]` | chain and Continue (with the finale's look and mix left behind), throwing storage, restart and title mid-finale, title during the chase, lab end, loader queue / failures / scoped subscriptions, the sim waiting through a load's fade, title shadow focus, look round trip, context loss, boot budget; `--artifact` also rebuilds and boots the single-file build. The boot budget is timed against the pre-foundation tree under the same load: by default the suite extracts that commit (`git archive`, cached in the OS temp dir) and serves it on a free port, `--base-port` names a running server of it instead, `--absolute` uses the recorded baseline (idle machine only) |
+| `node tools/negative.mjs --suite foundation [--artifact] [--base-port N \| --absolute] [--rounds 5]` | chain and Continue (with the finale's look and mix left behind), throwing storage, restart and title mid-finale, title during the chase, lab end, loader queue / failures / scoped subscriptions, a chain whose import fails (retries, then the title), restart chapter equal to a fresh start, the live and harmless title over the courtyard, the sim waiting through a load's fade, title shadow focus, look round trip, context loss, boot budget; `--artifact` also rebuilds and boots the single-file build. The boot budget is timed against the pre-foundation tree under the same load: by default the suite extracts that commit (`git archive`, cached in the OS temp dir) and serves it on a free port, `--base-port` names a running server of it instead, `--absolute` uses the recorded baseline (idle machine only); one warm-up boot each, then `--rounds` (default 5) alternating boots, compared by median |
 | `node tools/cycle.mjs [--cycles 3] [--path souk,lab,souk,sundown,souk]` | memory flat, programs stable, light census constant, no page errors |
 | `node tools/probe.mjs "<query>" "<js>"`, `tools/tour.mjs`, `tools/shot.mjs` | ad hoc evaluation and screenshots; all take `--port`, `BASE=` and `--chapter` |
 | `npm test`, `npm run test:souk`, `npm run test:foundation`, `npm run cycle` | the suites above |

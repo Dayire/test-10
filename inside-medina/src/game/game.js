@@ -397,8 +397,10 @@ export class Game {
     this.deathKind = null; this.dieT = 0;
   }
 
-  // back to the last checkpoint without counting a death (fade out and in, under 0.6 s)
+  // back to the last checkpoint without counting a death (fade out and in, under 0.6 s). Over the title or a
+  // chapter intro the chapter already stands at its checkpoint, so it only resumes.
   restartCheckpoint() {
+    if (this.mode === 'intro') { if (this.paused) this.setPaused(false); return true; }
     if (!['play', 'dying', 'finale', 'cutscene'].includes(this.mode) || this.deathKind === 'restart') return false;
     if (this.paused) this.setPaused(false);
     if (this.player.dead) { this.player.dead = false; this.player.state = 'ground'; }
@@ -408,16 +410,16 @@ export class Game {
     return true;
   }
 
-  // the chapter from its start, in place (initial snapshot, preset, flock)
+  // the chapter from its start, in place, exactly as a fresh load at checkpoint 0 leaves it: the initial snapshot,
+  // then placeAt(0) (prepare(0), the checkpoint snapshot, the spawn); the preset and the flock start over too
   restartChapter() {
     if (this.paused) this.setPaused(false);
     if (!this.level || !this.initialSnap || this.mode === 'loading') return this.loadChapter(this.chapterId || 'souk', 0, { reason: 'restart' });
     this.cinema?.stop(); this.cinema = null;
     this.flock?.reset();
-    const look = this.def.look;
-    if (Array.isArray(look)) this.director.apply(look[0].preset).keys(look); else this.director.apply(look || 'goldenHour');
-    this.director.restore();
-    this.cpIndex = 0; this.cpSnap = this.initialSnap;
+    this.restartChapterLook(); this.director.restore();
+    this.restore(this.initialSnap);
+    this.placeAt(0);
     this.deathKind = null;
     // chosen from the pause menu over the title: the title gives way to play
     if (this.titleShown) { this.titleShown = false; this.titleFade = undefined; this.ui.showTitle(false); }
@@ -438,6 +440,13 @@ export class Game {
     this.suspended = true;
     try { await this.fadeTo(1, { color: '#000000', sec: 0.4 }); } finally { this.suspended = false; }
     if (!this.level || this.mode === 'loading') return this.level;
+    return this.titleHere();
+  }
+  // the title in place over this chapter, back at its checkpoint (the screen is already covered). toTitle ends here,
+  // and so does a chain whose next chapter cannot be loaded (the ended chapter can take no input)
+  titleHere() {
+    if (!this.level) return null;
+    if (this.paused) this.setPaused(false);
     this.resetToCheckpoint();
     this.restartChapterLook(); this.director.restore();
     this.setMode('intro'); this.introT = 0; this.titleShown = true; this.titleFade = undefined;
@@ -461,7 +470,8 @@ export class Game {
     this.save.chapterEnd(id, next);
     this.emit('chapterEnd', { id, next });
     this.level?.onComplete?.(this);
-    if (next) return this.loadChapter(next, 0, { reason: 'chain' });
+    // a failed chain recovers in the loader (retries behind the card, then the title), so nothing rejects here
+    if (next) return this.loadChapter(next, 0, { reason: 'chain' }).catch(() => null);
     return this.rollCredits();
   }
 
@@ -481,7 +491,7 @@ export class Game {
     const lines = this.level?.credits || this.def?.credits || DEFAULT_CREDITS;
     this.emit('credits', { lines });
     try { if (this.hooks.credits) await this.hooks.credits(lines, this); } catch (e) { console.error(e); }
-    return this.toTitle();
+    return this.toTitle().catch(() => null);
   }
 
   // start the chapter's scripted walk (L.finale, a DepthWalk config)
