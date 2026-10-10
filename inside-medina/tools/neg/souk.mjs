@@ -56,6 +56,46 @@ export const scenarios = [
     check: (r) => (r.ok && r.moved > 34.5 && near(r.x, 33.5, 0.05) && r.cp === 1 && r.deaths === 0 && r.deathEvents === 0 && r.respawnEvents === 1 && r.mode === 'play' && r.respawnAfter <= 0.3 && r.respawnAfter + r.fadeIn <= 0.6 ? true : `restart failed ${JSON.stringify(r)}`),
   },
   {
+    // restart from checkpoint in the last quarter second before the lamp's dart: the chapter holds through the
+    // restart's fade, so the dart never lands (it used to kill him mid-restart and play the full death)
+    name: 'restart during an alarm is not a death', cp: 3,
+    run: ({ page }) => page.evaluate(() => {
+      const M = __medina, G = M.game, out = [];
+      let deathEv = 0;
+      G.events.on('death', () => deathEv++);
+      for (const delay of [0.8, 0.9, 1.0, 1.04]) {
+        M.checkpoint(3);
+        const S = G.level.searchlight;
+        for (let i = 0; i < 1400 && S.state !== 'alarm'; i++) M.sim(1 / 120, { x: 1 });
+        const alarm = S.state === 'alarm';
+        M.sim(delay, { x: 1 });
+        const d0 = G.stats.deaths, e0 = deathEv, dead0 = G.player.dead;
+        const ok = G.restartCheckpoint();
+        const s = M.sim(1, { x: 0 });
+        out.push({ delay, alarm, dead0, ok, deaths: G.stats.deaths - d0, deathEvents: deathEv - e0, mode: s.mode, x: s.x, lamp: S.state });
+      }
+      return out;
+    }),
+    check: (r) => (r.every((t) => t.alarm && !t.dead0 && t.ok && t.deaths === 0 && t.deathEvents === 0 && t.mode === 'play' && near(t.x, 71.6) && t.lamp === 'sweep') ? true : `restart during the alarm ${JSON.stringify(r.filter((t) => t.deaths || t.mode !== 'play' || !near(t.x, 71.6)))}`),
+  },
+  {
+    // restart from checkpoint while a death plays (reachable when a hidden page pauses mid-death): the death that
+    // happened counts once, the restart adds none and respawns at once
+    name: 'restart while dying adds no death', cp: 3,
+    run: ({ page }) => page.evaluate(() => {
+      const M = __medina, G = M.game;
+      for (let i = 0; i < 1400 && !M.state().dead; i++) M.sim(1 / 120, { x: 1 });
+      M.sim(0.3, { x: 0 });
+      const before = { deaths: G.stats.deaths, mode: G.mode };
+      G.setPaused(true);
+      const ok = G.restartCheckpoint();
+      const s = M.sim(1, { x: 0 });
+      const ev = M.events();
+      return { before, ok, paused: G.paused, deaths: s.deaths, mode: s.mode, x: s.x, dead: s.dead, deathEvents: ev.filter((e) => e.name === 'death').length, respawns: ev.filter((e) => e.name === 'respawn').map((e) => e.data.restart) };
+    }),
+    check: (r) => (r.before.deaths === 1 && r.before.mode === 'dying' && r.ok && !r.paused && r.deaths === 1 && r.deathEvents === 1 && r.mode === 'play' && !r.dead && near(r.x, 71.6) && r.respawns.length === 1 && r.respawns[0] === true ? true : `restart while dying ${JSON.stringify(r)}`),
+  },
+  {
     // Guard.getState used to report 'hidden' whatever the guard was doing
     name: 'guard snapshot is its real state', cp: 5,
     run: ({ page }) => page.evaluate(() => { const M = __medina; M.sim(1.0, { x: 1 }); const st = M.game.level.guard.getState(); return { state: st.state, x: +st.x.toFixed(2), extra: M.state().extra.guard }; }),

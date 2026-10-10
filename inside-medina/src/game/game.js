@@ -265,6 +265,8 @@ export class Game {
   }
 
   fixed(dt, st, first) {
+    // restarting from the checkpoint: the chapter holds (nothing steps, nothing can kill him) until the respawn
+    if (this.deathKind === 'restart') { this.updateDying(dt); return; }
     const pin = this.makePin(st, first);
     // under the title only what declares liveUnderTitle (it can never threaten the boy) keeps stepping
     const pl = this.player, L = this.level, live = !this.held;
@@ -402,14 +404,14 @@ export class Game {
     this.deathKind = null; this.dieT = 0;
   }
 
-  // back to the last checkpoint without counting a death (fade out and in, under 0.6 s). Over the title or a
-  // chapter intro the chapter already stands at its checkpoint, so it only resumes.
+  // back to the last checkpoint without counting a death (fade out and in, under 0.6 s). The chapter holds through
+  // the fade (fixed() only counts down to the respawn), so no hazard can kill him on the way, and a death already
+  // under way (paused while dying) is cut short without another. Over the title or a chapter intro the chapter
+  // already stands at its checkpoint, so it only resumes.
   restartCheckpoint() {
     if (this.mode === 'intro') { if (this.paused) this.setPaused(false); return true; }
     if (!['play', 'dying', 'finale', 'cutscene'].includes(this.mode) || this.deathKind === 'restart') return false;
     if (this.paused) this.setPaused(false);
-    if (this.player.dead) { this.player.dead = false; this.player.state = 'ground'; }
-    this.player.scripted = null;
     this.setMode('dying'); this.dieT = 0; this.deathKind = 'restart';
     this.fadeColor.set(0, 0, 0); this.fadeTarget = 1; this.fadeSpeed = 4;
     return true;
