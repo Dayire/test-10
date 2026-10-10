@@ -5,7 +5,8 @@ import { PRESETS, SKY_FIELDS } from './look.js';
 // The LookDirector owns the time of day. It resolves presets (look.js) into
 // live values, blends them over time or along x, layers temporary overrides
 // on top (cinematics), and writes the result into the sky, the sun and hemi
-// lights, fog, post-processing, the lantern pool, glow sprites and glass.
+// lights, fog, post-processing, the lantern pool, glow sprites (glowMul and
+// glowColor, read by the game's lantern loop) and glass.
 // Everything it writes is a uniform or a light parameter, so blending never
 // recompiles a shader. A change of sky colours re-bakes the environment map.
 
@@ -63,7 +64,7 @@ export class LookDirector {
     this.ov = {};
     this.blend = null; this.xKeys = null;
     this.user = { exposure: 1, grain: 1 };
-    this.pool = null; this.shafts = null; this.glowMul = 1;
+    this.pool = null; this.shafts = null; this.glowMul = 1; this.glowColor = new THREE.Color(PRESETS.goldenHour.glowColor);
     this.envKey = skyKey(this.base); this.envScale = -1;
   }
 
@@ -71,7 +72,7 @@ export class LookDirector {
   apply(preset) {
     this.blend = null; this.xKeys = null;
     this.name = typeof preset === 'string' ? preset : 'custom';
-    copyLook(this.base, resolved(preset));
+    this.base = copyLook({}, resolved(preset)); // fresh: no field of the previous preset survives
     this.write();
     const key = skyKey(this.cur);
     if (key !== this.envKey) { this.envKey = key; this.world.rebuildEnvironment?.(); }
@@ -119,6 +120,8 @@ export class LookDirector {
 
   write() {
     const c = copyLook(this.cur, this.base);
+    // a field only an override set (a cinematic's letterbox or fade) leaves with the override
+    for (const k in c) if (!(k in this.base) && !(k in this.ov)) delete c[k];
     for (const k of Object.keys(this.ov)) copyValue(c, k, this.ov[k]);
     const w = this.world, L = w.light;
     this.sunDir.copy(c.sunDir);
@@ -156,6 +159,7 @@ export class LookDirector {
     }
     if (this.pool) { this.pool.setColor(c.poolColor); this.pool.setMul(c.lanternPool); }
     this.glowMul = c.lanternGlow;
+    if (c.glowColor) this.glowColor.copy(c.glowColor);
     const glass = this.mats?.cache?.get('glassGlow');
     if (glass) glass.emissiveIntensity = 3.0 * c.glassGlow;
     if (Math.abs(c.envIntensity - this.envScale) > 1e-4) { this.envScale = c.envIntensity; this.mats?.setEnv?.(null, c.envIntensity); }

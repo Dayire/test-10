@@ -6,6 +6,17 @@ import { TextureBaker, bakeAll, bakeAsync } from './textures.js';
 import { Materials } from './materials.js';
 import { Lighting } from './lighting.js';
 import { LOOK } from './look.js';
+import { Overrides } from '../assets/library.js';
+
+// a software rasteriser (SwiftShader, llvmpipe): every present is expensive there
+export function isSoftwareGL(renderer) {
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+    return /swiftshader|llvmpipe|softpipe|software/i.test(name);
+  } catch { return false; }
+}
 
 // bake: true bakes every surface now (dev views); false leaves it to world.bake(names)
 export function createWorld(canvas, { tier = 'high', texScale = 1, onProgress, bake = true } = {}) {
@@ -39,9 +50,14 @@ export function createWorld(canvas, { tier = 'high', texScale = 1, onProgress, b
   rs.onTierChange = (t, q) => light.setShadowSize(q.shadow);
   const world = { rs, scene, sky, env, tex, mats, light, baker, sunDir };
   world.rebuildEnvironment = () => rebuildEnvironment(world);
-  // progressive bake of the surfaces a chapter needs: 200 ms slices, each followed by a painted frame
-  // (a yield costs a present, so finer slices only slow the bake down)
-  world.bake = (names, onProgress, slice = 200) => bakeAsync(baker, names.filter((n) => !tex[n]), onProgress, tex, slice);
+  // progressive bake of the surfaces a chapter needs, each slice followed by a painted frame. On a GPU a frame
+  // is cheap, so a slice is about one surface per frame (16 ms on touch devices, 33 ms on desktop) and input and
+  // menus stay responsive; a software rasteriser pays dearly for every present, so it bakes in 200 ms slices.
+  world.software = isSoftwareGL(rs.renderer);
+  let coarse = false;
+  try { coarse = matchMedia('(pointer: coarse)').matches; } catch { /* no media queries */ }
+  world.bakeSlice = world.software ? 200 : coarse ? 16 : 33;
+  world.bake = (names, onProgress, slice = world.bakeSlice) => bakeAsync(baker, names.filter((n) => !tex[n]), onProgress, tex, slice);
   return world;
 }
 
@@ -50,6 +66,14 @@ export function rebuildEnvironment(world) {
   const old = world.env;
   world.env = buildEnvironment(world.rs.renderer, world.sky.mesh);
   world.mats.setEnv(world.env);
+  // materials outside the cache that sample the old map: GLB override templates (and their placed clones),
+  // and any chapter material that took world.env
+  if (old && old !== world.env) {
+    if (Overrides.envMap === old) Overrides.envMap = world.env;
+    const swap = (o) => { const list = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []; for (const m of list) if (m.envMap === old) { m.envMap = world.env; } };
+    for (const root of Overrides.models.values()) root.traverse(swap);
+    world.scene.traverse(swap);
+  }
   // the PMREM texture belongs to a render target: disposing the texture alone leaks the target
   if (old && old !== world.env) { if (old.renderTarget) old.renderTarget.dispose(); else old.dispose(); }
   return world.env;

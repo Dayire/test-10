@@ -323,7 +323,7 @@ export class Guard {
     this.lantern.position.set(0, -0.07, 0.01);
     this.rig.j.wristR.add(this.lantern);
     // the lantern's light is a priority source in the shared light pool
-    this.light = game.lightPool ? game.lightPool.addDynamic(this, 2, { intensity: 6 }) : null;
+    this.light = game.lightPool ? game.lightPool.addDynamic(this, 2, { intensity: 6, color: 0xffa860, distance: 7, decay: 1.6 }) : null;
     this._wq = new THREE.Quaternion();
     this.rig.root.visible = false; if (this.light) this.light.enabled = false;
     this.body.enabled = false;

@@ -47,8 +47,8 @@ const GOLDEN = {
   fogColor: '#b9a594', fogSunColor: '#f7c58c', fogDensity: 0.022, fogFalloff: 0.075, fogStart: 6, wind: 1,
   exposure: 1.05, bloom: 0.28, bloomThreshold: 1.6, vignette: 0.5, grain: 0.018, saturation: 1.02, contrast: 0.14,
   shadowTint: [0.92, 0.95, 1.06], highlightTint: [1.04, 1.0, 0.92], lift: [0.018, 0.014, 0.016],
-  rays: 0.35, rayColor: [1.0, 0.78, 0.52],
-  lanternPool: 1, lanternGlow: 1, glassGlow: 1, poolColor: '#ffa550',
+  rays: 0.35, rayColor: [1.0, 0.78, 0.52], letterbox: 0,
+  lanternPool: 1, lanternGlow: 1, glassGlow: 1, poolColor: '#ffa550', glowColor: '#ffa860',
   envIntensity: 0.55,
   shadowBias: -0.00025, shadowNormalBias: 0.035,
 };

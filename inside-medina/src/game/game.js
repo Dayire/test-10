@@ -554,11 +554,12 @@ export class Game {
       // lanterns flicker
       for (const l of L.lanterns) {
         const f = 0.85 + Math.sin(this.time * 9 + l.phase) * 0.08 + Math.sin(this.time * 23 + l.phase * 2) * 0.05;
-        if (l.sprite) l.sprite.material.opacity = 0.5 * f * this.director.glowMul;
+        if (l.sprite) { l.sprite.material.opacity = 0.5 * f * this.director.glowMul; l.sprite.material.color.copy(this.director.glowColor); }
         l.mesh.rotation.z = Math.sin(this.time * 0.8 + l.phase) * 0.03;
       }
       this.charLight.position.set(x + 0.6, this._vy + 1.5, z + 1.6);
-      this.lightPool.update(this.camRig.look, this.time, dt);
+      // priority sources (a guard's lantern, a beam's hit spot) win a light only near the view
+      this.lightPool.update(this.camRig.look, this.time, dt, { range: (this.viewHalfW || 12) + 6 });
       this.dust?.update(dt);
       this.flock?.update(dt, x, this._vy, Math.abs(pl.body.vx) + (pl.state === 'air' ? 2 : 0), (bx) => this.sfx('wings', bx));
       // camera
