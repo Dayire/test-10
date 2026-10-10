@@ -4,7 +4,7 @@ import { chargeLevel, heatStep } from './logic.js';
 import { BeamLamp } from './sources.js';
 import { rosetteLock, sensorMesh, ropeMesh, lightTextures, lightMaterials } from '../../assets/lightprops.js';
 import { particles } from '../../render/particles.js';
-import { tube } from '../../assets/geom.js';
+import { tube, setColor } from '../../assets/geom.js';
 
 const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
 const glintSprite = (game, scale = 0.6) => {
@@ -43,7 +43,7 @@ export class SunLock {
     lightMaterials(g.mats);
     const V = pts.map((p) => new THREE.Vector3(...p));
     this.rodCurve = new THREE.CatmullRomCurve3(V, false, 'centripetal', 0.1);
-    const m = new THREE.Mesh(tube(V, 0.022, Math.max(8, V.length * 6), 6), g.mats.get('brassAged'));
+    const m = new THREE.Mesh(setColor(tube(V, 0.022, Math.max(8, V.length * 6), 6), 0xffffff), g.mats.get('brassAged'));
     m.castShadow = true;
     g.add(m);
     this.rodGlint = glintSprite(g, 0.9);

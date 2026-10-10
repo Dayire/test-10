@@ -342,8 +342,9 @@ export function* buildLab(game, kit) {
   game.vines.push(roofVine);
   E(new RopeLadder(game, { x: 467.6, y0: 0, y1: 12, z: 0.1, vine: roofVine })).setState({ t: 1, target: 1 });
   const H = add(new Mirror(game, { id: 'H', kind: 'continuous', x: 478, y: 14.5, r: 1.5, alpha: 20, thetaHint: 180, z: 0 }));
-  { const ring = new THREE.Mesh(new THREE.TorusGeometry(1.62, 0.07, 8, 48), game.mats.get('brassAged')); ring.position.set(478, 14.5, -0.1); game.add(ring);
-    for (const sx of [-1, 1]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 2.6, 8), game.mats.get('brassAged')); leg.position.set(478 + sx * 1.1, 13.2, -0.6); leg.rotation.z = sx * 0.45; leg.castShadow = true; game.add(leg); } }
+  // (raw geometries get a white vertex colour: the library's materials multiply by it, and without one they render black)
+  { const ring = new THREE.Mesh(setColor(new THREE.TorusGeometry(1.62, 0.07, 8, 48), 0xffffff), game.mats.get('brassAged')); ring.position.set(478, 14.5, -0.1); game.add(ring);
+    for (const sx of [-1, 1]) { const leg = new THREE.Mesh(setColor(new THREE.CylinderGeometry(0.06, 0.09, 2.6, 8), 0xffffff), game.mats.get('brassAged')); leg.position.set(478 + sx * 1.1, 13.2, -0.6); leg.rotation.z = sx * 0.45; leg.castShadow = true; game.add(leg); } }
   add(new Capstan(game, { id: 'capstan', x: 475.5, y: 12, mirror: H, dir: -1, rate: 6, magnet: { alpha: 3.2, window: 2 }, range: [-10, 40] }));
   add(new SunRay({ id: 'sunrise', x: 500, y: 14.5, angle: 180, clipByTerminator: termD }));
   cam(346, { dist: 18, height: 3.6, lookY: 5.0, fov: 40, ahead: 0.6, focusBias: 1 });

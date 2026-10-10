@@ -3,6 +3,7 @@ import { Body } from '../physics.js';
 import { DEG, NOTCH, angleOf, alphaFor, notchOf } from './trace.js';
 import { magnet } from './logic.js';
 import { trayMesh, mirrorStand, axleMesh, crankBracket, crankHandle, capstanMesh } from '../../assets/lightprops.js';
+import { setColor } from '../../assets/geom.js';
 
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3();
 const TILT = 25 * DEG; // trays lean toward the camera so their polished face shows (visual only, §6.1)
@@ -200,7 +201,7 @@ export class Crank {
       const a = new THREE.Vector3(x, y + 0.92 + 0.24, z + 0.11), b = new THREE.Vector3(mirror.x, mirror.y + 0.075, -(mirror.r + 0.09));
       const len = a.distanceTo(b);
       const geo = new THREE.CylinderGeometry(0.008, 0.008, len, 5); geo.translate(0, len / 2, 0);
-      const rm = new THREE.Mesh(geo, game.mats.get('ropeMat'));
+      const rm = new THREE.Mesh(setColor(geo, 0xffffff), game.mats.get('ropeMat'));
       rm.position.copy(a); rm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
       rm.castShadow = true;
       game.add(rm);
