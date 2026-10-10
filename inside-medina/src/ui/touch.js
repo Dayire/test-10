@@ -136,7 +136,7 @@ export class TouchControls {
   pulse(glyph) {
     this.el.querySelectorAll('.pulse').forEach((n) => n.classList.remove('pulse'));
     if (!glyph) return;
-    const t = glyph === 'jump' ? '.tjump' : glyph === 'grab' ? '.tgrab' : ['move', 'up', 'down', 'crawl'].includes(glyph) ? '.tzone' : null;
+    const t = glyph === 'jump' ? '.tjump' : glyph === 'grab' ? '.tgrab' : ['move', 'up', 'down', 'crawl'].includes(glyph) ? '.tbase' : null;
     if (t) this.el.querySelector(t)?.classList.add('pulse');
   }
   update(dt) {

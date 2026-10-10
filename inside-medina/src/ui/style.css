@@ -259,13 +259,14 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 @keyframes cline { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
 /* ------------------------------------------------------------ credits */
-#end { z-index: 3; pointer-events: auto; }
+#end { z-index: 3; pointer-events: auto; transition: opacity .6s ease; }
+#end.out { opacity: 0; }
 #end .scrim { position: absolute; inset: 0; background: linear-gradient(270deg, rgba(11, 8, 6, .55) 0%, rgba(11, 8, 6, .2) 42%, rgba(11, 8, 6, 0) 62%); opacity: 0; transition: opacity 1.5s ease; }
 #end.in .scrim { opacity: 1; }
 #end.light .scrim { display: none; }
 #end .roll { position: absolute; top: 0; bottom: 0; right: calc(8vw + var(--sr)); width: min(460px, 42vw); overflow: hidden; -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%); mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%); }
 #end .track { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 30px; transform: translate3d(0, 100vh, 0); will-change: transform; }
-#end.in .track { animation: roll var(--roll, 30s) linear .6s forwards; }
+#end.in .track, #end.out .track { animation: roll var(--roll, 30s) linear .6s forwards; } /* closing keeps the roll where it is */
 @keyframes roll { from { transform: translate3d(0, 100vh, 0); } to { transform: translate3d(0, calc(-100% + 52vh), 0); } }
 #end .cw { font-size: clamp(40px, 5vw, 70px); font-weight: 300; letter-spacing: .4em; padding-left: .4em; }
 #end .cs { width: 30px; height: 30px; color: var(--brass); margin: -4px 0 18px; }
@@ -362,7 +363,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #touch[data-hand="left"] .tgrab { right: auto; left: calc(22px + var(--sl) + 77px * var(--ts)); }
 #touch[data-hand="left"] .tpause { left: auto; right: calc(10px + var(--sr)); }
 #touch .pulse::after { content: ''; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--brass-hi); animation: ring 1.5s ease-out infinite; pointer-events: none; }
-#touch .tzone.pulse::after { inset: auto; left: 22%; bottom: 18%; width: 90px; height: 90px; }
+#touch .tbase.pulse::after { inset: 8%; }
 @keyframes ring { from { transform: scale(1); opacity: .9; } to { transform: scale(1.5); opacity: 0; } }
 
 /* ------------------------------------------------------------ portrait: the menu becomes a bottom sheet */
