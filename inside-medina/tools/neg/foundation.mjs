@@ -4,7 +4,9 @@
 // title shot's shadow focus, the LookDirector round trip, the boot budget, and
 // the flow negatives: a cinematic's look and mix leave with it, the title holds
 // the chapter, a dev chapter's end keeps the save, the loader serialises,
-// recovers and drops chapter-lived subscriptions.
+// recovers and drops chapter-lived subscriptions, a chain whose import fails
+// retries and then titles, restart chapter equals a fresh start, the title's
+// lamp sweeps harmlessly, x-keyed looks swap baked env maps.
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -423,6 +425,45 @@ export const scenarios = [
       if (r.glow.tinted === r.glow.back || r.glow.back !== r.glow.preset) return `glow colour: ${JSON.stringify(r.glow)}`;
       if (!r.env.rebuilt || !r.env.tpl || !r.env.scene) return `environment handover: ${JSON.stringify(r.env)}`;
       if (r.software && r.slice !== 200) return `bake slice on a software rasteriser: ${r.slice}`;
+      return true;
+    },
+  },
+  {
+    // an x-keyed look bakes every key's environment map behind the card; walking the blend swaps them at the
+    // half-way point (reflections follow the sky) with no bake and no new program; restart bakes nothing; a new
+    // chapter drops the maps it no longer needs
+    name: 'x-keyed look swaps the env map', chapter: 'lab', cp: 0,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game, D = G.director, W = G.world;
+      const frames = (n) => new Promise((r) => { const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+      const base = { id: 'xkeys', n: 9, numeral: 'X', glyph: 'rosette', label: 'xkeys', next: null, dev: true, exit: '#000000', tone: '#000000' };
+      M.registry.push({ ...base, load: async () => ({ default: { ...base, look: [{ x: 0, preset: 'dawn' }, { x: 30, preset: 'sunrise' }], needs: ['cobbles'], build: (g, kit) => {
+        kit.ground(-20, 60); kit.cp(-100, 1.5, 0, 1);
+        kit.L.dustRegions.push({ x0: -3, x1: 40, y0: 0.2, y1: 4, z0: -1, z1: 1 });
+        return kit.L;
+      } } }) });
+      let bakes = 0; const bake = W.bakeEnvironment; W.bakeEnvironment = () => { bakes++; return bake(); };
+      await G.loadChapter('xkeys', 0, { reason: 'restart' });
+      const out = { loadBakes: bakes, envs: D.envs.size };
+      bakes = 0;
+      const progs = () => W.rs.renderer.info.programs.length;
+      const at = async (x) => { M.photo(x, 0, 1, 0.1); await frames(3); return { x, name: D.name, env: W.env, sunI: +W.light.sun.intensity.toFixed(2), progs: progs() }; };
+      const a = await at(4), b = await at(26), c = await at(4);
+      const brass = G.mats.get('brass');
+      out.walk = { a: a.name, b: b.name, c: c.name, swapped: a.env !== b.env, back: a.env === c.env, brass: brass.envMap === W.env, bakes, progs: [a.progs, b.progs, c.progs], sun: [a.sunI, b.sunI] };
+      await at(26); await G.restartChapter(); await frames(3);
+      out.restart = { bakes, env: W.env === a.env, name: D.name };
+      await G.loadChapter('lab', 0, { reason: 'restart' });
+      out.lab = { envs: D.envs.size };
+      W.bakeEnvironment = bake;
+      return out;
+    }),
+    check: (r) => {
+      if (r.envs !== 2) return `x keys baked ${r.envs} maps: ${JSON.stringify(r)}`;
+      const w = r.walk;
+      if (w.a !== 'dawn' || w.b !== 'sunrise' || w.c !== 'dawn' || !w.swapped || !w.back || !w.brass || w.bakes || new Set(w.progs).size !== 1 || !(w.sun[1] > w.sun[0])) return `walking the blend: ${JSON.stringify(w)}`;
+      if (r.restart.bakes || !r.restart.env || r.restart.name !== 'dawn') return `restart: ${JSON.stringify(r.restart)}`;
+      if (r.lab.envs !== 1) return `the maps outlived their chapter: ${JSON.stringify(r.lab)}`;
       return true;
     },
   },

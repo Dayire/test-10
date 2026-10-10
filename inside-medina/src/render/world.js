@@ -50,6 +50,8 @@ export function createWorld(canvas, { tier = 'high', texScale = 1, onProgress, b
   rs.onTierChange = (t, q) => light.setShadowSize(q.shadow);
   const world = { rs, scene, sky, env, tex, mats, light, baker, sunDir };
   world.rebuildEnvironment = () => rebuildEnvironment(world);
+  world.bakeEnvironment = () => buildEnvironment(rs.renderer, sky.mesh);
+  world.useEnvironment = (t) => useEnvironment(world, t);
   // progressive bake of the surfaces a chapter needs, each slice followed by a painted frame. On a GPU a frame
   // is cheap, so a slice is about one surface per frame (16 ms on touch devices, 33 ms on desktop) and input and
   // menus stay responsive; a software rasteriser pays dearly for every present, so it bakes in 200 ms slices.
@@ -61,21 +63,28 @@ export function createWorld(canvas, { tier = 'high', texScale = 1, onProgress, b
   return world;
 }
 
-// re-bake the PMREM from the current sky uniforms (after a time-of-day change)
-export function rebuildEnvironment(world) {
+// hand an environment map to every material that samples the current one: the material cache, GLB override
+// templates (and their placed clones) and any chapter material that took world.env. Same-sized PMREM maps keep
+// every program. Returns the map it replaced (the caller disposes it unless it keeps it).
+export function useEnvironment(world, tex) {
   const old = world.env;
-  world.env = buildEnvironment(world.rs.renderer, world.sky.mesh);
-  world.mats.setEnv(world.env);
-  // materials outside the cache that sample the old map: GLB override templates (and their placed clones),
-  // and any chapter material that took world.env
-  if (old && old !== world.env) {
-    if (Overrides.envMap === old) Overrides.envMap = world.env;
-    const swap = (o) => { const list = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []; for (const m of list) if (m.envMap === old) { m.envMap = world.env; } };
+  if (!tex || old === tex) return null;
+  world.env = tex;
+  world.mats.setEnv(tex);
+  if (old) {
+    if (Overrides.envMap === old) Overrides.envMap = tex;
+    const swap = (o) => { const list = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []; for (const m of list) if (m.envMap === old) { m.envMap = tex; } };
     for (const root of Overrides.models.values()) root.traverse(swap);
     world.scene.traverse(swap);
   }
-  // the PMREM texture belongs to a render target: disposing the texture alone leaks the target
-  if (old && old !== world.env) { if (old.renderTarget) old.renderTarget.dispose(); else old.dispose(); }
+  return old;
+}
+// the PMREM texture belongs to a render target: disposing the texture alone leaks the target
+export function disposeEnvironment(t) { if (!t) return; if (t.renderTarget) t.renderTarget.dispose(); else t.dispose(); }
+
+// re-bake the PMREM from the current sky uniforms (after a time-of-day change or a lost context)
+export function rebuildEnvironment(world) {
+  disposeEnvironment(useEnvironment(world, buildEnvironment(world.rs.renderer, world.sky.mesh)));
   return world.env;
 }
 

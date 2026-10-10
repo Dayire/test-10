@@ -8,7 +8,9 @@ import { PRESETS, SKY_FIELDS } from './look.js';
 // lights, fog, post-processing, the lantern pool, glow sprites (glowMul and
 // glowColor, read by the game's lantern loop) and glass.
 // Everything it writes is a uniform or a light parameter, so blending never
-// recompiles a shader. A change of sky colours re-bakes the environment map.
+// recompiles a shader. A change of sky colours re-bakes the environment map;
+// the maps a blend will reach (x keys, prebaked presets) are baked up front,
+// under the card, and swapped in as the blend passes half-way.
 
 const VEC = new Set(['sunDir', 'moonDir']);
 const RGB = new Set(['shadowTint', 'highlightTint', 'lift', 'rayColor']);
@@ -52,6 +54,22 @@ function resolved(name) {
   return cache.get(name);
 }
 const skyKey = (L) => SKY_FIELDS.map((k) => { const v = L[k]; return v?.isColor ? v.getHexString() : v?.isVector3 ? v.toArray().map((n) => n.toFixed(3)).join() : String(v); }).join('|');
+const keyCache = new WeakMap();
+const keyOf = (L) => { let k = keyCache.get(L); if (!k) keyCache.set(L, k = skyKey(L)); return k; };
+const disposeEnv = (t) => { if (t) { if (t.renderTarget) t.renderTarget.dispose(); else t.dispose?.(); } };
+// the sky shader's uniforms for a look
+function writeSky(U, c) {
+  U.uSunDir.value.copy(c.sunDir);
+  U.uZenith.value.copy(c.zenith); U.uHorizon.value.copy(c.horizon); U.uGround.value.copy(c.groundCol);
+  U.uSunColor.value.copy(c.sunColor); U.uCloudLit.value.copy(c.cloudLit); U.uCloudShade.value.copy(c.cloudShade);
+  U.uExposure.value = c.skyExposure;
+  if (U.uSunDisk) U.uSunDisk.value = c.sunDisk;
+  if (U.uNight) U.uNight.value = c.night ?? c.moon;
+  if (U.uStars) U.uStars.value = c.stars;
+  if (U.uMoonDir) U.uMoonDir.value.copy(c.moonDir);
+  if (U.uMoonColor) U.uMoonColor.value.copy(c.moonColor);
+  if (U.uMoonSize) U.uMoonSize.value = c.moonSize * c.moon;
+}
 
 export class LookDirector {
   constructor(world, { mats } = {}) {
@@ -66,38 +84,102 @@ export class LookDirector {
     this.user = { exposure: 1, grain: 1 };
     this.pool = null; this.shafts = null; this.glowMul = 1; this.glowColor = new THREE.Color(PRESETS.goldenHour.glowColor);
     this.envKey = skyKey(this.base); this.envScale = -1;
+    // baked environment maps by sky key: the current one, the x keys' and prebaked presets (pinned per chapter)
+    this.envs = new Map(); this.pinned = new Set(); this.chapter = null;
+    if (world.env) this.envs.set(this.envKey, world.env);
   }
 
-  // instant switch; re-bakes the environment if the sky changed
+  // instant switch; the environment map follows the sky (from the cache, else baked now)
   apply(preset) {
     this.blend = null; this.xKeys = null;
     this.name = typeof preset === 'string' ? preset : 'custom';
     this.base = copyLook({}, resolved(preset)); // fresh: no field of the previous preset survives
     this.write();
-    const key = skyKey(this.cur);
-    if (key !== this.envKey) { this.envKey = key; this.world.rebuildEnvironment?.(); }
+    this.useEnv(this.cur, skyKey(this.cur));
     return this;
   }
-  // x-keyed blend: [{x, preset}] (Chapter IV); update(x) follows the boy
+  // a chapter's look (a preset, or x keys) with the environment maps its blends need; a new chapter drops the rest
+  look(look, chapter = null) {
+    if (chapter !== this.chapter) { this.chapter = chapter; this.pinned.clear(); }
+    if (Array.isArray(look)) this.apply(look[0].preset).keys(look); else this.apply(look || 'goldenHour');
+    const keep = new Set([this.envKey, ...this.pinned, ...(this.xKeys || []).map((k) => keyOf(k.L))]);
+    for (const [k, t] of this.envs) if (!keep.has(k)) { this.envs.delete(k); if (t !== this.world.env) disposeEnv(t); }
+    return this;
+  }
+  // x-keyed blend: [{x, preset}] (Chapter IV); update(x) follows the boy. Every key's environment map is baked now.
   keys(xKeys) {
     this.blend = null;
-    this.xKeys = xKeys && xKeys.length ? xKeys.slice().sort((a, b) => a.x - b.x).map((k) => ({ x: k.x, L: resolved(k.preset) })) : null;
+    this.xKeys = xKeys && xKeys.length ? xKeys.slice().sort((a, b) => a.x - b.x).map((k) => ({ x: k.x, L: resolved(k.preset), name: typeof k.preset === 'string' ? k.preset : 'custom' })) : null;
+    for (const k of this.xKeys || []) this.envFor(k.L);
     return this;
   }
+  // a timed blend; call prebake(preset) under the chapter's card first, or the target's map is baked here
   blendTo(preset, sec = 1) {
     this.xKeys = null;
-    this.blend = { from: copyLook({}, this.base), to: resolved(preset), t: 0, dur: Math.max(1e-3, sec), name: typeof preset === 'string' ? preset : 'custom' };
+    const to = resolved(preset);
+    this.blend = { from: copyLook({}, this.base), to, t: 0, dur: Math.max(1e-3, sec), name: typeof preset === 'string' ? preset : 'custom' };
+    this.blend.fromEnv = this.envSnapshot();
+    this.envFor(to);
     if (sec <= 0) this.update(0, 1);
     return this;
   }
   // set the blend position directly (clocks that own their own time)
-  blendAt(from, to, t) { this.blend = null; this.xKeys = null; lerpLook(this.base, resolved(from), resolved(to), Math.max(0, Math.min(1, t))); return this; }
+  blendAt(from, to, t) {
+    this.blend = null; this.xKeys = null;
+    const a = resolved(from), b = resolved(to); t = Math.max(0, Math.min(1, t));
+    lerpLook(this.base, a, b, t);
+    this.followEnv(a, b, t);
+    return this;
+  }
+  // bake a preset's environment map now (under a card) so a later blend to it swaps instead of baking mid-play
+  prebake(preset) { const L = resolved(preset); this.envFor(L); this.pinned.add(keyOf(L)); return this; }
   // temporary per-field values on top of the preset (cinematics); restore() drops them
   override(fields) { for (const k of Object.keys(fields)) copyValue(this.ov, k, resolveValue(k, fields[k])); return this; }
   restore() { this.ov = {}; this.write(); return this; }
   // resolved copy of a preset (for relative overrides)
   get(name) { return copyLook({}, name ? resolved(name) : this.base); }
-  rebake() { this.envKey = skyKey(this.cur); this.world.rebuildEnvironment?.(); }
+  rebake() { this.envKey = null; this.useEnv(this.cur, skyKey(this.cur)); }
+
+  // ---- environment maps
+  // the cached map for a look's sky, or one baked now: the sky uniforms take that look for the bake, then the
+  // director writes the live values back
+  envFor(L, key = keyOf(L)) {
+    let t = this.envs.get(key);
+    if (t) return t;
+    const w = this.world, U = w.sky?.uniforms;
+    if (!U || !w.bakeEnvironment) return null;
+    if (L !== this.cur) writeSky(U, L);
+    t = w.bakeEnvironment();
+    if (L !== this.cur) this.write();
+    this.envs.set(key, t);
+    return t;
+  }
+  useEnv(L, key) {
+    if (key === this.envKey) return;
+    this.envKey = key;
+    const t = this.envFor(L, key);
+    if (t && this.world.useEnvironment) this.world.useEnvironment(t);
+    else if (!t) { this.world.rebuildEnvironment?.(); if (this.world.env) this.envs.set(key, this.world.env); }
+  }
+  // a blend shows the map of the side it is nearer, switching with a little hysteresis (a swap keeps every program)
+  followEnv(a, b, t) {
+    const ka = keyOf(a), kb = keyOf(b);
+    if (ka === kb) return;
+    const near = t > 0.55 ? 1 : t < 0.45 ? 0 : this.envKey === kb ? 1 : this.envKey === ka ? 0 : t >= 0.5 ? 1 : 0;
+    if (near) this.useEnv(b, kb); else this.useEnv(a, ka);
+  }
+  // the current map as a blend's starting side (a blend may start from a mid-blend look)
+  envSnapshot() { const L = copyLook({}, this.cur); keyCache.set(L, this.envKey); return L; }
+  // after a lost context every baked map is gone: forget them and bake the current sky again
+  resetEnvs() {
+    const cur = this.world.env;
+    for (const t of this.envs.values()) if (t !== cur) disposeEnv(t);
+    this.envs.clear();
+    this.world.rebuildEnvironment?.();
+    this.envKey = skyKey(this.cur);
+    if (this.world.env) this.envs.set(this.envKey, this.world.env);
+    return this;
+  }
   setUser({ brightness, grain } = {}) {
     if (brightness !== undefined) this.user.exposure = 1 + 0.08 * brightness;
     if (grain !== undefined) this.user.grain = grain / 60;
@@ -108,12 +190,20 @@ export class LookDirector {
     if (b) {
       b.t = Math.min(1, b.t + dt / b.dur);
       lerpLook(this.base, b.from, b.to, smooth(b.t));
+      this.followEnv(b.fromEnv, b.to, smooth(b.t));
       if (b.t >= 1) { this.blend = null; this.name = b.name; }
     } else if (this.xKeys) {
       const K = this.xKeys;
-      if (x <= K[0].x) copyLook(this.base, K[0].L);
-      else if (x >= K[K.length - 1].x) copyLook(this.base, K[K.length - 1].L);
-      else { let i = 0; while (K[i + 1].x < x) i++; lerpLook(this.base, K[i].L, K[i + 1].L, smooth((x - K[i].x) / (K[i + 1].x - K[i].x))); }
+      // name: the key the blend is nearer
+      if (x <= K[0].x) { copyLook(this.base, K[0].L); this.useEnv(K[0].L, keyOf(K[0].L)); this.name = K[0].name; }
+      else if (x >= K[K.length - 1].x) { const k = K[K.length - 1]; copyLook(this.base, k.L); this.useEnv(k.L, keyOf(k.L)); this.name = k.name; }
+      else {
+        let i = 0; while (K[i + 1].x < x) i++;
+        const t = smooth((x - K[i].x) / (K[i + 1].x - K[i].x));
+        lerpLook(this.base, K[i].L, K[i + 1].L, t);
+        this.followEnv(K[i].L, K[i + 1].L, t);
+        this.name = K[t < 0.5 ? i : i + 1].name;
+      }
     }
     this.write();
   }
@@ -136,18 +226,7 @@ export class LookDirector {
     G.uFogParams.value.x = c.fogDensity; G.uFogParams.value.y = c.fogFalloff;
     G.uFogStart.value = c.fogStart; G.uWindStrength.value = c.wind;
     const U = w.sky?.uniforms;
-    if (U) {
-      U.uSunDir.value.copy(c.sunDir);
-      U.uZenith.value.copy(c.zenith); U.uHorizon.value.copy(c.horizon); U.uGround.value.copy(c.groundCol);
-      U.uSunColor.value.copy(c.sunColor); U.uCloudLit.value.copy(c.cloudLit); U.uCloudShade.value.copy(c.cloudShade);
-      U.uExposure.value = c.skyExposure;
-      if (U.uSunDisk) U.uSunDisk.value = c.sunDisk;
-      if (U.uNight) U.uNight.value = c.night ?? c.moon;
-      if (U.uStars) U.uStars.value = c.stars;
-      if (U.uMoonDir) U.uMoonDir.value.copy(c.moonDir);
-      if (U.uMoonColor) U.uMoonColor.value.copy(c.moonColor);
-      if (U.uMoonSize) U.uMoonSize.value = c.moonSize * c.moon;
-    }
+    if (U) writeSky(U, c);
     const P = w.rs?.post?.params;
     if (P) {
       P.exposure = c.exposure * this.user.exposure; P.bloom = c.bloom; P.bloomThreshold = c.bloomThreshold;

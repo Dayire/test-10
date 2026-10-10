@@ -229,12 +229,20 @@ colour, density, falloff, start; wind; post `exposure, bloom, bloomThreshold, vi
 contrast, shadowTint, highlightTint, lift, rays, rayColor, letterbox`; `lanternPool, lanternGlow, glassGlow,
 poolColor, glowColor`; `envIntensity`; `shadowBias, shadowNormalBias`.
 
-**LookDirector** (`game.director`): `apply(preset)`, `keys([{x, preset}])` with `update(x, dt)`, `blendTo(preset,
-sec)`, `blendAt(from, to, t)`, `override(fields)` / `restore()`, `get(name)`, `setUser({brightness, grain})`. It
+**LookDirector** (`game.director`): `apply(preset)`, `look(def.look, chapterId)` (the loader and restarts: `apply`,
+plus `keys` for an x-keyed look), `keys([{x, preset}])` with `update(x, dt)`, `blendTo(preset, sec)`, `blendAt(from,
+to, t)`, `prebake(preset)`, `override(fields)` / `restore()`, `get(name)`, `rebake()`, `resetEnvs()`,
+`setUser({brightness, grain})`. It
 owns `director.sunDir` (= `world.sunDir`, read by shafts, atmosphere and the sun light) and writes the sky (and
 `uNight, uStars, uMoonDir, uMoonColor, uMoonSize` when the sky has them), sun, hemi, fog, post, the pool colour and
 multiplier, `glowMul` and `glowColor` (the game's lantern loop applies both to the glow sprites),
-`glassGlow.emissiveIntensity`, env intensity and `shafts.setSun?.(dir, colour)`; a sky change rebuilds the PMREM.
+`glassGlow.emissiveIntensity`, env intensity and `shafts.setSun?.(dir, colour)`. **Environment maps** are cached by
+sky: a sky change uses the cached PMREM or bakes one. `keys()` bakes every key's map at once (behind the card, or
+the dip of a restart or the title), and `prebake(preset)` does the same for a later `blendTo`/`blendAt` target
+(call it in `build`); a blend then shows the map of the side it is nearer, swapped as it passes half-way (with a
+little hysteresis), which keeps every program and costs no bake mid-play. `name` follows the nearer x key.
+`look()` with a new chapter id drops the maps that chapter does not need; `resetEnvs()` (context restored) bakes
+the current sky again.
 `apply()` starts from a fresh copy of the preset, and a field that only an override set (a cinematic's `fade`, or
 `letterbox` in a custom preset) leaves the live values as soon as the override is restored.
 
@@ -252,8 +260,9 @@ only once one has faded out (no cut); a priority source takes the dimmest free l
 
 **Materials and surfaces**: `mats.register(defs)`, `mats.setEnv(tex, scale)`, `registerSurfaces(defs)`,
 `SURFACES`, `bakeAsync(baker, names, onProgress, out, slice)`, `world.bake(names, onProgress)`,
-`world.rebuildEnvironment()` (the new PMREM goes to the material cache, to GLB-override templates and to every
-scene material that sampled the old one, which is then disposed), `baker.rebakeAll()`. A surface not listed in
+`world.useEnvironment(tex)` (the map goes to the material cache, to GLB-override templates and to every scene
+material that sampled the old one; returns the old one), `world.bakeEnvironment()` (a PMREM of the sky as its
+uniforms stand), `world.rebuildEnvironment()` (both, then disposes the old map), `baker.rebakeAll()`. A surface not listed in
 `needs` is baked on first use with a warning.
 
 ## 8. Camera rig (`src/game/camera.js`)
@@ -293,7 +302,7 @@ counts), ext{}`. `window.__info()` adds the state to `info()`.
 |---|---|
 | `node tools/playtest.mjs --chapter souk [--cp N] [--from step] [--to step] [--runs 2]` | the chapter bot (`tools/bots/<chapter>.js` on `tools/bots/lib.js`); exit 0 on pass; several runs must agree on the end-state hash |
 | `node tools/negative.mjs --chapter souk` | `tools/neg/<chapter>.mjs` as assertions; `--selftest-fail` must exit 1 |
-| `node tools/negative.mjs --suite foundation [--artifact] [--base-port N \| --absolute] [--rounds 5]` | chain and Continue (with the finale's look and mix left behind), throwing storage, restart and title mid-finale, title during the chase, lab end, loader queue / failures / scoped subscriptions, a chain whose import fails (retries, then the title), restart chapter equal to a fresh start, the live and harmless title over the courtyard, the sim waiting through a load's fade, title shadow focus, look round trip, context loss, boot budget; `--artifact` also rebuilds and boots the single-file build. The boot budget is timed against the pre-foundation tree under the same load: by default the suite extracts that commit (`git archive`, cached in the OS temp dir) and serves it on a free port, `--base-port` names a running server of it instead, `--absolute` uses the recorded baseline (idle machine only); one warm-up boot each, then `--rounds` (default 5) alternating boots, compared by median |
+| `node tools/negative.mjs --suite foundation [--artifact] [--base-port N \| --absolute] [--rounds 5]` | chain and Continue (with the finale's look and mix left behind), throwing storage, restart and title mid-finale, title during the chase, lab end, loader queue / failures / scoped subscriptions, a chain whose import fails (retries, then the title), restart chapter equal to a fresh start, the live and harmless title over the courtyard, x-keyed env maps swapped without a bake, the sim waiting through a load's fade, title shadow focus, look round trip, context loss, boot budget; `--artifact` also rebuilds and boots the single-file build. The boot budget is timed against the pre-foundation tree under the same load: by default the suite extracts that commit (`git archive`, cached in the OS temp dir) and serves it on a free port, `--base-port` names a running server of it instead, `--absolute` uses the recorded baseline (idle machine only); one warm-up boot each, then `--rounds` (default 5) alternating boots, compared by median |
 | `node tools/cycle.mjs [--cycles 3] [--path souk,lab,souk,sundown,souk]` | memory flat, programs stable, light census constant, no page errors |
 | `node tools/probe.mjs "<query>" "<js>"`, `tools/tour.mjs`, `tools/shot.mjs` | ad hoc evaluation and screenshots; all take `--port`, `BASE=` and `--chapter` |
 | `npm test`, `npm run test:souk`, `npm run test:foundation`, `npm run cycle` | the suites above |

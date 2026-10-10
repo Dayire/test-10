@@ -156,9 +156,8 @@ export class ChapterLoader {
     mark('unload');
     prog(0.02, 'opening the gate…');
     g.def = def; g.chapterId = id;
-    // 6. time of day (re-bakes the env map when the sky changes)
-    if (Array.isArray(def.look)) g.director.apply(def.look[0].preset).keys(def.look);
-    else g.director.apply(def.look || 'goldenHour');
+    // 6. time of day (the env map follows the sky; an x-keyed look bakes every key's map now, behind the card)
+    g.director.look(def.look, id);
     // 7. surfaces and materials this chapter needs, baked progressively
     if (def.surfaces) registerSurfaces(def.surfaces);
     if (def.materials) g.mats.register(def.materials);

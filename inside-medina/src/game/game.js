@@ -459,7 +459,7 @@ export class Game {
     this.emit('title', { id: this.chapterId, cp: this.cpIndex });
     return this.level;
   }
-  restartChapterLook() { const look = this.def?.look; if (Array.isArray(look)) this.director.apply(look[0].preset).keys(look); else this.director.apply(look || 'goldenHour'); }
+  restartChapterLook() { this.director.look(this.def?.look, this.def?.id ?? null); }
 
   // the chapter's finale or exit: save, event, then the next chapter behind a card (or the credits)
   completeChapter() {
@@ -506,7 +506,7 @@ export class Game {
   // so bake them again in place, then reload the chapter at its checkpoint
   async recoverContext() {
     this.world.baker?.rebakeAll?.();
-    this.world.rebuildEnvironment?.();
+    this.director.resetEnvs();
     for (const s of this.lightRig.spots) s.shadow.needsUpdate = true;
     this.emit('contextRestored', { id: this.chapterId, cp: this.cpIndex });
     if (this.chapterId && this.mode !== 'loading') return this.loadChapter(this.chapterId, this.cpIndex, { reason: 'restart' });
