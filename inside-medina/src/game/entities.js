@@ -5,6 +5,8 @@ import { createCharacter, GUARD } from '../assets/character.js';
 import { Animator } from './animator.js';
 import { archOutline } from '../assets/architecture.js';
 import { extrude, worldUV, setColor } from '../assets/geom.js';
+import { LAYERS, SOFT_GLSL, softUniforms } from '../render/layers.js';
+import { physicsWorld } from './light/system.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -170,6 +172,7 @@ void main(){ vPos = position; vN = normalize(normalMatrix * normal); vec4 w = mo
 const BEAM_FS = /* glsl */ `
 uniform vec3 uColor; uniform float uIntensity; uniform float uTime; uniform float uLen;
 varying vec3 vPos; varying vec3 vN; varying vec3 vW;
+${SOFT_GLSL}
 float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719))) * 43758.5453); }
 float n3(vec3 p){ vec3 i = floor(p), f = fract(p); f = f*f*(3.-2.*f);
   return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z); }
@@ -181,20 +184,35 @@ void main(){
   float along = clamp(-vPos.y / uLen, 0., 1.);
   float fall = (1. - along * .75) * smoothstep(0., .04, along);
   float dust = .75 + .5 * n3(vW * 1.3 + vec3(0., -uTime * .3, uTime * .2));
-  float a = pow(core, 3.5) * fall * dust * uIntensity;
+  float a = pow(core, 3.5) * fall * dust * uIntensity * softFade(.6) * softNear(2.);
   gl_FragColor = vec4(uColor * a, 1.);
+  #include <fog_fragment>
 }`;
 
+// A watchman's lamp (FULL_GAME §6.4: one rule everywhere, "lit = seen"). It sees the boy when his head (0.85 h) or
+// chest (0.5 h) is inside its cone (×0.92 of the spot angle), no cover box crosses the 3D line, and the 2D line
+// from the lamp to that point crosses no light blocker: solids (one-way cloth included, light: 'pass' excepted),
+// solid bodies, mirror trays and guards. Seen for 0.18 s → alarm → a dart 1.05 s later. Only the lamp's own eye
+// sees (its reflected light detects nothing).
+//   mode 'sweep' (between x0 and x1) or 'watch' (a fixed aim at watchAt, a visual unless detect: true)
+//   dazzle(sec): the aim swings up 8 m, the beam whitens, it sees nothing
+//   fixate(target, {while}): the beam narrows to a 0.05 rad wedge on the target while the condition holds
+// The light is one of the rig's two shared spots, acquired near the camera. With a LightSystem (light.lamp(sl))
+// its beam is a light source too (reflectable, I 1.5) and its eye can be dazzled by reflections.
 export class Searchlight {
-  constructor(game, { origin, x0, x1, aimY = 0.6, speed = 3.2, pause = 1.1, covers = [], color = 0xfff0d0, startX }) {
-    this.game = game;
+  constructor(game, { origin, x0, x1, aimY = 0.6, speed = 3.2, pause = 1.1, covers = [], color = 0xfff0d0, startX, mode = 'sweep', watchAt = null, detect, id } = {}) {
+    this.game = game; if (id !== undefined) this.id = id;
     this.origin = origin.clone();
-    this.x0 = x0; this.x1 = x1; this.aimY = aimY; this.speed = speed; this.pauseT = pause;
+    this.x0 = x0 ?? (watchAt ? watchAt[0] : 0); this.x1 = x1 ?? this.x0; this.aimY = aimY; this.speed = speed; this.pauseT = pause;
     this.covers = covers; // THREE.Box3[]
-    this.aim = new THREE.Vector3(startX ?? x0, aimY, 0);
+    this.mode = mode; this.watchAt = watchAt; this.detect = detect ?? mode !== 'watch';
+    this.aim = new THREE.Vector3(mode === 'watch' && watchAt ? watchAt[0] : startX ?? this.x0, mode === 'watch' && watchAt ? watchAt[1] : aimY, 0);
     this.dir = 1; this.pause = 0.5;
     this.state = 'sweep'; this.seen = 0; this.alarmT = 0;
     this.enabled = true;
+    this.isLamp = true;
+    this.light = null; // a LightSystem (set by light.lamp(this))
+    this.dazzled = 0; this.fix = null; this.wedge = 0;
     // under the title the lamp keeps sweeping for show on its own aim and never detects; play resumes from the
     // real aim (the checkpoint's), and the shown beam swings back onto it
     this.liveUnderTitle = true;
@@ -204,29 +222,36 @@ export class Searchlight {
     this.angle = 0.11; this.power = 520;
     this.spot = null;
     this.baseColor = new THREE.Color(color);
-    // volumetric beam cone (additive)
+    this.beamColor = this.baseColor.clone();
+    // volumetric beam cone (additive, on the soft layer)
     const len = 18;
     const cone = new THREE.CylinderGeometry(0.22, Math.tan(0.11) * len * 1.05, len, 32, 1, true);
     cone.translate(0, -len / 2, 0);
     this.beamMat = new THREE.ShaderMaterial({
       vertexShader: BEAM_VS, fragmentShader: BEAM_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: { uColor: { value: new THREE.Color(1.0, 0.86, 0.62) }, uIntensity: { value: 0.35 }, uTime: game.globals.uTime, uLen: { value: len } },
+      uniforms: softUniforms({ uColor: { value: new THREE.Color(1.0, 0.86, 0.62) }, uIntensity: { value: 0.35 }, uTime: game.globals.uTime, uLen: { value: len } }),
     });
     this.beam = new THREE.Mesh(cone, this.beamMat);
     this.beam.frustumCulled = false;
+    this.beam.layers.set(LAYERS.BEAMS);
     game.add(this.beam);
     // lamp housing
     const lamp = new THREE.Group();
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 0.8, 16), game.mats.get('brass'));
     body.rotation.x = Math.PI / 2; lamp.add(body);
-    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.4, 20), new THREE.MeshBasicMaterial({ color: new THREE.Color(8, 7, 5) }));
+    this.lensMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(8, 7, 5) });
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.4, 20), this.lensMat);
     lens.position.z = 0.41; lamp.add(lens);
     lamp.position.copy(this.origin);
     game.add(lamp);
     this.lamp = lamp;
-    this._v = new THREE.Vector3(); this._d = new THREE.Vector3(); this._ray = new THREE.Ray();
+    this._v = new THREE.Vector3(); this._d = new THREE.Vector3(); this._ray = new THREE.Ray(); this._hit = new THREE.Vector3(); this._t = new THREE.Vector3();
+    this._c = new THREE.Color(); this._red = new THREE.Color(1.0, 0.45, 0.3); this._white = new THREE.Color(1.6, 1.55, 1.5);
     this.hum = 0;
   }
+
+  // the cone half-angle that detects (a fixated lamp narrows to its wedge)
+  get seeAngle() { return (this.fix ? 0.05 : this.angle) * 0.92; }
 
   visible(p) {
     // within cone?
@@ -234,15 +259,17 @@ export class Searchlight {
     const v = this._v.subVectors(p, this.origin);
     const dist = v.length(); v.divideScalar(dist);
     const ang = Math.acos(THREE.MathUtils.clamp(d.dot(v), -1, 1));
-    if (ang > this.angle * 0.92) return false;
+    if (ang > this.seeAngle) return false;
     this._ray.set(this.origin, v);
-    const hit = new THREE.Vector3();
-    for (const b of this.covers) { if (this._ray.intersectBox(b, hit) && hit.distanceTo(this.origin) < dist - 0.05) return false; }
-    return true;
+    for (const b of this.covers) { if (this._ray.intersectBox(b, this._hit) && this._hit.distanceTo(this.origin) < dist - 0.05) return false; }
+    // the unified rule: the 2D line from the lamp to the point must cross no light blocker
+    const W = this.light ? this.light.sync() : physicsWorld(this.game);
+    return W.clear(this.origin.x, this.origin.y, p.x, p.y, this.game.player.body);
   }
 
   // move an aim {aim, dir, pause} along the sweep
   sweep(s, dt) {
+    if (this.mode === 'watch' && this.watchAt) { s.aim.x = this.watchAt[0]; s.aim.y = this.watchAt[1] + Math.sin(this.game.time * 0.9) * 0.08; return; }
     if (s.pause > 0) s.pause -= dt;
     else {
       s.aim.x += s.dir * this.speed * dt;
@@ -254,6 +281,29 @@ export class Searchlight {
   // the aim the beam shows (the title's sweep, easing back onto the real aim after it)
   get viewAim() { return this._view.addVectors(this.aim, this.off); }
 
+  // blinded by its own light thrown back: the aim swings up, the beam whitens, nothing is seen
+  dazzle(sec = 7) {
+    if (!this.enabled) return;
+    if (!(this.dazzled > 0)) { this.game.sfx('dazzle', this.origin.x); this.game.audio?.stinger?.('dazzle'); }
+    this.dazzled = Math.max(this.dazzled, sec);
+    this.state = 'dazzled'; this.seen = 0; this.fix = null;
+    this.game.emit('lampDazzled', { id: this.id, sec });
+  }
+  // stare at a target (a crate on a tripwire, a guard) while `cond` holds
+  fixate(target, { while: cond = null } = {}) {
+    if (!this.enabled || !target) return;
+    this.fix = { target, cond };
+    if (this.state === 'sweep') this.state = 'fixate';
+    this.game.sfx('fixate', this.origin.x);
+    this.game.emit('lampFixate', { id: this.id });
+  }
+  targetPoint(o, out) {
+    const b = o.body || o;
+    if (b.h !== undefined) return out.set(b.x, b.y + b.h * 0.5, 0);
+    if (o.x0 !== undefined) return out.set((o.x0 + o.x1) / 2, (o.y0 + o.y1) / 2, 0);
+    return out.set(o.x ?? this.aim.x, o.y ?? this.aim.y, 0);
+  }
+
   step(dt) {
     if (!this.enabled) return;
     if (this.game.held) {
@@ -264,21 +314,34 @@ export class Searchlight {
     }
     this.showing = false;
     const pl = this.game.player;
-    if (this.state === 'sweep') {
-      this.sweep(this, dt);
-      if (!pl.dead && pl.body.x > this.x0 - 3 && pl.body.x < this.x1 + 3) {
-        const head = new THREE.Vector3(pl.body.x, pl.body.y + pl.body.h * 0.85, 0);
-        const chest = new THREE.Vector3(pl.body.x, pl.body.y + pl.body.h * 0.5, 0);
-        const seen = this.visible(head) || this.visible(chest);
+    if (this.state === 'dazzled') {
+      this.dazzled -= dt;
+      // the beam lifts off the street and drifts while the lamp is blind
+      this._t.set(this.aim.x + Math.sin(this.game.time * 1.7) * 0.6 * dt, this.aimY + 8, 0);
+      this.aim.lerp(this._t, 1 - Math.exp(-3 * dt));
+      if (this.dazzled <= 0) { this.dazzled = 0; this.state = 'sweep'; this.seen = 0; this.aim.x = THREE.MathUtils.clamp(this.aim.x, this.x0, this.x1); this.pause = 0.6; }
+      return;
+    }
+    if (this.fix && this.state !== 'alarm') {
+      const F = this.fix;
+      if (F.cond && !F.cond()) { this.fix = null; this.state = 'sweep'; this.aim.x = THREE.MathUtils.clamp(this.aim.x, this.x0, this.x1); this.pause = 0.4; }
+      else { this.state = 'fixate'; this.aim.lerp(this.targetPoint(F.target, this._t), 1 - Math.exp(-6 * dt)); }
+    }
+    if (this.state === 'sweep' || this.state === 'fixate') {
+      if (this.state === 'sweep') this.sweep(this, dt);
+      if (this.detect && !pl.dead && pl.body.x > Math.min(this.x0, this.aim.x) - 3 && pl.body.x < Math.max(this.x1, this.aim.x) + 3) {
+        const head = this._t.set(pl.body.x, pl.body.y + pl.body.h * 0.85, 0);
+        let seen = this.visible(head);
+        if (!seen) seen = this.visible(head.set(pl.body.x, pl.body.y + pl.body.h * 0.5, 0));
         this.seen = seen ? this.seen + dt : Math.max(0, this.seen - dt * 2);
         if (this.seen > 0.18) { this.state = 'alarm'; this.alarmT = 0; this.game.sfx('alarm', pl.body.x); this.game.onSpotted && this.game.onSpotted(); }
       }
     } else if (this.state === 'alarm') {
       this.alarmT += dt;
-      const target = new THREE.Vector3(pl.body.x, pl.body.y + 0.6, 0);
+      const target = this._t.set(pl.body.x, pl.body.y + 0.6, 0);
       this.aim.lerp(target, 1 - Math.exp(-10 * dt));
       if (this.alarmT > 1.05 && !pl.dead) { this.game.sfx('dart', pl.body.x); pl.die('shot'); }
-      if (this.alarmT > 4) { this.state = 'sweep'; this.seen = 0; }
+      if (this.alarmT > 4) { this.state = this.fix ? 'fixate' : 'sweep'; this.seen = 0; }
     }
   }
 
@@ -287,7 +350,7 @@ export class Searchlight {
     const g = this.game, rig = g.lightRig;
     if (!rig) return;
     const fx = g.camRig ? g.camRig.look.x : this.aim.x, half = g.viewHalfW || 12;
-    const d = Math.max(0, this.x0 - fx, fx - this.x1);
+    const d = Math.max(0, Math.min(this.x0, this.origin.x) - fx, fx - Math.max(this.x1, this.origin.x));
     if (!this.spot && this.enabled && d < half + 10) {
       this.spot = rig.acquireSpot(this);
       if (this.spot) {
@@ -306,26 +369,40 @@ export class Searchlight {
     }
     const aim = this.viewAim;
     const alarm = this.state === 'alarm' ? Math.min(1, this.alarmT * 3) : 0;
-    const col = this.baseColor.clone().lerp(new THREE.Color(1.0, 0.45, 0.3), alarm);
+    const blind = this.dazzled > 0 ? Math.min(1, this.dazzled * 2) : 0;
+    const col = this._c.copy(this.baseColor).lerp(this._red, alarm).lerp(this._white, blind * 0.8);
+    this.beamColor.copy(col);
+    this.wedge += ((this.fix && this.state !== 'alarm' ? 1 : 0) - this.wedge) * (1 - Math.exp(-6 * dt));
+    const ang = this.angle + (0.05 - this.angle) * this.wedge;
     this.updateSpot();
     if (this.spot) {
       const s = this.spot;
       s.position.copy(this.origin); s.target.position.copy(aim);
       s.updateMatrixWorld(); s.target.updateMatrixWorld();
       s.color.copy(col);
-      s.intensity = this.enabled ? this.power * (1 + alarm * 0.4) : 0;
+      s.angle = ang;
+      s.intensity = this.enabled ? this.power * (1 + alarm * 0.4 + blind * 0.6 + this.wedge * 0.8) : 0;
     }
-    this.beamMat.uniforms.uColor.value.set(1.0, 0.86, 0.62).lerp(new THREE.Color(1.0, 0.45, 0.3), alarm);
-    this.beamMat.uniforms.uIntensity.value = this.enabled ? 0.55 + alarm * 0.3 : 0;
+    this.beamMat.uniforms.uColor.value.set(1.0, 0.86, 0.62).lerp(this._red, alarm).lerp(this._white, blind * 0.7);
+    this.beamMat.uniforms.uIntensity.value = this.enabled ? 0.55 + alarm * 0.3 + blind * 0.5 + this.wedge * 0.25 : 0;
+    this.lensMat.color.setRGB(8, 7, 5).multiplyScalar(this.enabled ? 1 + blind * 1.5 : 0.02);
     // orient beam cone from origin to aim
-    const d = new THREE.Vector3().subVectors(aim, this.origin).normalize();
+    const d = this._d.subVectors(aim, this.origin).normalize();
     this.beam.position.copy(this.origin);
-    this.beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), d);
+    this.beam.quaternion.setFromUnitVectors(_down, d);
+    const k = ang / this.angle;
+    this.beam.scale.set(k, 1, k);
     this.lamp.lookAt(aim);
   }
-  getState() { return { x: this.aim.x, dir: this.dir, pause: this.pause }; }
-  setState(s) { this.aim.x = s.x; this.dir = s.dir; this.pause = 1.5; this.state = 'sweep'; this.seen = 0; this.alarmT = 0; this.off.set(0, 0, 0); this.showing = false; }
+  getState() { return { x: this.aim.x, dir: this.dir, pause: this.pause, enabled: this.enabled }; }
+  setState(s) {
+    this.aim.x = s.x; this.dir = s.dir; this.pause = 1.5; this.state = 'sweep'; this.seen = 0; this.alarmT = 0; this.off.set(0, 0, 0); this.showing = false;
+    this.dazzled = 0; this.fix = null; this.wedge = 0;
+    if (this.mode === 'watch' && this.watchAt) this.aim.set(this.watchAt[0], this.watchAt[1], 0); else this.aim.y = this.aimY;
+    if (s.enabled !== undefined) this.enabled = s.enabled;
+  }
 }
+const _down = new THREE.Vector3(0, -1, 0);
 
 // ------------------------------------------------------------------ guard
 export class Guard {
@@ -335,8 +412,9 @@ export class Guard {
     this.anim = new Animator(this.rig, { scale: 1.5 });
     this.rig.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     game.add(this.rig.root);
-    this.body = new Body(x, y, 0.5, 1.8, { kind: 'guard', solid: false, pushable: false });
+    this.body = new Body(x, y, 0.5, 1.8, { kind: 'guard', solid: false, pushable: false, owner: this });
     this.body.kinematic = true;
+    this.stunT = 0; this.immune = 0; this.prevState = 'chase';
     game.phys.addBody(this.body);
     this.home = { x, y };
     this.speed = speed; this.blockX = blockX;
@@ -357,17 +435,38 @@ export class Guard {
   }
   activate(x) {
     const b = this.body; b.x = x ?? this.home.x; b.y = this.home.y; b.vx = 0; b.vy = 0; this.prev.set(b.x, b.y);
-    this.state = 'chase'; this.t = 0; this.rig.root.visible = true; b.enabled = true;
+    this.state = 'chase'; this.t = 0; this.rig.root.visible = true; b.enabled = true; this.stunT = 0; this.immune = 0;
     this.anim.setState('ground', 0.01);
     this.game.sfx('shout', b.x);
   }
   deactivate() { this.state = 'hidden'; this.rig.root.visible = false; if (this.light) this.light.enabled = false; this.body.enabled = false; }
   dispose() { if (this.light) this.game.lightPool?.remove(this.light); }
   prestep() { this.prev.set(this.body.x, this.body.y); }
+  // Sunwork (FULL_GAME §6.2): stun(sec) stops him with his eyes shielded, then 2 s of immunity; Infinity is the
+  // asleep collapse (a turret's dart). onLight: a lamp-keeper cannot bear I ≥ 0.8 (sun shafts, a reflected beam)
+  stun(sec = 1.2) {
+    if (this.state === 'hidden' || this.state === 'asleep') return;
+    const b = this.body;
+    b.vx = 0; this.vault = null;
+    if (sec === Infinity) { this.state = 'asleep'; this.t = 0; this.game.sfx('guardSleep', b.x); this.game.emit('guardAsleep', { x: b.x }); return; }
+    if (this.state !== 'stunned') this.prevState = this.state === 'blocked' ? 'blocked' : 'chase';
+    this.state = 'stunned'; this.stunT = sec; this.t = 0;
+    this.game.sfx('guardStun', b.x);
+    this.game.emit('guardStun', { x: b.x, sec });
+  }
+  onLight(I) { if (I >= 0.8 && this.state === 'chase' && this.immune <= 0 && !this.vault) this.stun(1.2); }
   step(dt) {
     if (this.state === 'hidden') return;
     const b = this.body, pl = this.game.player, ph = this.game.phys;
     this.t += dt;
+    this.immune = Math.max(0, this.immune - dt);
+    if (this.state === 'stunned' || this.state === 'asleep') {
+      b.vx = 0;
+      b.vy = Math.max(b.vy - GRAVITY * dt, -16);
+      const ry = ph.sweepY(b, b.vy * dt); b.y += ry.dy; if (ry.hit) b.vy = 0;
+      if (this.state === 'stunned') { this.stunT -= dt; if (this.stunT <= 0) { this.state = this.prevState; this.immune = 2; this.t = 0; } }
+      return;
+    }
     if (this.state === 'chase') {
       if (this.vault) {
         const v = this.vault; v.t += dt / v.dur;
@@ -386,7 +485,9 @@ export class Guard {
       const rx = ph.sweepX(b, b.vx * dt);
       if (rx.hit) {
         const c = rx.hit; const hgt = c.y1 - b.y;
-        if (hgt <= 2.3 && hgt > 0 && ph.free(c.x0, c.y1, c.x1, c.y1 + 1.8, b)) {
+        // stairs and kerbs: an automatic step up (≤ 0.26), not a vault
+        if (hgt > 0 && hgt <= 0.26 && ph.free(b.x0 + b.vx * dt, c.y1 + EPS, b.x1 + b.vx * dt, c.y1 + b.h, b)) { b.y = c.y1 + EPS * 2; b.x += b.vx * dt; }
+        else if (hgt <= 2.3 && hgt > 0 && ph.free(c.x0, c.y1, c.x1, c.y1 + 1.8, b)) {
           const dir = Math.sign(b.vx);
           const landX = dir > 0 ? c.x0 + 0.45 : c.x1 - 0.45;
           this.vault = { x0: b.x, x1: landX, y0: b.y, y1: c.y1 + EPS, t: 0, dur: hgt > 1.4 ? 0.62 : 0.34 };
@@ -411,7 +512,10 @@ export class Guard {
     let st = 'ground';
     if (this.vault) st = 'air';
     if (this.state === 'blocked' || this.state === 'grab') st = 'reach';
-    if (st === 'reach') {
+    if (this.state === 'stunned' || this.state === 'asleep') {
+      this.anim.setState(this.state === 'asleep' ? 'asleep' : 'shieldEyes', this.state === 'asleep' ? 0.25 : 0.12);
+      this.anim.update(dt, { speed: 0, vx: 0, vy: 0, grounded: true, facing: this.facing, poseT: this.t });
+    } else if (st === 'reach') {
       this.anim.setState('push', 0.3);
       this.anim.update(dt, { speed: 0, vx: 0, vy: 0, grounded: true, facing: this.facing });
       // crouch & reach through the gap
@@ -438,12 +542,13 @@ export class Guard {
       this.light.enabled = true;
     }
   }
-  getState() { const b = this.body; return { state: this.state, x: b.x, y: b.y, vx: b.vx, vy: b.vy, t: this.t, facing: this.facing, vault: this.vault && { ...this.vault } }; }
+  getState() { const b = this.body; return { state: this.state, x: b.x, y: b.y, vx: b.vx, vy: b.vy, t: this.t, facing: this.facing, vault: this.vault && { ...this.vault }, stunT: this.stunT, immune: this.immune, prevState: this.prevState }; }
   setState(s) {
     this.vault = null;
     if (!s || s.state === 'hidden') { this.deactivate(); return; }
     const b = this.body; b.x = s.x; b.y = s.y; b.vx = s.vx; b.vy = s.vy; this.prev.set(b.x, b.y);
     this.state = s.state; this.t = s.t; this.facing = s.facing; this.vault = s.vault ? { ...s.vault } : null;
+    this.stunT = s.stunT ?? 0; this.immune = s.immune ?? 0; this.prevState = s.prevState ?? 'chase';
     this.rig.root.visible = true; b.enabled = true;
   }
 }
