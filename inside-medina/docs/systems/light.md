@@ -198,10 +198,10 @@ Measured on the dev server (headless Chromium, SwiftShader):
 | Check | Result |
 |---|---|
 | `light-unit.mjs` | 29 / 29: maths, primitives, 100 random traces against brute force (worst error 2.8e-14 m), every traced hit of §3–5 |
-| lab bot | all twelve rooms, 0 deaths, 287.4 s of game time, 0 jumps while gripping, trace p95 0.20 ms |
-| lab negatives | 16 / 16 (wrong notch ×12 in six rooms, one beam never burns, bolt dash, tripwires, darted guard, dazzle, sunset clock, lost mirror, death restores, finger aim, lit = seen, sun shafts, p95, census) |
+| lab bot | all twelve rooms, 0 deaths, 287.4 s of game time, 0 jumps while gripping, trace p95 0.30 ms (loaded machine); the dazzle crossing (release, over the stand, sprint to x 258.8) takes 7.4 s of the 7.9 s the lamp is blind |
+| lab negatives | 17 / 17 (wrong notch ×12 in six rooms, one beam never burns, bolt dash, tripwires, darted guard (never stunned by T4's beam, falls at x 305.3, lies 0.45 m high, T4 clears, S5 lets go), dazzle crossing, the dazzle's end (7 s / 10.5 s with assist, nothing seen while blind, aim steps ≤ 0.11 m, the boy seen again 1.3 s after it settles, within the 12.2 s sweep cycle), sunset clock, lost mirror, death restores, finger aim, lit = seen, sun shafts, p95, census) |
 | trace cost | p95 0.20 ms, median 0.10 ms over 600 passes with 22 sources (budget 0.35 ms) |
 | Chapter I | souk bot hash unchanged (`7bd4df65`), souk negatives 13 / 13 under the one searchlight rule |
 | census | `tools/cycle.mjs`: 13 loads, `{dir 1, hemi 1, point 7, spot 2}` in every chapter, memory flat |
 | LDR cone (P.md #9) | `?ldr=1&tier=low` courtyard cone matches the float path (mean luma 83.0 vs 85.8); `perf.mjs --check ldr` passes |
-| foundation | 15 / 17: the two failures assume the one-preset lab stub (requests/L.md #6; both pass with that patch) |
+| foundation | 15 / 17 (boot budget passes, median 22546 ms against 23203): the two failures assume the one-preset lab stub (requests/L.md #6; with that patch both pass: the dev end at the heliostat reloads x 1.5 and keeps the save, and the lab holds 5 maps for its 5 presets) |
