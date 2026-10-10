@@ -111,9 +111,10 @@ export class Photocell extends SunLock {
 }
 
 // A lamp's eye (FULL_GAME §6.2): a circle at the lamp; reflected light (not the lamp's own beam, and not a
-// direct ray) held on it for 0.1 s dazzles the lamp (7 s, +50 % with assist) or calls onHit. It re-arms
-// once the reflection has left it for half a second. `face` (deg): an eye behind a window that looks that way only
-// sees light travelling toward it (the fortress lamp looks east, so a ray sent back west-to-east never counts).
+// direct ray) held on it for 0.1 s dazzles the lamp (7 s, +50 % with assist) or calls onHit. It re-arms once
+// the lamp sees again and the reflection has left it for half a second. `face` (deg): an eye behind a window that
+// looks that way only sees light travelling toward it (the fortress lamp looks east, so a ray sent back
+// west-to-east never counts).
 export class LampEye {
   constructor(game, { id, x, y, z = -8, r = 0.8, lamp = null, onHit = null, hold = 0.1, dazzle = 7, face = null } = {}) {
     this.game = game; if (id !== undefined) this.id = id;
@@ -125,9 +126,12 @@ export class LampEye {
   onLight(I, dt, sys) {
     const Ir = this._Ir || 0; // reflected light only
     this.I = Ir; this.lit = Ir > 0;
-    if (Ir > 0) { this.t += dt; this.off = 0; } else { this.t = 0; this.off += dt; if (this.off > 0.5) this.fired = false; }
+    // refractory: a blind lamp (dazzled, or its beam still settling) neither re-arms nor fires; once it sees
+    // again the eye re-arms after half a second without a reflection (the sweep has carried the beam away)
+    const blind = !!this.lamp?.blind;
+    if (Ir > 0) { this.t += dt; this.off = 0; } else { this.t = 0; if (!blind) { this.off += dt; if (this.off > 0.5) this.fired = false; } }
     this.level = Math.min(1, this.t / this.hold);
-    if (!this.fired && this.t >= this.hold - 1e-9) {
+    if (!this.fired && !blind && this.t >= this.hold - 1e-9) {
       this.fired = true;
       const sec = this.dazzle * (this.game.assist ? 1.5 : 1);
       this.lamp?.dazzle?.(sec);

@@ -9,6 +9,8 @@ import { LAYERS, SOFT_GLSL, softUniforms } from '../render/layers.js';
 import { physicsWorld } from './light/system.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (x) => x * x * (3 - 2 * x);
+const RECOVER = 0.9; // s: a dazzled lamp's beam settling back onto the street
 
 // ------------------------------------------------------------------ crate
 export class Crate {
@@ -172,7 +174,7 @@ const BEAM_VS = /* glsl */ `
 varying vec3 vPos; varying vec3 vN; varying vec3 vW;
 void main(){ vPos = position; vN = normalize(normalMatrix * normal); vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
 const BEAM_FS = /* glsl */ `
-uniform vec3 uColor; uniform float uIntensity; uniform float uTime; uniform float uLen;
+uniform vec3 uColor; uniform float uIntensity; uniform float uTime; uniform float uLen; uniform vec3 uFade;
 varying vec3 vPos; varying vec3 vN; varying vec3 vW;
 ${SOFT_GLSL}
 float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719))) * 43758.5453); }
@@ -185,6 +187,8 @@ void main(){
   float core = 1. - edge;
   float along = clamp(-vPos.y / uLen, 0., 1.);
   float fall = (1. - along * .75) * smoothstep(0., .04, along);
+  // a beam that ends in the air (a dazzled lamp looking up) dissolves into the haze instead of showing its cut end
+  fall *= 1. - uFade.z * smoothstep(uFade.x, uFade.y, -vPos.y);
   float dust = .75 + .5 * n3(vW * 1.3 + vec3(0., -uTime * .3, uTime * .2));
   float a = pow(core, 3.5) * fall * dust * uIntensity * softFade(.6) * softNear(2.);
   gl_FragColor = vec4(uColor * a, 1.);
@@ -214,7 +218,8 @@ export class Searchlight {
     this.enabled = true;
     this.isLamp = true;
     this.light = null; // a LightSystem (set by light.lamp(this))
-    this.dazzled = 0; this.fix = null; this.wedge = 0;
+    this.dazzled = 0; this.fix = null; this.wedge = 0; this.blindV = 0;
+    this.rec = { t: 0, from: new THREE.Vector3(), aim: new THREE.Vector3(), dir: 1, pause: 0 };
     // under the title the lamp keeps sweeping for show on its own aim and never detects; play resumes from the
     // real aim (the checkpoint's), and the shown beam swings back onto it
     this.liveUnderTitle = true;
@@ -231,7 +236,7 @@ export class Searchlight {
     cone.translate(0, -len / 2, 0);
     this.beamMat = new THREE.ShaderMaterial({
       vertexShader: BEAM_VS, fragmentShader: BEAM_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: softUniforms({ uColor: { value: new THREE.Color(1.0, 0.86, 0.62) }, uIntensity: { value: 0.35 }, uTime: game.globals.uTime, uLen: { value: len } }),
+      uniforms: softUniforms({ uColor: { value: new THREE.Color(1.0, 0.86, 0.62) }, uIntensity: { value: 0.35 }, uTime: game.globals.uTime, uLen: { value: len }, uFade: { value: new THREE.Vector3(len, len + 1, 0) } }),
     });
     this.beam = new THREE.Mesh(cone, this.beamMat);
     this.beam.frustumCulled = false;
@@ -291,6 +296,16 @@ export class Searchlight {
     this.state = 'dazzled'; this.seen = 0; this.fix = null;
     this.game.emit('lampDazzled', { id: this.id, sec });
   }
+  // the dazzle is over: ease the aim back down (RECOVER s) while sweeping toward the far end, no pause
+  recover() {
+    const R = this.rec;
+    this.dazzled = 0; this.state = 'recover'; this.seen = 0;
+    R.t = 0; R.from.copy(this.aim);
+    R.aim.set(THREE.MathUtils.clamp(this.aim.x, this.x0, this.x1), this.aimY, 0);
+    R.dir = R.aim.x - this.x0 <= this.x1 - R.aim.x ? 1 : -1; R.pause = 0;
+  }
+  // blind (dazzled, or settling after it): sees nothing, and its eye cannot be dazzled again
+  get blind() { return this.state === 'dazzled' || this.state === 'recover'; }
   // stare at a target (a crate on a tripwire, a guard) while `cond` holds
   fixate(target, { while: cond = null } = {}) {
     if (!this.enabled || !target) return;
@@ -321,7 +336,18 @@ export class Searchlight {
       // the beam lifts off the street and drifts while the lamp is blind
       this._t.set(this.aim.x + Math.sin(this.game.time * 1.7) * 0.6 * dt, this.aimY + 8, 0);
       this.aim.lerp(this._t, 1 - Math.exp(-3 * dt));
-      if (this.dazzled <= 0) { this.dazzled = 0; this.state = 'sweep'; this.seen = 0; this.aim.x = THREE.MathUtils.clamp(this.aim.x, this.x0, this.x1); this.pause = 0.6; }
+      if (this.dazzled <= 0) this.recover();
+      return;
+    }
+    if (this.state === 'recover') {
+      // the beam settles back onto the street while the sweep runs on, away from the rest that blinded it; the
+      // lamp is still blind until it has settled
+      const R = this.rec;
+      R.t += dt;
+      this.sweep(R, dt);
+      const k = R.t >= RECOVER ? 1 : smooth(R.t / RECOVER);
+      this.aim.lerpVectors(R.from, R.aim, k);
+      if (k >= 1) { this.state = 'sweep'; this.aim.copy(R.aim); this.dir = R.dir; this.pause = R.pause; this.seen = 0; }
       return;
     }
     if (this.fix && this.state !== 'alarm') {
@@ -371,8 +397,11 @@ export class Searchlight {
     }
     const aim = this.viewAim;
     const alarm = this.state === 'alarm' ? Math.min(1, this.alarmT * 3) : 0;
-    const blind = this.dazzled > 0 ? Math.min(1, this.dazzled * 2) : 0;
-    const col = this._c.copy(this.baseColor).lerp(this._red, alarm).lerp(this._white, blind * 0.8);
+    // blind: eases in as the beam lifts and out as it settles back (reduce flashing halves the glare)
+    const bt = this.state === 'dazzled' ? 1 : this.state === 'recover' ? 1 - smooth(Math.min(1, this.rec.t / RECOVER)) : 0;
+    this.blindV += (bt - this.blindV) * (1 - Math.exp(-8 * dt));
+    const blind = this.blindV, glare = blind * (this.game.settings?.reduceFlashing ? 0.45 : 1);
+    const col = this._c.copy(this.baseColor).lerp(this._red, alarm).lerp(this._white, glare * 0.5);
     this.beamColor.copy(col);
     this.wedge += ((this.fix && this.state !== 'alarm' ? 1 : 0) - this.wedge) * (1 - Math.exp(-6 * dt));
     const ang = this.angle + (0.05 - this.angle) * this.wedge;
@@ -383,13 +412,18 @@ export class Searchlight {
       s.updateMatrixWorld(); s.target.updateMatrixWorld();
       s.color.copy(col);
       s.angle = ang;
-      s.intensity = this.enabled ? this.power * (1 + alarm * 0.4 + blind * 0.6 + this.wedge * 0.8) : 0;
+      s.intensity = this.enabled ? this.power * (1 + alarm * 0.4 + glare * 0.3 + this.wedge * 0.8) : 0;
     }
-    this.beamMat.uniforms.uColor.value.set(1.0, 0.86, 0.62).lerp(this._red, alarm).lerp(this._white, blind * 0.7);
-    this.beamMat.uniforms.uIntensity.value = this.enabled ? 0.55 + alarm * 0.3 + blind * 0.5 + this.wedge * 0.25 : 0;
-    this.lensMat.color.setRGB(8, 7, 5).multiplyScalar(this.enabled ? 1 + blind * 1.5 : 0.02);
+    const U = this.beamMat.uniforms;
+    U.uColor.value.set(1.0, 0.86, 0.62).lerp(this._red, alarm).lerp(this._white, glare * 0.45);
+    U.uIntensity.value = this.enabled ? 0.55 + alarm * 0.3 + glare * 0.15 + this.wedge * 0.25 : 0;
+    this.lensMat.color.setRGB(8, 7, 5).multiplyScalar(this.enabled ? 1 + glare * 0.6 : 0.02);
     // orient beam cone from origin to aim
-    const d = this._d.subVectors(aim, this.origin).normalize();
+    const d = this._d.subVectors(aim, this.origin);
+    // a blind lamp's beam ends in the air near its aim: it fades out over the last 70 % of that length
+    const reach = THREE.MathUtils.clamp(d.length() * 1.05, 8, 18);
+    U.uFade.value.set(reach * 0.3, reach, blind);
+    d.normalize();
     this.beam.position.copy(this.origin);
     this.beam.quaternion.setFromUnitVectors(_down, d);
     const k = ang / this.angle;
@@ -399,7 +433,7 @@ export class Searchlight {
   getState() { return { x: this.aim.x, dir: this.dir, pause: this.pause, enabled: this.enabled }; }
   setState(s) {
     this.aim.x = s.x; this.dir = s.dir; this.pause = 1.5; this.state = 'sweep'; this.seen = 0; this.alarmT = 0; this.off.set(0, 0, 0); this.showing = false;
-    this.dazzled = 0; this.fix = null; this.wedge = 0;
+    this.dazzled = 0; this.fix = null; this.wedge = 0; this.blindV = 0;
     if (this.mode === 'watch' && this.watchAt) this.aim.set(this.watchAt[0], this.watchAt[1], 0); else this.aim.y = this.aimY;
     if (s.enabled !== undefined) this.enabled = s.enabled;
   }

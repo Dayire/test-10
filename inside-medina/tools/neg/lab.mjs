@@ -201,6 +201,40 @@ export const scenarios = [
     check: (r) => (r.plain.dead && r.plain.kind === 'shot' && r.dazzle.shielded && !r.dazzle.dead && r.dazzle.x > 257 ? true : `dazzle ${JSON.stringify(r)}`),
   },
   {
+    // III-B2: a dazzle lasts 7 s (10.5 s with assist) and then ends: the beam settles back onto the street without
+    // a jump, the lamp sweeps away from the rest that blinded it, and it sees the boy again within one sweep cycle
+    name: 'a dazzle ends and the lamp sees again', cp: 10,
+    run: async ({ page }) => { await prep(page); return page.evaluate(() => {
+      const { M, G, get, until } = __neg;
+      const one = (assist) => {
+        M.checkpoint(10); G.assist = assist;
+        get('LL1').setState({ level: 1, done: true }); get('G10').setState({ open: 1 });
+        get('LM2').setState({ x: 235.25, y: 0, alpha: -45 });
+        M.teleport(234.73, 0, 1);
+        until(() => get('S2').dazzled > 0, { x: 0 }, 15);
+        const S = get('S2');
+        M.teleport(241, 0, 1); // in the open, in the sweep
+        let t = 0, dazzleT = null, seenBlind = 0, jump = 0, prevY = S.aim.y, settleY = null;
+        const cycle = 2 * (S.x1 - S.x0) / S.speed + 2 * S.pauseT;
+        while (t < 30 && !G.player.dead && S.state !== 'alarm') {
+          M.sim(1 / 120, { x: 0 }); t += 1 / 120;
+          if (dazzleT === null && S.state !== 'dazzled') dazzleT = t;
+          if (S.blind) seenBlind = Math.max(seenBlind, S.seen);
+          if (dazzleT !== null) jump = Math.max(jump, Math.abs(S.aim.y - prevY));
+          if (settleY === null && dazzleT !== null && !S.blind) settleY = S.aim.y;
+          prevY = S.aim.y;
+        }
+        G.assist = false;
+        return { dazzleT: +(dazzleT ?? -1).toFixed(2), seenAfter: dazzleT === null ? null : +(t - dazzleT).toFixed(2), cycle: +cycle.toFixed(2), seenBlind, jump: +jump.toFixed(3), settleY: settleY && +settleY.toFixed(2), state: S.state, dead: G.player.dead, kind: G.player.deathKind };
+      };
+      return { plain: one(false), assist: one(true) };
+    }); },
+    check: (r) => {
+      const ok = (o, sec) => near(o.dazzleT, sec, 0.05) && o.seenBlind === 0 && o.jump < 0.3 && o.seenAfter !== null && o.seenAfter <= o.cycle + 1 && (o.state === 'alarm' || o.kind === 'shot');
+      return ok(r.plain, 7) && ok(r.assist, 10.5) ? true : `dazzle lifecycle ${JSON.stringify(r)}`;
+    },
+  },
+  {
     // II-E2: the idle clock kills ('sunset') when the last ray dies; the respawn resets t, T and the look
     name: 'idle sunset clock fails, respawn restores t', cp: 9,
     run: async ({ page }) => { await prep(page); return page.evaluate(() => {
