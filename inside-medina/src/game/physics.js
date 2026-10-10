@@ -42,6 +42,8 @@ export class Body {
     this.weight = o.weight; // plate load; undefined = by kind
     this.crushes = !!o.crushes; // kills the boy when it falls on him
     this.light = o.light || 'block';
+    this.anchored = !!o.anchored; // grippable but never moves (an anchored mirror's stand)
+    this.owner = o.owner || null; // the entity this body belongs to (a guard, a mirror)
   }
   get x0() { return this.x - this.w / 2; }
   get x1() { return this.x + this.w / 2; }
@@ -123,6 +125,7 @@ export class PhysicsWorld {
 
   // Try to push body horizontally by dx (used by the player). Carries bodies on top.
   pushBody(body, dx) {
+    if (body.anchored) return 0;
     const r = this.sweepX(body, dx);
     if (r.dx === 0) return 0;
     const riders = this.bodies.filter((o) => o !== body && o.enabled && Math.abs(o.y - body.y1) < 0.02 && o.x1 > body.x0 && o.x0 < body.x1);
@@ -149,6 +152,7 @@ export class PhysicsWorld {
         if (b.grounded) b.vy = 0;
       }
       if (!wasGrounded && b.grounded) b.fallStartY = b.y;
+      if (b.anchored) b.vx = 0;
       if (b.grounded) b.vx *= Math.exp(-14 * dt);
       else b.vx *= Math.exp(-0.5 * dt);
       if (Math.abs(b.vx) > 1e-3) { const rx = this.sweepX(b, b.vx * dt); b.x += rx.dx; if (rx.hit) b.vx = 0; }
