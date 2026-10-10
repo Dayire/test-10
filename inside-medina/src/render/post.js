@@ -244,7 +244,7 @@ export class PostFX {
     this.rtScene.texture.minFilter = THREE.LinearFilter; this.rtScene.texture.generateMipmaps = false;
     // keep the explicit resolve path even where multisampled render-to-texture exists, so the depth
     // texture is never attached to the framebuffer the soft pass draws into
-    if (q.msaa > 0) r.properties.get(this.rtScene).__useRenderToTexture = false;
+    this._explicitResolve();
     const mk = (type = ht) => new THREE.WebGLRenderTarget(1, 1, { type, depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
     this.levels = 6;
     this.down = []; this.up = [];
@@ -284,6 +284,10 @@ export class PostFX {
     }, D);
     this.mOut = createOutputMaterial();
   }
+
+  _explicitResolve() { if (this.q.msaa > 0) this.r.properties.get(this.rtScene).__useRenderToTexture = false; }
+  // after a context restore three's object properties are fresh: re-apply ours, recompile on demand
+  restored() { this._explicitResolve(); this.warmed = false; }
 
   // every render target this chain owns (leak checks)
   targets() { return [this.rtScene, this.rtDof, this.rtRayMask, this.rtRays, this.rtLdr, this.rtFlare, this.rtAO, this.rtAO2, ...this.down, ...this.up].filter(Boolean); }

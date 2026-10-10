@@ -92,7 +92,12 @@ void main(){
     float lit = sat(.55 + (c - c2) * 3.5);
     vec3 cc = mix(uCloudShade, uCloudLit, lit);
     cc += uSunColor * pow(sd, 5.) * .6 * (1. - smoothstep(.5, .9, c)) * day; // silver lining
-    if (uNight > 0.) cc += uMoonColor * pow(max(dot(d, normalize(uMoonDir)), 0.), 6.) * .35 * (1. - smoothstep(.5, .9, c)) * uNight;
+    if (uNight > 0.) {
+      // night clouds: dark silhouettes a little above the sky, their thin edges lit by the moon
+      vec3 nightCloud = mix(uZenith, uHorizon, .6) * (.55 + .5 * lit) + uMoonColor * .015;
+      nightCloud += uMoonColor * pow(max(dot(d, normalize(uMoonDir)), 0.), 6.) * .35 * (1. - smoothstep(.5, .9, c));
+      cc = mix(cc, nightCloud, uNight);
+    }
     col = mix(col, cc, cov * .95);
   }
   col = mix(col, uGround, smoothstep(.0, -.12, el));

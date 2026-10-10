@@ -53,7 +53,7 @@ export class RenderSystem {
     this.frameStart = 0; this.cpuMs = 0; this.gpuMs = 0;
     this._initTimer();
     canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.lost = true; for (const f of this._lostCbs) f(e); }, false);
-    canvas.addEventListener('webglcontextrestored', () => { this.lost = false; this._timerQueries = []; this._initTimer(); this.shadows.invalidate(); for (const f of this._restoredCbs) f(); }, false);
+    canvas.addEventListener('webglcontextrestored', () => { this.lost = false; this._timerQueries = []; this._initTimer(); this.post.restored(); this.shadows.invalidate(); for (const f of this._restoredCbs) f(); }, false);
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
