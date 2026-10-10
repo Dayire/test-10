@@ -129,6 +129,8 @@ window.__bots.lab = (B) => {
   const hidden = (x) => zones().some((z) => Math.abs(z.x - x) < z.half - 0.03);
   const LM1 = () => get('LM1');
   const pushTo = (bx) => (s) => ({ x: s.x < bx - 0.03 ? (bx - s.x < 0.2 ? 0.3 : 1) : 0, grab: true });
+  add('LM1:outside', (s) => ({ x: s.x < 208.3 ? 0.5 : 0 }), (s) => s.x >= 208.2 && Math.abs(P().body.vx) < 0.05, 4);
+  add('LM1:wait0', () => ({ x: 0 }), () => S().dir > 0 && S().pause <= 0 && S().aim.x > 221 && S().aim.x < 226, 30);
   add('LM1:walk', (s) => { const d = B.light.standX('LM1', -1) - s.x; return { x: Math.abs(d) < 0.02 ? 0 : Math.sign(d) * (Math.abs(d) < 0.5 ? 0.25 : 1) }; }, (s) => Math.abs(s.x - B.light.standX('LM1', -1)) < 0.03 && Math.abs(P().body.vx) < 0.05, 10);
   add('LM1:grip', () => ({ x: 0, grab: true }), () => P().grip?.mirror === LM1(), 1.5);
   // into the first rug's shadow
@@ -142,11 +144,9 @@ window.__bots.lab = (B) => {
   add('LM1:hide', (s) => { const z = zones()[3]; const d = z.x - s.x; return { x: Math.abs(d) < 0.06 ? 0 : Math.sign(d) * 0.6 }; }, (s) => Math.abs(s.x - zones()[3].x) < 0.08 && Math.abs(P().body.vx) < 0.05, 4);
   waitDone('LL1', 'LL1', 30);
   gateOpen('G10', 0.6);
-  // S1 swings away left; S2 must be far right before he steps into its range
-  add('LL1:wait', () => ({ x: 0 }), (s) => S().dir < 0 && S().aim.x < s.x - 3.6 && S().pause <= 0, 20);
+  // leave cover only when S1 swings away left and S2 is far right heading away (both lamps miss the 5 m dash)
+  add('LL1:wait', () => ({ x: 0 }), (s) => S().dir < 0 && S().pause <= 0 && S().aim.x < 224 && S2().aim.x > 246 && (S2().dir > 0 || S2().pause > 0.3), 120);
   over('overLM1', 229.1, 230.3);
-  add('toGate10', (s) => ({ x: s.x < 232.2 ? 0.6 : 0 }), (s) => s.x > 232.1 && Math.abs(P().body.vx) < 0.05, 4);
-  add('waitS2', () => ({ x: 0 }), () => S2().aim.x > 246 && (S2().dir < 0 || S2().pause > 0), 20);
   add('toLM2', (s) => { const d = B.light.standX('LM2', -1) - s.x; return { x: Math.abs(d) < 0.02 ? 0 : Math.sign(d) * (Math.abs(d) < 0.5 ? 0.25 : 1) }; }, (s) => Math.abs(s.x - B.light.standX('LM2', -1)) < 0.03 && Math.abs(P().body.vx) < 0.05, 8);
   add('LM2:grip', () => ({ x: 0, grab: true }), () => P().grip?.mirror === get('LM2'), 1.5);
   tiltTo('LM2:tilt', 'LM2', -45);

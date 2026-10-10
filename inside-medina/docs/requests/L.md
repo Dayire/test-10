@@ -1,0 +1,54 @@
+# Requests from L (Sunwork) for files L does not own
+
+Each entry: file, change, reason, test. Everything L ships works without them (fallbacks noted).
+
+## 1. `tools/playtest.mjs` (F, frozen): inject the Sunwork bot helpers
+
+- **Change.** After `inject(P.page, 'tools/bots/lib.js')`, also `if (exists('tools/bots/lightlib.js')) await inject(P.page, 'tools/bots/lightlib.js');`
+  (before the chapter bot).
+- **Reason.** FULL_GAME §6.8 puts the light bot helpers in `tools/bots/lightlib.js`; the chapter bots of C2, C3 and C4
+  build on them. Until then `tools/bots/lab.js` loads the file itself with a synchronous request to the dev server
+  (with a cache-busting query: Vite serves a stale transform of a plain `/tools/bots/lightlib.js` after an edit), which
+  only works where the page is served by the dev server.
+- **Test.** `node tools/playtest.mjs --chapter lab` passes with the fallback in `lab.js` removed.
+
+## 2. `src/game/game.js` (F, frozen): the colour a death fades to
+
+- **Change.** In `updateDying`, `this.fadeColor.set(this.level?.deathColor?.(this.deathKind) ?? 0x000000)` instead of
+  always black.
+- **Reason.** FULL_GAME §3.2 II-E2: when the sunset clock expires "the light dies, the screen dims to indigo (death
+  kind `sunset`)". The boy kneels into the dark (the `sunset` death pose) today, but the fade is black.
+- **Test.** `?chapter=lab&cp=9`, walk past x 176 and wait 49 s: during the dying fade `post.params.fadeColor` is the
+  chapter's indigo (`#0b1026` in Chapter II).
+
+## 3. `docs/ARCHITECTURE.md` (F / integrator): the Sunwork contracts
+
+- **Change.** Add `docs/systems/light.md`'s summary: the LightSystem as a chapter system, the entity list, the player
+  states (`crank`, `capstan`), the light-blocking flags (`Solid.light`, `Body.light`, entity `lightPlank` / `lightBox`),
+  and these names to the registries:
+  - events `notch`, `lockOpen`, `ropeSnap`, `alarm`, `dart`, `dazzle`, `lampDazzled`, `lampFixate`, `guardStun`,
+    `guardAsleep`, `mirrorLost`, `mirrorHome`, `clock`;
+  - sounds now in use: `mirrorGrip`, `notch`, `mirrorRoll`, `crank`, `capstan`, `lockCharge`, `lockOpen`, `boltShut`,
+    `ropeSmoulder`, `ropeSnap`, `counterweight`, `dazzle`, `fixate`, `turret`, `dartGuard`, `guardStun`,
+    `guardSleep`, `tripHum`, `sunsetTick`, `answeredLight`.
+- **Reason.** §11.2 F16 makes ARCHITECTURE.md the event and SFX registry.
+- **Test.** Documentation only.
+
+## 4. `docs/FULL_GAME.md` §5.2 IV-D (C4's design): a two-mirror shortcut
+
+- **Change.** Add a light-blocking rafter, solid x 162.5–169.0, y 9.0–9.3 (or move L_TOP), to the minaret chain.
+- **Reason.** `node tools/light-unit.mjs` finds that, as specified, C1 at −60° alone sends a 150° leg from (170.8, 6.0)
+  into L_TOP at (161.55, 11.34), whatever C2 does: 12 of the 1727 wrong settings light the lock, so C4's negative
+  "chain dark if any mirror is wrong" would fail. With the rafter all 1727 wrong settings stay dark and every leg of
+  the solution (and the boy on ladder 1 and floor 1) is clear.
+- **Test.** The `IV-D minaret chain` fixture in `tools/light-unit.mjs` (it checks both versions).
+
+## 5. `src/ui/**`, `src/core/input.js` (U): touch grab and haptics hooks
+
+- **Change (none required in L's files).** The context icon of the touch grab button can read
+  `game.player.reachable()` (`'mirror' | 'crank' | 'capstan' | 'crate' | 'lever' | null`), and haptics can subscribe
+  to `game.events` `notch` (5 ms tick), `lockOpen`, `ropeSnap`, `dart`. The sticky grab on mirrors, cranks and the
+  capstan for touch, and `settings.grabMode === 'toggle'` for every grip, are handled in `player.js` (no input change).
+- **Reason.** FULL_GAME §8.1, §8.3.
+- **Test.** `tools/mobile-tests.mjs`: "finger aim tilts a lab mirror to the touched notch" (a pointer held on the
+  canvas while gripping `M2` in `?chapter=lab&cp=3`).

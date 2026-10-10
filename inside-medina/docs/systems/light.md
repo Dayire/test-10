@@ -1,0 +1,168 @@
+# Sunwork: the light mechanic (package L)
+
+Owner files: `src/game/light/**`, `src/assets/lightprops.js`, `src/game/{player,animator,entities,bridge,physics}.js`,
+`src/chapters/lab/**`, `tools/bots/{lab,lightlib}.js`, `tools/neg/lab.mjs`, `tools/light-unit.mjs`. The design is
+FULL_GAME §6 (with §1.3 and the puzzles of §3–5); this page is how it is built and how chapters use it.
+
+## Model
+
+Light is 2D in the play plane (x right, y up, metres; angles in degrees counter-clockwise from +x), traced every
+second fixed step (60 Hz) against the colliders the boy collides with. A mirror's surface angle α turns in 15°
+notches; a beam arriving at θi leaves at θr = 2α − θi; each reflection keeps 95 % of the intensity and a beam
+stops below 0.4. Sun 1.0, searchlight 1.5, beam lamp 1.0, moon 0.5.
+
+What blocks light: enabled solids (one-way cloth too) unless `light: 'pass'`; bodies (crates, mirror stands, the
+boy, guards) unless `light: 'pass'`; mirror trays; light-only `Occluder` boxes; light-only planks (a raised
+drawbridge: any entity's `lightPlank` / `lightBox`). Targets (locks, photocells, eyes, sensors, ropes) absorb the
+beam that reaches them; a target is lit where the beam enters its circle (or box).
+
+**Trays reflect on both faces.** The fixtures of §3–5 need it (II-B2 starts on the underside at +30° and is solved
+on the top face at −45°; IV-A1's crank is solved on its underside). `oneSided: true` makes the back face (against
+the normal (−sin α, cos α)) block instead.
+
+## Code map
+
+| File | Content |
+|---|---|
+| `light/trace.js` | Pure (Node-safe): angle maths (`reflect`, `wrapAlpha`, `notchOf`, `alphaFor`), ray against box / tray / circle, `LightWorld` (statics bucketed in a 4 m x-grid; bodies, occluders, planks, mirrors and targets always tested), `trace()`, `clear()` (line of sight) |
+| `light/logic.js` | Pure rules: `chargeLevel`, `heatStep`, `keyed`, `clockT` / `clockDeath`, `magnet`, `liftClamp`, `crossAt` |
+| `light/system.js` | `LightSystem` (a chapter system), `physicsWorld(game)` (line of sight for chapters without one) |
+| `light/sources.js` | `SunRay`, `MoonRay`, `BeamLamp`, `SearchlightSource` |
+| `light/mirror.js` | `Mirror` (wheeled, anchored, crank, continuous), `Crank`, `Capstan` |
+| `light/targets.js` | `SunLock` (latch, hold, bolt), `Photocell`, `LampEye`, `Sensor` (tripwire + dart turret), `BurnRope`, `Occluder` |
+| `light/time.js` | `Terminator`, `SunClock`, `Hatch` |
+| `light/beams.js` | `BeamRenderer`: ribbons, sunspots and glints on `LAYERS.BEAMS`, the priority pool light |
+| `light/index.js` | everything above, one import |
+| `assets/lightprops.js` | `trayMesh`, `mirrorStand`, `crankBracket`, `crankHandle`, `rosetteLock`, `beamLampMesh`, `sensorMesh`, `ropeMesh`, `starInlay`, `starCookie`, `lightTextures`, `lightMaterials` (registers `mirrorBrass`, `brassAged`, `silverPlate`, `ironDark`, `hemp`) |
+
+## Using it in a chapter
+
+```js
+import { LightSystem, SunRay, Mirror, Crank, SunLock } from '../../game/light/index.js';
+const light = new LightSystem(game, kit);            // registers __medina.ext.light
+L.systems.push(light);
+light.add(new SunRay({ id: 'sun3', x: 46.45, y: 2.93, angle: 195 }));
+const M1 = light.add(new Mirror(game, { id: 'M1', kind: 'wheeled', x: 33, alpha: -15, zone: { x0: 31, x1: 45.2 }, thetaHint: 195 }));
+const L3 = light.add(new SunLock(game, { id: 'L3', x: 37, y: 4.2, degree: 2 }));
+const G3 = new Gate(game, { x: 46, h: 2.2, lift: 2.0 }); G3.source = () => (L3.done ? 1 : 0); L.entities.push(G3);
+// a crank: the handle is an interactable the system adds to L.interactables
+const F2 = light.add(new Mirror(game, { id: 'F2', kind: 'crank', x: 118.4, y: 6.8, alpha: -15, thetaHint: 105 }));
+light.add(new Crank(game, { id: 'K2', x: 118.2, y: 4.0, mirror: F2, dir: -1 }));
+// a searchlight joins: tray-aware line of sight, a reflectable beam, an eye that can be dazzled
+const S2 = new Searchlight(game, { id: 'S2', origin, x0, x1, aimY: 0.4, covers }); L.entities.push(S2); light.lamp(S2, { dazzle: 7 });
+```
+
+The system owns its children: it steps, snapshots (`getState` aggregates them by id) and renders them; do not add
+them to `L.entities`. `prepare(cp)` sets solved states with each child's `setState`. Gates, hatches and bridges stay
+ordinary entities driven by `source()` closures (`lock.done`, `1 - bolt.level`, `rope.burnt`).
+
+| Entity | Main options | State |
+|---|---|---|
+| `SunRay` / `MoonRay` / `BeamLamp` | `x, y, angle, I, enabled (bool or fn), clipByTerminator (true: the system's terminator, or a Terminator), width, color` | `{on}` |
+| `Mirror` | `kind, x, y (floor, or the pivot for crank / continuous), alpha, r 0.4, pivotH 1.2, zone {x0, x1}, home, killY, thetaHint, range [lo, hi], oneSided, enabled, z` | `{x, y, alpha}` |
+| `Crank` | `x, y (handle floor), mirror, dir (the side he stands, -1 left)` | via the mirror |
+| `Capstan` | `x, y, mirror (continuous), dir, rate 6, magnet {alpha, window 2}, range` | via the mirror |
+| `SunLock` | `x, y, r 0.35, need (0.8 gold, 0.4 silver), mode latch / hold / bolt, chargeT 0.6, decayT 0.5, metal gold / silver / iron, degree, mount (stem length to the wall), rod [[x, y, z], …], onOpen, rides {body, ox, oy}` | `{level, done}`; `value` = gate source |
+| `Photocell` | a hold-mode lock, r 0.15, chargeT 0.08, may `ride` a body | `{level, done}` |
+| `LampEye` | `x, y, z, r 0.8, lamp, onHit, hold 0.1, dazzle 7` (reflected light only; assist +50 %) | `{fired}` |
+| `Sensor` | `from [x, y], to [x, y], darkT 0.2, lamp (a Searchlight to slave)` — creates its own `BeamLamp` | `{state}` |
+| `BurnRope` | `x0, y0, x1, y1, need 1.6, burnT 1.5, cool 0.5, onBurnt` | `{heat, burnt}` |
+| `Occluder` | `x0, y0, x1, y1, mesh`; `to({y0, y1}, sec)` | `{x0, y0, x1, y1}` |
+| `Terminator` | `T, keys [[x, T], …], range [x0, x1] (where its shadow line is drawn)` | `{T}` |
+| `SunClock` | `T0, rate, y (the ray it kills), terminator, look {from, to, sec}, onExpire (default: die 'sunset'), onReset` | `{t, running, expired}` |
+| `Hatch` | `x0, x1, y0, y1, source, hinge` | `{open}` |
+
+### Player states and input (§6.3)
+
+- **Grip a mirror** exactly like a crate (hold grab beside its stand). ←/→ push or pull (wheeled); an anchored stand
+  never moves and walking away lets it go. **Tilt**: |y| > 0.6 and |y| > 1.2·|x| steps one notch at once, then every
+  0.22 s while held; up raises the far rim (+α facing right), `settings.invertTilt` flips it. The tray turns to its
+  notch in 0.15 s (`settled`). Tilting input never pushes the stand.
+- **Crank**: hold grab within 0.45 m of its stand point; ↑/↓ step notches (up is +α); state `crank`.
+- **Capstan**: ←/→ turn the continuous mirror at 6°/s; state `capstan`; the magnet pulls within ±2° once the input
+  is released.
+- **The jump-buffer fix**: an up-press buffers a jump only when the boy holds nothing — never while gripping a crate
+  or a mirror, in the lever, crank or capstan states, or with grab held next to something he can take; a jump
+  buffered by an up-press just before a grab is dropped. Only the jump button jumps from those states (it drops
+  the grip; from a crank or the capstan it lets go and jumps).
+- **Latched grips**: `settings.grabMode === 'toggle'`, or touch (`input.lastDevice === 'touch'`) on a mirror, crank
+  or capstan: a tap takes it, the next tap lets it go.
+- **Finger / mouse aim**: while gripping or cranking, `pin.aimTarget` sets the wanted reflection θr* = the direction
+  from the pivot to the point; α* = (θr* + θi)/2, θi the beam lighting the tray (or `thetaHint`), rounded to a notch.
+  With `settings.aimSnap` (default on), if that notch lights no target but a neighbour does (a probe trace), the
+  neighbour wins.
+- A grip survives a step down of up to 0.26 m (a kerb), so pushing a stand off a rail kerb keeps the hands on it.
+- `player.animContext()` adds `tilt {age, dir, rim}`, `crankA`, `capstanV`; animator states `crank`, `capstan`,
+  `reach`, `sit` (DepthWalk poses `reach` / `insert` / `sit`), the tilt overlay on push / pull, the guard's
+  `shieldEyes` and `asleep`, and the `sunset` death (a slow kneel).
+
+### Searchlights (§6.4: one rule, "lit = seen")
+
+The lamp sees the boy when his head (0.85 h) or chest (0.5 h) is inside its cone (×0.92 of the spot angle), no
+cover box crosses the 3D line, and the 2D line from the lamp to the point crosses no light blocker (solids, solid
+bodies, mirror trays, guards). Chapters without a LightSystem use `physicsWorld(game)` (solids and bodies only).
+Chapter I is unchanged: its courtyard has no blocker between the lamp and the floor (the souk bot keeps its
+hash, all 13 souk negatives pass). New: `mode 'sweep' | 'watch'` (`watchAt`, `detect`), `dazzle(sec)` (aim up 8 m,
+white beam, sees nothing), `fixate(target, {while})` (a 0.05 rad wedge on the target), `light.lamp(sl)`. The cone
+is on `LAYERS.BEAMS` with `softFade` and ends with the fog chunk (requests/P.md #9). It still takes one of the rig's
+two spots near the view.
+
+### Guards
+
+`stun(sec)`: shield-eyes, no chase, then 2 s of immunity; `stun(Infinity)`: the asleep collapse (a turret dart).
+`onLight(I)`: I ≥ 0.8 stuns for 1.2 s (sun shafts, a reflected beam). Steps of ≤ 0.26 m are climbed, not vaulted.
+
+## Rendering
+
+- Every traced segment is a camera-facing ribbon (one draw for all beams, 96 segments): a hot core, a dusty haze
+  and drifting motes, faded into geometry by the soft pass; its half-width never drops under 2.2 px, so thin beams
+  still read on a phone. A segment that ends in a lamp's eye is drawn to the lamp's real z. A searchlight's own
+  first segment is its cone, not a ribbon.
+- Where a beam ends: a sunspot glow (a lock's glow sits on its lens); where it reflects: a star glint above the bloom
+  threshold (one instanced draw for both). `settings.reduceFlashing` dims them.
+- The brightest end spot is a priority dynamic source of the light pool (priority 3), so a real point light warms
+  the wall around it; the census never changes.
+- Beam colours: the sun's beams take the live key light's hue (lifted toward warm white), the moon's are silver-blue,
+  a searchlight's follow its lamp (red in alarm, white when dazzled), tripwires are thin amber lines.
+- Locks: twelve brass petals hinged on the rim open with the level over a glass lens whose glow follows it; silver
+  for moon-locks, iron for bolts (whose petals close while lit); a latch sends a glint along its brass rod.
+- The terminator is an invisible depth-only slab toward the sun whose shadow edge sits at T on the play plane.
+- `starCookie()` is the lamp-keepers' eight-point star lattice for the rig spots (`lightRig.setCookie`); the lab
+  uses it in its night rooms.
+
+## Sounds and events
+
+Sounds (P's names): `mirrorGrip`, `notch {notch, stop, steps}`, `mirrorRoll {speed}`, `crank`, `capstan`,
+`lockCharge {level, degree}`, `lockOpen {degree, bolt?, hold?}`, `boltShut`, `ropeSmoulder {heat}`, `ropeSnap`,
+`counterweight`, `dazzle`, `fixate`, `turret`, `dart`, `dartGuard`, `alarm {tripwire}`, `guardStun`, `guardSleep`,
+`tripHum`, `sunsetTick {urgency}`, `answeredLight`; stingers `lockOpen`, `ropeSnap`, `dazzle`.
+Events (`game.events`, for haptics, hints and tests): `notch {id, notch, alpha, aim?}`, `lockOpen {id, degree}`,
+`ropeSnap {id}`, `alarm {id, by}`, `dart {id, at}`, `dazzle {id, sec}`, `lampDazzled {id, sec}`, `lampFixate {id}`,
+`guardStun {x, sec}`, `guardAsleep {x}`, `mirrorLost {id, x}`, `mirrorHome {id}`, `clock {id, on, duration?, expired?}`.
+
+## Test API
+
+`__medina.ext.light()` → `{beams: [{src, on, I, pts, ends}], targets: [{id, kind, level, done, lit, I, state}],
+mirrors: [{id, kind, x, y, alpha, target, notch, settled, lost, enabled}], lamps: [{id, state, dazzled, fixated, aim}],
+stats: {traceMs, p95, max, passes, segs}, T, trace(x, y, θ, I) → {pts, hits}, solve(targetId, {depth 3}) → [{mirrorId:
+degrees}], resetStats(), samples(), sys}`.
+
+## The lab (`?chapter=lab`)
+
+Twelve rooms (`ROOMS` in `src/chapters/lab/rooms.js`), one per verb of §6.7 plus the jump-fix and kerb rooms, built
+on the numbers of §3–5 (Chapter II's rooms keep their x; the night rooms are Chapter III's moved +176 / +255 / +140,
+dawn Chapter IV's +330 / +310): **1 sunlock** (II-A1 laundry gust), **2 shadow** (II-A2), **3 kerb** (II-B1), **4 tilt**
+(II-B2), **5 jumpfix** (an anchored tray that must go up three notches), **6 bolt** (II-C2), **7 crank** (II-D1), **8 burn**
+(II-D2), **9 clock** (II-E2 with the terminator and the sunset → dusk blend), **10 lamp** (III-B1 bounce, III-B2 dazzle),
+**11 wire** (III-A basket and tripwires, C2 walk-under, D the darted guard, E the moon well), **12 dawn** (IV-A1 under
+the descending terminator, IV-C sun shafts on a captain, IV-E the heliostat and the fortress lamp). The look follows
+the day (sunset → dusk → night → dawn → sunrise); `?look=<preset>` holds one preset for every room. Checkpoints
+start each room with the earlier ones solved.
+
+## Tests
+
+```
+node tools/light-unit.mjs                       # pure Node: maths, primitives, 100 random traces vs brute force, §3–5 fixtures
+node tools/playtest.mjs --chapter lab --port N  # the lab bot, all twelve rooms
+node tools/negative.mjs --chapter lab --port N  # the lab negatives
+```
