@@ -206,6 +206,14 @@ export class Sensor {
   }
   clear() { this.state = 'clear'; this.target = null; this.alarmT = 0; this.darted = false; this.clearT = 0; }
   step(dt) {
+    // the line hums while the boy is within 3 m of it: a cue to look for it at night
+    if ((this.humT = (this.humT ?? 0) - dt) <= 0) {
+      this.humT = 0.1;
+      const p = this.game.player, [ax, ay] = this.from, [bx, by] = this.to;
+      const dx = bx - ax, dy = by - ay, u = Math.max(0, Math.min(1, ((p.x - ax) * dx + (p.y + 0.6 - ay) * dy) / (dx * dx + dy * dy || 1)));
+      const qx = ax + dx * u, d = Math.hypot(p.x - qx, p.y + 0.6 - (ay + dy * u));
+      if (d < 3 && this.source.enabled !== false && !p.dead) this.game.sfx('tripHum', qx, { level: (1 - d / 3) * 0.6 });
+    }
     if (this.state !== 'alarm') return;
     this.alarmT += dt;
     if (!this.darted && this.alarmT >= 1.05) this.dart();
