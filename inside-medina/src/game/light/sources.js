@@ -3,7 +3,8 @@ import { angleOf, DEG } from './trace.js';
 import { beamLampMesh } from '../../assets/lightprops.js';
 
 // Light sources (FULL_GAME §6.2). A source is a ray entering the play plane: (x, y), an angle in degrees and an
-// intensity (sun 1.0, searchlight 1.5, beam lamp 1.0, moon 0.5). clipByTerminator: dead while y ≤ T + 0.3.
+// intensity (sun 1.0, searchlight 1.5, beam lamp 1.0, moon 0.5). clipByTerminator: dead while y ≤ T + 0.3 (true:
+// the system's terminator; or a Terminator of its own).
 // enabled: false, or a function read every trace.
 const _c = new THREE.Color();
 export class LightSource {
@@ -24,7 +25,8 @@ export class LightSource {
   get theta() { return this.angle; }
   live(sys) {
     if (!this.on || (this.enabledFn && !this.enabledFn())) return false;
-    if (this.clipByTerminator && sys?.terminator && this.oy <= sys.terminator.T + 0.3) return false;
+    const T = this.clipByTerminator === true ? sys?.terminator : this.clipByTerminator || null;
+    if (T && this.oy <= T.T + 0.3) return false;
     return true;
   }
   // the beam's colour, unit brightness (the renderer scales it by the segment's intensity)

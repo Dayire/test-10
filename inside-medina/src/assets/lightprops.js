@@ -289,3 +289,30 @@ export function lightTextures() {
   _tex = { glint };
   return _tex;
 }
+
+// the lamp-keepers' 8-point star lattice (FULL_GAME §4): a cookie for the rig spots (lightRig.setCookie)
+let _star = null;
+export function starCookie() {
+  if (_star) return _star;
+  const n = 256, c = document.createElement('canvas'); c.width = c.height = n;
+  const x = c.getContext('2d');
+  x.fillStyle = '#000'; x.fillRect(0, 0, n, n);
+  x.save(); x.beginPath(); x.arc(n / 2, n / 2, n / 2 - 2, 0, Math.PI * 2); x.clip();
+  const g = x.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+  g.addColorStop(0, '#fff'); g.addColorStop(0.75, '#f4f0e8'); g.addColorStop(1, '#8a8478');
+  x.fillStyle = g; x.fillRect(0, 0, n, n);
+  // the pierced brass of the lantern: a lattice of eight-point stars, its bars cast as dark lines
+  const cell = n / 7;
+  x.strokeStyle = 'rgba(0,0,0,.92)'; x.lineWidth = n * 0.018; x.lineJoin = 'round';
+  const star = (cx, cy, r) => {
+    x.beginPath();
+    for (let i = 0; i <= 16; i++) { const a = (i / 16) * Math.PI * 2 + Math.PI / 8, rr = i % 2 ? r * 0.62 : r; const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr; i ? x.lineTo(px, py) : x.moveTo(px, py); }
+    x.closePath(); x.stroke();
+  };
+  for (let i = -1; i <= 7; i++) for (let j = -1; j <= 7; j++) { star((i + 0.5) * cell, (j + 0.5) * cell, cell * 0.47); }
+  for (let i = 0; i <= 7; i++) { x.beginPath(); x.moveTo(i * cell, 0); x.lineTo(i * cell, n); x.moveTo(0, i * cell); x.lineTo(n, i * cell); x.lineWidth = n * 0.008; x.stroke(); }
+  x.restore();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.name = 'cookie.star'; t.userData.shared = true;
+  _star = t;
+  return t;
+}

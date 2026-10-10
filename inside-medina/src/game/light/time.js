@@ -8,11 +8,12 @@ const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 *
 // (b) Visual: an invisible shadow caster (no colour, no depth) parallel to the play plane, placed toward the sun
 //     at 0.4 × the sun shadow camera's distance from the view's focus, its top edge at T + D·sunDir.y: its shadow
 //     edge on the play plane sits at T, level across the view. Zero shader cost: one depth-only draw.
-// T follows `keys` ([[x, T], ...], on the boy's x: Chapter IV) unless a SunClock drives it. Snapshot {T}.
+// T follows `keys` ([[x, T], ...], on the boy's x: Chapter IV) unless a SunClock drives it. range [x0, x1]: the view
+// x where its shadow line is drawn (a chapter may have several). Snapshot {T}.
 export class Terminator {
-  constructor(game, { id, T = 0, keys = null, visual = true } = {}) {
+  constructor(game, { id, T = 0, keys = null, visual = true, range = null } = {}) {
     this.game = game; if (id !== undefined) this.id = id;
-    this.T = keys ? keyed(keys, game.player?.x ?? 0) : T; this.keys = keys;
+    this.T = keys ? keyed(keys, game.player?.x ?? 0) : T; this.keys = keys; this.range = range;
     this.isTerminator = true; this.liveUnderTitle = true;
     this.driven = false;
     if (visual) {
@@ -32,7 +33,7 @@ export class Terminator {
     const D = 0.4 * 80; // Lighting puts the sun 80 m from the focus along sunDir
     const fz = -2;
     // a sun under the horizon or straight above has no terminator line to draw
-    m.visible = d.y > -0.2 && Math.abs(d.z) > 0.15;
+    m.visible = d.y > -0.2 && Math.abs(d.z) > 0.15 && (!this.range || (lk.x > this.range[0] && lk.x < this.range[1]));
     const zs = fz + D * d.z, s = (zs - fz) / d.z;
     const top = this.T + s * d.y;
     m.position.set(lk.x, top - 40, zs);

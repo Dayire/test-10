@@ -150,8 +150,8 @@ export class Player {
 
   stepGround(dt, inp) {
     const b = this.body;
-    // ground check
-    const g = this.phys.groundUnder(b, 0.04);
+    // ground check (a gripped crate or mirror keeps him on the floor down a kerb: he steps down, never falls)
+    const g = this.phys.groundUnder(b, this.grip ? P.stepUp : 0.04);
     if (!g) {
       this.state = 'air'; this.coyote = this.tune.coyote; this.fallStartY = b.y; this.grip = null; this.setCrawl(false);
       return this.stepAir(dt, inp);
