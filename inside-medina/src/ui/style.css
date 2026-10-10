@@ -34,3 +34,11 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
 #end button { color: #5a3a1e; }
 #end button:hover { color: #9a5a22; }
 #dbg { position: fixed; left: 8px; top: 8px; font: 11px/1.4 monospace; color: #ffe; background: rgba(0,0,0,.5); padding: 6px 8px; white-space: pre; transition: none; }
+#card { position: fixed; inset: 0; z-index: 15; display: grid; place-content: center; justify-items: center; gap: 14px; background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--tone, #20140c) 82%, #fff3dc), var(--tone, #20140c) 70%); color: #fbefdc; transition: opacity .6s ease; pointer-events: auto; }
+#card.out { transition: opacity .9s ease; }
+#card .cg { width: min(22vw, 120px); height: min(22vw, 120px); fill: none; stroke: #fbefdc; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; opacity: .92; }
+#card.draw .cg * { stroke-dasharray: 320; stroke-dashoffset: 320; animation: cdraw 1.8s .25s ease forwards; }
+#card .cn { font-size: clamp(40px, 8vw, 96px); font-weight: 300; letter-spacing: .3em; padding-left: .3em; line-height: 1; }
+#card .cl { font-size: clamp(14px, 1.7vw, 20px); letter-spacing: .32em; padding-left: .32em; font-style: italic; color: rgba(251,239,220,.78); }
+@keyframes cdraw { to { stroke-dashoffset: 0; } }
+#end .e3 { display: grid; gap: 6px; justify-items: center; margin-bottom: 18px; letter-spacing: .2em; font-size: clamp(13px, 1.4vw, 17px); }

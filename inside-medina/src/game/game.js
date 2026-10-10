@@ -3,39 +3,72 @@ import { PhysicsWorld } from './physics.js';
 import { Player } from './player.js';
 import { Animator } from './animator.js';
 import { CameraRig } from './camera.js';
-import { buildLevel } from './level1.js';
 import { createCharacter, BOY } from '../assets/character.js';
 import { G } from '../render/atmosphere.js';
-import { Shafts } from '../render/shafts.js';
 import { updateAtmosphere } from '../render/world.js';
 import { LightRig } from '../render/lightrig.js';
 import { LookDirector } from '../render/lookdirector.js';
-import { Dust, Flock } from '../render/fx.js';
+import { Events } from './events.js';
+import { ChapterLoader, makeGlowTexture, buildChapterFX } from './chapterloader.js';
+import { DepthWalk, introShot } from './cinematics.js';
+import { installTestApi } from './testapi.js';
+import { Save } from '../core/save.js';
+import { storage } from '../core/storage.js';
 
-const STEP = 1 / 120;
+// The engine: one Game for the session (camera, light rig, boy, test API)
+// and one chapter at a time (game.level = L, built by the ChapterLoader).
+// Fixed 120 Hz simulation, interpolated rendering, a generic entity/system
+// loop, the flow API (new / continue / chapters / restart / title), saves,
+// settings, events and hooks. Chapters never edit this file: they declare
+// what they need through the chapter contract (docs/ARCHITECTURE.md).
+
+export const STEP = 1 / 120;
+export const MODES = ['boot', 'menu', 'loading', 'intro', 'play', 'dying', 'cutscene', 'finale', 'chapterEnd', 'credits'];
+const INPUT_MODES = new Set(['play', 'finale']);
 const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+const ZERO_INPUT = { x: 0, y: 0, jump: false, grab: false, pause: false, any: false, pointer: null };
+// surfaces the session objects (the boy) need before any chapter loads
+export const SESSION_SURFACES = ['fabricCream'];
+export const DEFAULT_CREDITS = ['made entirely of code', 'three.js'];
+export const DEFAULT_SETTINGS = {
+  shake: 100, reduceMotion: false, cameraDist: 'normal', timeScale: 1, generous: false, coyote: null, buffer: null, assist: false,
+  hints: 'first', invertTilt: false, aimSnap: true, grabMode: 'hold', crawlMode: 'hold',
+  fpsCap: null, renderScale: 100, dynres: true, dof: true, grain: 60, brightness: 0, quality: 'auto', volumes: {},
+};
 
 export class Game {
-  constructor(world, input, audio, ui, params) {
+  constructor(world, input, audio, ui, params = {}, { save } = {}) {
     this.world = world; this.input = input; this.audio = audio; this.ui = ui; this.params = params;
     this.scene = world.scene; this.mats = world.mats; this.globals = G;
-    this.time = 0; this.acc = 0;
-    this.paused = false;
-    this.vines = [];
+    this.save = save || new Save(storage);
+    this.time = 0; this.acc = 0; this.timeScale = 1;
+    this.mode = 'boot'; this.paused = false; this.menuOpen = false;
     this.fade = 1; this.fadeTarget = 0; this.fadeSpeed = 0.6; this.fadeColor = new THREE.Color(0, 0, 0);
-    this.mode = 'intro'; // intro | play | dying | finale | end
-    this.cpIndex = 0;
     this.stats = { deaths: 0, t0: 0 };
+    this.events = new Events(); this.events.clock = () => this.time;
+    this.hooks = { frame: [], card: null, credits: null, hint: null };
+    this.ext = {};
+    this.settings = { ...DEFAULT_SETTINGS };
+    this.assist = false; this.guardSpeedMul = 1;
+    this.mix = {};
+    this.tracked = new Set();
+    this.def = null; this.chapterId = null; this.level = null; this.root = null;
+    this.vines = [];
+    this.resetChapterState();
+    this._focus = new THREE.Vector3(); this._v = new THREE.Vector3(); this._wind = new THREE.Vector3(); this._ndc = new THREE.Vector3();
+    this.save.onWrite = (d) => this.emit('save', { chapter: d.chapter, cp: d.cp });
   }
 
-  init(progress = () => {}) {
+  // ------------------------------------------------------------------ lifetimes
+  // session objects: camera, rig, light rig, look director, boy, FX textures, test API
+  initOnce({ pool = 6 } = {}) {
     const rs = this.world.rs;
     this.phys = new PhysicsWorld();
     this.camera = new THREE.PerspectiveCamera(34, rs.cssW / rs.cssH, 0.1, 1500);
     rs.camera = this.camera;
     this.camRig = new CameraRig(this.camera);
     // fixed light rig (sun, hemi, fill, pool, two spots) before anything compiles
-    this.lightRig = new LightRig(this.scene, this.world, { pool: this.params.pool ? +this.params.pool : 6, tier: rs.tier });
+    this.lightRig = new LightRig(this.scene, this.world, { pool, tier: rs.tier });
     this.lightPool = this.lightRig.pool;
     this.charLight = this.lightRig.charLight;
     const tierCb = rs.onTierChange;
@@ -54,91 +87,129 @@ export class Game {
       if (speed > 3.2 && this.dust && Math.random() < 0.5) this.dust.emit(new THREE.Vector3(this.player.x - this.player.facing * 0.15, this.player.y, (this.player.z || 0) + 0.1), { count: 1, spread: 0.3, up: 0.25, size: 0.3, alpha: 0.18, life: 0.7 });
       this.audio.play('step', this.player.x, { surface: g?.surface || 'stone', speed: st === 'crawl' ? 1 : speed });
     };
-    progress(0.1, 'raising walls…');
-    this.level = buildLevel(this);
-    const L = this.level;
-    progress(0.8, 'hanging the lanterns…');
-    this.entities = [L.crateA, L.crateB, L.plate, L.bridge, L.lever, L.ladder, L.searchlight, L.guard].filter(Boolean);
-    this.interactables = [L.lever];
-    this.camRig.setKeys(L.cameraKeys);
     this.phys.onImpact = (b, speed, hit) => {
+      this.emit('impact', { x: b.x, speed, kind: b.kind });
       if (b.onImpact) b.onImpact(speed, hit);
       else if (b.kind === 'crate') { this.sfx('crateImpact', b.x); if (speed > 6) this.camRig.addShake(0.5); this.dust && this.dust.emit(new THREE.Vector3(b.x, b.y, 0), { count: 14, spread: 1.4, up: 0.5, size: 0.9, alpha: 0.35 }); }
     };
-    // light shafts & dust
-    this.shafts = new Shafts(this.scene, this.director.sunDir, G);
-    for (const s of L.shaftSpots) this.shafts.add(s.p, s.o);
-    this.shafts.addDust(L.dustRegions, 1400);
-    this.director.shafts = this.shafts;
-    // lantern lights: fixed pool reassigned to the nearest lanterns (no shader recompiles)
-    for (const s of L.lightSources) this.lightPool.add(s.pos, s.intensity, s.phase);
-    // dust puffs and pigeons
-    this.dust = new Dust(this.scene, 64);
-    this.flock = new Flock(this.scene, this.mats, [
-      { x: 4.5, y: 0, z: 1.6, w: 2.5, n: 5 }, { x: 26, y: 1.5, z: 0.6, w: 2, n: 3 }, { x: 48.5, y: 3.1, z: -0.6, w: 3, n: 4 },
-      { x: 80.5, y: 0, z: 1.8, w: 3, n: 4 }, { x: 160, y: 0, z: 1.5, w: 3, n: 4 }, { x: 188.2, y: 0, z: -19.5, w: 3, n: 7 },
-    ]);
-    // lantern glow sprites
     this.glowTex = makeGlowTexture();
-    for (const l of L.lanterns) {
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: 0xffa860, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.55 }));
-      sp.scale.setScalar(0.9);
-      sp.position.set(0, l.mesh.userData.glowY ?? 0.2, 0);
-      l.mesh.add(sp);
-      l.sprite = sp;
-    }
-    // checkpoints & spawn
-    this.checkpoints = L.checkpoints.sort((a, b) => a.x - b.x);
-    this.triggers = L.triggers;
-    this.initialSnap = this.snapshot();
-    const startCp = this.params.cp !== undefined ? Math.min(+this.params.cp, this.checkpoints.length - 1) : 0;
-    this.cpIndex = startCp;
-    this.cpSnap = this.initialSnap;
-    const s = this.checkpoints[startCp].spawn;
-    if (startCp > 0) this.prepareForCheckpoint(startCp);
-    this.player.spawn(s.x, s.y, s.facing);
-    this.camRig.groundY = s.y;
-    this.camRig.snapNext = true;
-    this.installTestApi();
-    progress(1, 'ready');
+    this.loader = new ChapterLoader(this);
+    this.applySettings(this.settings, { persist: false });
+    installTestApi(this);
+    return this;
   }
 
-  // skip puzzles that precede a checkpoint when starting there (dev/testing)
-  prepareForCheckpoint(i) {
-    const L = this.level;
-    const x = this.checkpoints[i].x;
-    if (x > 118) { L.lever.pulled = true; L.lever.t = 1; L.ladder.t = 1; L.ladder.target = 1; L.ladder.vine.enabled = true; }
-    if (x > 140) { L.crateB.setState({ x: 128.15, y: 0 }); L.bridge.setState({ angle: 0 }); }
-    if (x > 42) { L.crateA.setState({ x: 41.5, y: 0 }); }
-    if (x > 186) { this.triggers.find((t) => t.id === 'chase').fired = true; }
+  // per-chapter fields (the loader calls this between unload and build)
+  resetChapterState() {
+    this.level = null;
+    this.entities = []; this.systems = []; this.interactables = []; this.triggers = []; this.checkpoints = [];
+    this.vines.length = 0;
+    this.cpIndex = 0; this.cpSnap = null; this.initialSnap = null;
+    this.cinema = null; this.dieT = 0; this.deathKind = null;
+    this.titleShown = false; this.introT = 0;
+    this._crateMoving = 0; this._vy = undefined; this._zone = undefined;
+    this.shafts = null; this.dust = null; this.flock = null;
+    if (this.camRig) this.camRig.reset();
+  }
+
+  // the loader hands over a built level: generic lists, FX, camera keys, first snapshot
+  wireChapter(L) {
+    this.entities = L.entities.filter(Boolean);
+    this.systems = L.systems.filter(Boolean);
+    this.interactables = L.interactables.filter(Boolean);
+    this.triggers = L.triggers.filter(Boolean);
+    // snapshot keys: explicit id, else Kind#i in build order
+    const n = {};
+    for (const list of [this.entities, this.systems, this.triggers]) for (const e of list) {
+      if (e.id !== undefined && e.id !== null) continue;
+      const k = e.constructor?.name || 'Entity';
+      e.id = `${k}#${n[k] = (n[k] ?? -1) + 1}`;
+    }
+    const fx = buildChapterFX(this, L);
+    this.shafts = fx.shafts; this.dust = fx.dust; this.flock = fx.flock;
+    this.director.shafts = this.shafts;
+    this.camRig.setKeys(L.cameraKeys);
+    this.checkpoints = L.checkpoints.sort((a, b) => a.x - b.x);
+    if (!this.checkpoints.length) this.checkpoints.push({ x: -100, spawn: { x: 0, y: 0, facing: 1 } });
+    if (L.shadowExtent) this.world.light.setExtent?.(L.shadowExtent);
+    this.initialSnap = this.snapshot();
+  }
+
+  // starting at checkpoint i: the chapter solves what precedes it, then the boy spawns
+  placeAt(i) {
+    this.cpIndex = i;
+    this.level.prepare?.(i, this);
     this.cpSnap = this.snapshot();
+    const s = this.checkpoints[i].spawn;
+    this.player.spawn(s.x, s.y, s.facing ?? 1);
+    this.anim.setState('ground', 0.01);
+    if (this.rig.scarf) this.rig.scarf.reset();
+    this.camRig.reset(); this.camRig.groundY = s.y; this.camRig.snapNext = true;
+    this._vy = undefined;
+  }
+
+  // the chapter is built and warm: intro shot or straight to play, then reveal
+  enterChapter({ reason = 'start', card = null } = {}) {
+    const def = this.def;
+    this.save.begin?.(def.id, this.cpIndex, reason);
+    this.emit('chapterStart', { id: def.id, cp: this.cpIndex, reason });
+    this.setMode('intro');
+    this.introT = 0;
+    this.titleShown = (reason === 'boot' && !this.params.autostart) || reason === 'title';
+    const shot = def.intro;
+    if (shot) { this.camRig.setOverride(introShot(this, shot), 0.001); this.camRig.overrideW = 1; }
+    if (this.titleShown) { this.titleFade = undefined; this.ui.showTitle(true); this.ui.titleOpacity?.(1); }
+    if (reason !== 'boot') { this.fade = 1; this.fadeTarget = 0; this.fadeSpeed = 0.8; }
+    if (this.params.autostart && reason !== 'title') this.beginPlay();
+    if (card) Promise.resolve(card.hide?.()).catch(() => {});
   }
 
   snapshot() {
-    return {
-      ents: this.entities.map((e) => e.getState()),
-      trig: this.triggers.map((t) => t.getState()),
-    };
+    const s = { ents: {}, sys: {}, trig: {} };
+    for (const e of this.entities) s.ents[e.id] = e.getState();
+    for (const y of this.systems) if (y.getState) s.sys[y.id] = y.getState();
+    for (const t of this.triggers) s.trig[t.id] = t.getState();
+    return s;
   }
   restore(s) {
-    this.entities.forEach((e, i) => e.setState(s.ents[i]));
-    this.triggers.forEach((t, i) => t.setState(s.trig[i]));
+    for (const e of this.entities) if (e.id in s.ents) e.setState(s.ents[e.id]);
+    for (const y of this.systems) if (y.setState && y.id in s.sys) y.setState(s.sys[y.id]);
+    for (const t of this.triggers) if (t.id in s.trig) t.setState(s.trig[t.id]);
   }
 
   sfx(name, x, data) { this.audio.play(name, x, data); }
+  emit(name, data) { this.events.emit(name, data); }
   add(o) { (this.root || this.scene).add(o); return o; }
-  safeZone(x) { return x > 182.95; }
+  // disposed with the chapter (objects outside the root, chapter textures and materials)
+  track(o) { this.tracked.add(o); return o; }
+  registerExt(name, fn) { this.ext[name] = fn; return fn; }
+  safeZone(x) { return !!this.level?.safeZone?.(x); }
   interactNear(px, py, facing) { for (const it of this.interactables) if (it.near(px, py, facing)) return it; return null; }
+  setMode(m) { if (this.mode === m) return; this.mode = m; this.emit('mode', { mode: m }); }
 
   // ------------------------------------------------------------------ loop
   frame(dt) {
     dt = Math.min(dt, 0.1);
-    const inp = this.input.poll();
-    if (this.input.pausePressed && (this.mode === 'play' || this.mode === 'intro' || this.paused)) this.setPaused(!this.paused);
-    if (this.mode === 'intro' && (this.input.anyPressed || this.params.autostart)) this.beginPlay();
+    for (const f of this.hooks.frame) f(dt, this);
+    let inp = this.input.poll();
+    if (this.menuOpen) inp = this.input.state = { ...ZERO_INPUT };
+    if (this.input.pausePressed && !this.menuOpen && (this.mode === 'play' || this.mode === 'intro' || this.paused)) this.setPaused(!this.paused);
+    if (this.mode === 'intro' && !this.paused) {
+      this.introT += dt;
+      if (this.params.autostart) this.beginPlay();
+      else if (this.input.anyPressed && !this.menuOpen) this.introInput();
+      else if (!this.titleShown && this.def?.intro && this.introT > (this.def.intro.dur ?? 5)) this.beginPlay();
+    }
     this.ui.update(dt);
-    if (!this.paused) {
-      this.acc += dt;
+    if (this.mode === 'loading' || this.mode === 'boot') return;
+    if (this.paused) {
+      // freeze-frame: one dimmed frame, then nothing until resume
+      if (this._pauseFrames > 0) { this._pauseFrames--; this.render(0, this.acc / STEP); }
+      return;
+    }
+    if (!this.params.hold) {
+      const sdt = dt * this.timeScale;
+      this.acc += sdt;
       let first = true;
       let n = 0;
       while (this.acc >= STEP && n < 12) {
@@ -146,23 +217,45 @@ export class Game {
         first = false; this.acc -= STEP; n++;
       }
       if (n >= 12) this.acc = 0;
-      this.time += dt;
+      this.time += sdt;
+      if (this.mode === 'play' && this.chapterId) this.save.play(this.chapterId, sdt);
     }
     this.render(dt, this.acc / STEP);
   }
 
-  fixed(dt, st, first) {
-    const pin = {
-      x: this.mode === 'play' || this.mode === 'finale' ? st.x : 0,
-      y: this.mode === 'play' || this.mode === 'finale' ? st.y : 0,
-      jump: st.jump, grab: st.grab,
-      jumpPressed: first && this.input.jumpPressed && this.mode === 'play',
-      upPressed: first && st.y > 0.6 && !(this.input.prev.y > 0.6) && this.mode === 'play',
-      grabPressed: first && this.input.grabPressed,
+  // the boy's input for one fixed step
+  makePin(st, first) {
+    const I = this.input, play = INPUT_MODES.has(this.mode);
+    return {
+      x: play ? st.x : 0, y: play ? st.y : 0,
+      jump: play && !!st.jump, grab: play && !!st.grab,
+      jumpPressed: first && I.jumpPressed && this.mode === 'play',
+      upPressed: first && st.y > 0.6 && !(I.prev.y > 0.6) && this.mode === 'play',
+      downPressed: first && st.y < -0.6 && !(I.prev.y < -0.6) && this.mode === 'play',
+      grabPressed: first && I.grabPressed,
+      pointerPressed: first && play && !!st.pointer?.pressed,
+      aimTarget: play ? this.aimTarget(st) : null,
     };
-    if (this.mode !== 'play' && this.mode !== 'finale') { pin.jump = false; pin.grab = false; }
+  }
+
+  // the world point under the pointer on the play plane (z = 0), or a scripted one
+  aimTarget(st) {
+    if (st.aimTarget) return st.aimTarget;
+    const p = st.pointer;
+    if (!p || !p.active) return null;
+    const cam = this.camera;
+    const d = this._ndc.set(p.x, p.y, 0.5).unproject(cam).sub(cam.position).normalize();
+    if (Math.abs(d.z) < 1e-6) return null;
+    const t = -cam.position.z / d.z;
+    if (t <= 0) return null;
+    return { x: cam.position.x + d.x * t, y: cam.position.y + d.y * t };
+  }
+
+  fixed(dt, st, first) {
+    const pin = this.makePin(st, first);
+    const pl = this.player, L = this.level;
     for (const e of this.entities) e.prestep?.();
-    const pl = this.player;
+    for (const s of this.systems) s.prestep?.();
     pl.step(dt, pin);
     for (const e of this.entities) e.step?.(dt);
     this.phys.stepBodies(dt);
@@ -172,13 +265,20 @@ export class Game {
       const p = pl.body;
       if (!pl.dead && b.vy < -3 && b.x1 > p.x0 + 0.05 && b.x0 < p.x1 - 0.05 && b.y < p.y + p.h && b.y > p.y + p.h - 0.4) { pl.die('crushed'); this.sfx('crateImpact', b.x); }
     }
+    for (const s of this.systems) s.step?.(dt);
+    // kill zones: the boy's feet inside
+    const kz = L?.killZones;
+    if (kz && kz.length && !pl.dead) for (const z of kz) if (pl.x >= z.x0 && pl.x <= z.x1 && pl.y >= z.y0 && pl.y <= z.y1) { pl.die(z.kind || 'fall'); break; }
     if (this.mode === 'play') {
       for (const t of this.triggers) t.test(this);
-      // checkpoints
+      // checkpoints: grounded, x >= cp.x and y >= minY
       const cps = this.checkpoints;
+      let moved = false;
       for (let i = this.cpIndex + 1; i < cps.length; i++) {
-        if (pl.x >= cps[i].x && (pl.state === 'ground') && !pl.dead) { this.cpIndex = i; this.cpSnap = this.snapshot(); }
+        const c = cps[i];
+        if (pl.x >= c.x && (c.minY === undefined || pl.y >= c.minY) && pl.state === 'ground' && !pl.dead) { this.cpIndex = i; this.cpSnap = this.snapshot(); moved = true; }
       }
+      if (moved) { this.emit('checkpoint', { id: this.chapterId, cp: this.cpIndex }); this.save.checkpoint(this.chapterId, this.cpIndex); }
     }
     // player events -> sound / feedback
     for (const [name, data] of pl.events) {
@@ -186,6 +286,7 @@ export class Game {
         this.sfx('land', pl.x, data); this.anim.land(Math.min(1, data.speed / 11) * (data.hard ? 1.3 : 0.8));
         if (data.hard) this.camRig.addShake(0.35);
         if (data.speed > 5) this.dust.emit(new THREE.Vector3(pl.x, pl.y, pl.z || 0), { count: data.hard ? 12 : 6, spread: data.hard ? 1.2 : 0.7, size: data.hard ? 0.7 : 0.45, alpha: 0.3 });
+        this.emit('land', data);
       }
       else if (name === 'death') this.onDeath(data);
       else if (name === 'crateMove') { this._crateMoving = 0.1; }
@@ -194,121 +295,200 @@ export class Game {
     pl.events.length = 0;
     this._crateMoving = Math.max(0, (this._crateMoving || 0) - dt);
     if (this.mode === 'dying') this.updateDying(dt);
-    if (this.mode === 'finale') this.updateFinale(dt, st);
+    if (this.mode === 'finale' || this.mode === 'cutscene') this.cinema?.update(dt);
   }
 
   // ------------------------------------------------------------------ flow
+  loadChapter(id, cp = 0, opts = {}) { return this.loader.load(id, cp, opts); }
+  newGame() { this.save.newJourney(); return this.loadChapter('souk', 0, { reason: 'start' }); }
+  continueGame() { const d = this.save.data; return this.loadChapter(d.chapter, d.cp, { reason: 'continue' }); }
+  startChapter(id, cp = 0) { return this.loadChapter(id, cp, { reason: 'select' }); }
+
+  // the intro shot: the title waits for input; a chapter intro takes input after 1.5 s
+  introInput() {
+    if (this.mode !== 'intro') return;
+    if (this.titleShown || this.introT > 1.5) this.beginPlay();
+  }
+
   beginPlay() {
-    this.mode = 'play';
+    if (this.mode !== 'intro' && this.mode !== 'menu') return;
+    this.setMode('play');
     this.audio.start();
-    this.ui.showHint(this.input.lastDevice, 9, this.input.keyLabels);
-    this.titleFade = 1;
+    if (!this._hinted) {
+      this._hinted = true;
+      if (this.hooks.hint) this.hooks.hint('controls', this); else this.ui.showHint(this.input.lastDevice, 9, this.input.keyLabels);
+    }
+    this.titleFade = 1; this.titleShown = false;
     this.camRig.clearOverride(2.8);
     this.stats.t0 = this.time;
   }
 
+  // freeze-frame pause; audio ducks (or the context suspends on older audio engines)
   setPaused(p) {
-    this.paused = p;
+    p = !!p;
+    if (p === this.paused) return;
+    if (p && (this.mode === 'loading' || this.mode === 'boot')) return;
+    this.paused = p; this._pauseFrames = p ? 1 : 0;
     this.ui.showPause(p, this.input.lastDevice, this.world.rs.tier, this.audio.muted, this.input.keyLabels);
-    if (this.audio.ctx) { if (p) this.audio.ctx.suspend(); else this.audio.ctx.resume(); }
+    if (this.audio.setPaused) this.audio.setPaused(p);
+    else if (this.audio.ctx) { if (p) this.audio.ctx.suspend(); else this.audio.ctx.resume(); }
+    this.emit('pause', { on: p });
+    if (p) this.save.flush(true);
   }
+  // a menu is open over the game: input never reaches the boy
+  setMenuOpen(b) { this.menuOpen = !!b; if (b) { this.input.state = { ...ZERO_INPUT }; this.input.prev = { ...ZERO_INPUT }; } }
+  // ask for one more freeze-frame (resize while paused)
+  redraw() { if (this.paused) this._pauseFrames = 1; }
 
   onDeath(kind) {
-    this.mode = 'dying'; this.dieT = 0; this.deathKind = kind; this.stats.deaths++;
+    this.setMode('dying'); this.dieT = 0; this.deathKind = kind; this.stats.deaths++;
+    this.save.death(this.chapterId);
+    this.emit('death', { kind, x: this.player.x, y: this.player.y });
     this.sfx('death', this.player.x);
     if (kind === 'fall' || kind === 'crushed') this.camRig.addShake(0.6);
   }
 
   updateDying(dt) {
     this.dieT += dt;
+    if (this.deathKind === 'restart') { if (this.dieT > 0.26) this.respawn(); return; }
     if (this.dieT > 1.6 && this.fadeTarget !== 1) { this.fadeTarget = 1; this.fadeSpeed = 1.8; this.fadeColor.set(0, 0, 0); }
     if (this.dieT > 2.35) this.respawn();
   }
 
   respawn() {
+    const restart = this.deathKind === 'restart';
+    if (this.cinema) { this.cinema.stop(); this.cinema = null; this.camRig.clearOverride(0.01); }
     const cp = this.checkpoints[this.cpIndex];
     this.restore(this.cpSnap);
-    this.player.spawn(cp.spawn.x, cp.spawn.y, cp.spawn.facing);
+    this.player.spawn(cp.spawn.x, cp.spawn.y, cp.spawn.facing ?? 1);
     this.player.z = 0;
     this.anim.setState('ground', 0.01);
     if (this.rig.scarf) this.rig.scarf.reset();
     this.camRig.groundY = cp.spawn.y; this.camRig.snapNext = true;
-    this.mode = 'play';
-    this.fadeTarget = 0; this.fadeSpeed = 1.2;
-    this.audio.lowpass && this.audio.lowpass.frequency.setTargetAtTime(20000, this.audio.ctx.currentTime, 0.3);
+    this.setMode('play');
+    this.deathKind = null; this.dieT = 0;
+    this.fadeTarget = 0; this.fadeSpeed = restart ? 3.4 : 1.2;
+    this.audio.lowpass && this.audio.ctx && this.audio.lowpass.frequency.setTargetAtTime(20000, this.audio.ctx.currentTime, 0.3);
+    this.emit('respawn', { cp: this.cpIndex, restart });
   }
 
-  restartLevel() {
-    this.flock && this.flock.reset();
-    this.director.restore(); this.sunFrom = null;
+  // back to the last checkpoint without counting a death (fade out and in, under 0.6 s)
+  restartCheckpoint() {
+    if (!['play', 'dying', 'finale', 'cutscene'].includes(this.mode) || this.deathKind === 'restart') return false;
+    if (this.paused) this.setPaused(false);
+    if (this.player.dead) { this.player.dead = false; this.player.state = 'ground'; }
+    this.player.scripted = null;
+    this.setMode('dying'); this.dieT = 0; this.deathKind = 'restart';
+    this.fadeColor.set(0, 0, 0); this.fadeTarget = 1; this.fadeSpeed = 4;
+    return true;
+  }
+
+  // the chapter from its start, in place (initial snapshot, preset, flock)
+  restartChapter() {
+    if (this.paused) this.setPaused(false);
+    if (!this.level || !this.initialSnap || this.mode === 'loading') return this.loadChapter(this.chapterId || 'souk', 0, { reason: 'restart' });
+    this.cinema?.stop(); this.cinema = null;
+    this.flock?.reset();
+    const look = this.def.look;
+    if (Array.isArray(look)) this.director.apply(look[0].preset).keys(look); else this.director.apply(look || 'goldenHour');
+    this.director.restore();
     this.cpIndex = 0; this.cpSnap = this.initialSnap;
+    this.deathKind = null;
     this.respawn();
-    this.finaleT = 0;
     this.camRig.clearOverride(0.01);
     this.ui.showEnd(false);
+    return Promise.resolve(this.level);
   }
 
+  async toTitle() {
+    if (this.paused) this.setPaused(false);
+    const d = this.save.exists ? this.save.data : null;
+    if (d && d.chapter !== this.chapterId) return this.loadChapter(d.chapter, d.cp, { reason: 'title' });
+    if (!this.level) return this.loadChapter('souk', 0, { reason: 'title' });
+    this.cinema?.stop(); this.cinema = null;
+    this.restartChapterLook();
+    this.setMode('intro'); this.introT = 0; this.titleShown = true; this.titleFade = undefined;
+    this.ui.showEnd(false); this.ui.showTitle(true); this.ui.titleOpacity?.(1);
+    if (this.def.intro) { this.camRig.setOverride(introShot(this, this.def.intro), 1.5); }
+    this.fadeTarget = 0; this.fadeSpeed = 0.8;
+    return this.level;
+  }
+  restartChapterLook() { const look = this.def?.look; if (Array.isArray(look)) this.director.apply(look[0].preset).keys(look); else this.director.apply(look || 'goldenHour'); }
+
+  // the chapter's finale or exit: save, event, then the next chapter behind a card (or the credits)
+  completeChapter() {
+    if (this.mode === 'chapterEnd' || this.mode === 'loading' || this.mode === 'credits' || !this.def) return null;
+    const id = this.def.id, next = this.def.next ?? null;
+    this.setMode('chapterEnd');
+    this.save.chapterEnd(id, next);
+    this.emit('chapterEnd', { id, next });
+    this.level?.onComplete?.(this);
+    if (next) return this.loadChapter(next, 0, { reason: 'chain' });
+    return this.rollCredits();
+  }
+
+  async rollCredits() {
+    this.setMode('credits');
+    const lines = this.level?.credits || this.def?.credits || DEFAULT_CREDITS;
+    this.emit('credits', { lines });
+    try { if (this.hooks.credits) await this.hooks.credits(lines, this); } catch (e) { console.error(e); }
+    return this.toTitle();
+  }
+
+  // start the chapter's scripted walk (L.finale, a DepthWalk config)
   startFinale() {
-    if (this.mode === 'finale') return;
-    const F = this.level.finale;
-    this.mode = 'finale'; this.finaleT = 0; this.finaleS = 0; this.finaleDone = false;
-    const pl = this.player;
-    pl.grip = null;
-    const curve = new THREE.CatmullRomCurve3(F.path, false, 'centripetal');
-    this.finaleCurve = curve; this.finaleLen = curve.getLength();
-    // start the path from the boy's current position
-    this.finaleS = 0;
-    pl.scripted = (dt, p) => {
-      p.state = 'ground';
-      const inp = this.input.state;
-      const want = Math.max(inp.x, inp.y, this.finaleT > 2 ? 0.55 : 0, this.params.autostart ? 1 : 0);
-      const v = 1.55 * Math.min(1, want);
-      p.fvx = (p.fvx || 0) + (v - (p.fvx || 0)) * (1 - Math.exp(-3 * dt));
-      this.finaleS = Math.min(this.finaleLen, this.finaleS + p.fvx * dt);
-      const t = this.finaleS / this.finaleLen;
-      const pos = curve.getPointAt(t);
-      const tan = curve.getTangentAt(Math.min(0.999, t + 0.01));
-      p.body.x = pos.x; p.body.y = 0; p.z = pos.z;
-      p.finaleYaw = Math.atan2(tan.x, tan.z);
-      p.body.vx = p.fvx;
-    };
-    this.camRig.setOverride(() => {
-      const k = smooth(this.finaleT / 14);
-      // portrait screens get the tall reference framing, landscape a narrower lens looking less steeply up
-      const aspect = this.camera.aspect;
-      const w = THREE.MathUtils.clamp((aspect - 0.7) / 1.1, 0, 1);
-      const pos = F.camPos.clone().add(new THREE.Vector3(0.25 * w, -0.05 * k + 0.25 * w, -2.2 * k + 0.5 * w));
-      const look = F.camLook.clone().add(new THREE.Vector3(-0.3 * w, -0.4 * k - 2.6 * w, 0));
-      return { pos, look, fov: THREE.MathUtils.lerp(F.fov, 47, w) - 3 * k };
-    }, 3.2);
-    this.audio.finale();
-    this.ui.el('hint').classList.add('hidden'); this.ui.hintTimer = 0;
+    if (this.mode === 'finale' || !this.level?.finale) return;
+    this.cinema = new DepthWalk(this, { onEnd: () => this.completeChapter(), ...this.level.finale });
+    this.cinema.start();
+    this.ui.hideHint?.();
   }
 
-  updateFinale(dt) {
-    this.finaleT += dt;
-    const F = this.level.finale;
-    const D = this.director, B = D.base;
-    if (!this.sunFrom) this.sunFrom = B.sunDir.clone();
-    const ks = smooth(this.finaleT / 7);
-    const k = smooth(this.finaleT / 4);
-    D.override({
-      sunDir: this.sunFrom.clone().lerp(F.sunDir, ks).normalize(),
-      sunColor: B.sunColor.clone().lerp(new THREE.Color('#ffb46e'), ks * 0.6),
-      fogDensity: B.fogDensity * (1 - 0.45 * ks),
-      contrast: B.contrast + 0.08 * ks, saturation: B.saturation + 0.1 * ks,
-      letterbox: 0.075 * k, rays: 1.6, bloom: 0.42,
+  // promise: fade the canvas to `target` (1 = covered) in `sec`
+  fadeTo(target, { color, sec = 0.8 } = {}) {
+    if (color !== undefined && color !== null) this.fadeColor.set(color);
+    this.fadeTarget = target; this.fadeSpeed = 1 / Math.max(0.05, sec);
+    const t0 = performance.now();
+    return new Promise((res) => {
+      const check = () => {
+        if (Math.abs(this.fade - target) < 1e-3 || performance.now() - t0 > sec * 1000 + 700) { this.fade = target; res(); }
+        else setTimeout(check, 30);
+      };
+      check();
     });
-    const pl = this.player;
-    if (!this.finaleDone && pl.z < -13.2) {
-      this.finaleDone = true; this.endT = 0;
-      this.fadeColor.set(0.97, 0.9, 0.78); this.fadeTarget = 1; this.fadeSpeed = 0.28;
-      this.audio.fadeOut(6);
+  }
+
+  // ------------------------------------------------------------------ settings
+  // engine settings apply here; the rest are forwarded (render, audio, input)
+  applySettings(s = {}, { persist = true } = {}) {
+    const S = this.settings = { ...this.settings, ...s };
+    const cr = this.camRig;
+    if (cr) {
+      cr.shakeScale = Math.max(0, +S.shake) / 100;
+      cr.reduceMotion = !!S.reduceMotion;
+      cr.distMul = typeof S.cameraDist === 'number' ? S.cameraDist : ({ close: 0.85, normal: 1, wide: 1.12 }[S.cameraDist] ?? 1);
     }
-    if (this.finaleDone) {
-      this.endT += dt;
-      if (this.endT > 4.2 && this.mode !== 'end') { this.mode = 'end'; this.ui.showEnd(true); }
+    const ts = +S.timeScale || 1;
+    this.timeScale = ts > 2 ? ts / 100 : ts;
+    if (this.player) {
+      const T = this.player.tune;
+      T.coyote = S.coyote ?? (S.generous ? 0.18 : 0.1);
+      T.buffer = S.buffer ?? (S.generous ? 0.2 : 0.14);
     }
+    this.guardSpeedMul = S.generous ? 0.95 : 1;
+    this.assist = !!S.assist;
+    this.dofOn = S.dof !== false;
+    this.director?.setUser({ brightness: +S.brightness || 0, grain: S.grain ?? 60 });
+    const rs = this.world.rs;
+    if (s.quality !== undefined && rs) {
+      if (S.quality === 'auto') rs.autoQuality = !this.params.noauto;
+      else if (rs.tier !== S.quality) { rs.autoQuality = false; rs.setTier(S.quality); }
+      else rs.autoQuality = false;
+    }
+    rs?.applySettings?.(S);
+    if (S.volumes) this.audio.setVolumes?.(S.volumes);
+    this.input.applySettings?.(S);
+    if (persist) this.save.settings(s);
+    return S;
   }
 
   // ------------------------------------------------------------------ render
@@ -316,7 +496,8 @@ export class Game {
     const rs = this.world.rs;
     const pl = this.player;
     const P = rs.post.params;
-    if (!this.paused) {
+    const L = this.level;
+    if (!this.paused && L) {
       // player visuals
       const x = pl.prev.x + (pl.cur.x - pl.prev.x) * alpha;
       const y = pl.prev.y + (pl.cur.y - pl.prev.y) * alpha;
@@ -331,7 +512,7 @@ export class Game {
       if (pl.dead && pl.deathKind !== 'fall') targetYaw = root.rotation.y;
       // critically damped yaw
       const w = 16;
-      let d = targetYaw - root.rotation.y;
+      const d = targetYaw - root.rotation.y;
       const a = w * w * d - 2 * w * (pl.yawVel || 0);
       pl.yawVel = (pl.yawVel || 0) + a * dt;
       root.rotation.y += pl.yawVel * dt;
@@ -348,33 +529,35 @@ export class Game {
       }
       this.anim.setState(st, fade);
       if (this.debugPose) { this.anim.prevVx = pl.body.vx; }
-      this.anim.update(dt, pl.animContext(this.lookTarget(pl)));
+      this.anim.update(dt, pl.animContext(L.lookTarget?.(pl) ?? null));
       root.updateMatrixWorld(true);
       if (this.debugPose) { root.rotation.y = targetYaw + this.debugPose.yawOff; pl.yawVel = 0; if (this.debugPose.pose === 'climb') root.rotation.y = Math.PI + this.debugPose.yawOff; }
       if (this.rig.scarf) {
-        const wind = new THREE.Vector3(-pl.body.vx * 6 - 1.5, 0.6, -0.8 + Math.sin(this.time * 0.7) * 1.2);
+        const wind = this._wind.set(-pl.body.vx * 6 - 1.5, 0.6, -0.8 + Math.sin(this.time * 0.7) * 1.2);
         this.rig.scarf.update(dt, wind);
       }
-      // entities
+      // entities and systems
       for (const e of this.entities) e.render?.(alpha, dt);
+      for (const s of this.systems) s.render?.(alpha, dt);
       // lanterns flicker
-      for (const l of this.level.lanterns) {
+      for (const l of L.lanterns) {
         const f = 0.85 + Math.sin(this.time * 9 + l.phase) * 0.08 + Math.sin(this.time * 23 + l.phase * 2) * 0.05;
         if (l.sprite) l.sprite.material.opacity = 0.5 * f * this.director.glowMul;
         l.mesh.rotation.z = Math.sin(this.time * 0.8 + l.phase) * 0.03;
       }
       this.charLight.position.set(x + 0.6, this._vy + 1.5, z + 1.6);
       this.lightPool.update(this.camRig.look, this.time, dt);
-      this.dust.update(dt);
-      this.flock.update(dt, x, this._vy, Math.abs(pl.body.vx) + (pl.state === 'air' ? 2 : 0), (bx) => this.sfx('wings', bx));
+      this.dust?.update(dt);
+      this.flock?.update(dt, x, this._vy, Math.abs(pl.body.vx) + (pl.state === 'air' ? 2 : 0), (bx) => this.sfx('wings', bx));
       // camera
-      const ppos = new THREE.Vector3(x, this._vy, z);
-      if (this.mode === 'intro' && !this.camRig.override) this.introCamera();
+      const ppos = this._v.set(x, this._vy, z);
       const cp = this.camRig.update(dt, pl, ppos, pl.facing, pl.state === 'ground');
       // depth of field follows the boy
-      const fd = this.camera.position.distanceTo(new THREE.Vector3(x, this._vy + 0.7, z));
+      const fd = this.camera.position.distanceTo(this._focus.set(x, this._vy + 0.7, z));
       P.focus = fd; P.nearRange = Math.max(2.5, fd * 0.28); P.farStart = fd * 1.1; P.farRamp = 40;
-      P.nearBlur = this.mode === 'finale' ? 4 : cp.dofNear; P.farBlur = this.mode === 'finale' ? 1.5 : cp.dofFar;
+      const dof = this.mode === 'finale' && this.cinema?.dof;
+      P.nearBlur = dof ? dof.near : cp.dofNear; P.farBlur = dof ? dof.far : cp.dofFar;
+      if (!this.dofOn) { P.nearBlur = 0; P.farBlur = 0; }
       // fades
       this.fade += Math.sign(this.fadeTarget - this.fade) * Math.min(Math.abs(this.fadeTarget - this.fade), dt * this.fadeSpeed);
       P.fade = smooth(this.fade); P.fadeColor.copy(this.fadeColor);
@@ -384,96 +567,25 @@ export class Game {
       this.viewHalfW = Math.abs(this.camera.position.z) * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) * this.camera.aspect;
       // time of day (writes sun, sky, fog, post and the lantern pool)
       this.director.update(x, dt);
-      // shadow frustum follows the view
-      const focus = new THREE.Vector3(this.camRig.look.x, this.camRig.look.y, this.mode === 'finale' ? -8 : -2);
-      if (this.camRig.override) focus.set(188, 3, -9);
-      this.world.light.update(focus);
-      // audio listener & mix
+      // shadow frustum follows the view: the override's shadowFocus, else the camera's look
+      const sf = this.camRig.shadowFocus;
+      if (sf) this._focus.copy(sf);
+      else { const lk = this.camRig.override ? this.camRig.curLook : this.camRig.look; this._focus.set(lk.x, lk.y, this.mode === 'finale' ? -8 : -2); }
+      this.world.light.update(this._focus);
+      // audio listener & mix (generic fields + the chapter's)
       this.audio.setListener(x);
-      const L = this.level;
-      const hum = L.searchlight && x > 66 && x < 120 ? 0.9 * (1 - Math.min(1, Math.abs(x - 93) / 40)) : 0;
-      const crateSpeed = this._crateMoving > 0 ? Math.abs(pl.body.vx) : 0;
-      this.audio.update(dt, { crateSpeed, hum, tension: L.searchlight?.state === 'alarm' || L.guard.state === 'chase' ? 1 : (x > 70 && x < 118 ? 0.35 : 0.1), height: this._vy, birds: x < 70 || x > 118, chase: L.guard.state === 'chase' && !pl.dead, finale: this.mode === 'finale' || this.mode === 'end' });
+      const m = this.mix = {
+        crateSpeed: this._crateMoving > 0 ? Math.abs(pl.body.vx) : 0, hum: 0, tension: 0.1, height: this._vy, birds: true, chase: false,
+        finale: this.mode === 'finale' || this.mode === 'chapterEnd' || this.mode === 'credits', zone: null, music: null, loops: {},
+        ...L.mix?.(x, this),
+      };
+      this.audio.update(dt, m);
+      if (m.zone !== this._zone) { this._zone = m.zone; this.audio.setZone?.(m.zone); }
+    } else if (this.paused) {
+      // the freeze-frame is dimmed
+      P.fade = Math.max(smooth(this.fade), 0.42); P.fadeColor.set(0, 0, 0);
     }
     updateAtmosphere(this.world, this.camera, this.time);
     rs.render(this.scene, this.camera, this.time);
   }
-
-  lookTarget(pl) {
-    const L = this.level;
-    if (L.guard.state === 'chase' && L.guard.body.x < pl.x) return pl.facing > 0 ? -0.8 : 0.8;
-    return null;
-  }
-
-  introCamera() {
-    // establishing shot over the souk until the first input
-    const t = this.time;
-    this.camRig.setOverride(() => ({
-      pos: new THREE.Vector3(5 + Math.sin(t * 0.05) * 0.5, 4.2, 15.5),
-      look: new THREE.Vector3(7, 6.8, -10),
-      fov: 42,
-    }), 0.001);
-    this.camRig.overrideW = 1;
-  }
-
-  // ------------------------------------------------------------------ test hooks
-  installTestApi() {
-    const g = this;
-    window.__medina = {
-      game: g,
-      state: () => ({ x: +g.player.x.toFixed(3), y: +g.player.y.toFixed(3), z: +(g.player.z || 0).toFixed(3), st: g.player.state, crawl: g.player.crawling, dead: g.player.dead, mode: g.mode, cp: g.cpIndex, t: +g.time.toFixed(2), deaths: g.stats.deaths, guard: g.level.guard.state, gx: +g.level.guard.body.x.toFixed(2), beam: +g.level.searchlight.aim.x.toFixed(2), plate: +g.level.plate.load.toFixed(2), bridge: +g.level.bridge.angle.toFixed(2), crateA: [+g.level.crateA.body.x.toFixed(2), +g.level.crateA.body.y.toFixed(2)], crateB: [+g.level.crateB.body.x.toFixed(2), +g.level.crateB.body.y.toFixed(2)], lever: g.level.lever.pulled, ladder: g.level.ladder.vine.enabled }),
-      // run the simulation without rendering: seconds, input object or fn(state)->input
-      sim: (seconds, input) => {
-        const n = Math.round(seconds / STEP);
-        for (let i = 0; i < n; i++) {
-          const st = typeof input === 'function' ? input(window.__medina.state()) : input;
-          const prevState = g.input.state;
-          const s = { x: 0, y: 0, jump: false, grab: false, pause: false, any: true, ...st };
-          g.input.prev = prevState; g.input.state = s;
-          g.input.jumpPressed = s.jump && !prevState.jump; g.input.grabPressed = s.grab && !prevState.grab;
-          if (g.mode === 'intro') g.beginPlay();
-          g.fixed(STEP, s, true);
-          g.time += STEP;
-          if (g.mode === 'dying' && g.dieT > 2.35) g.respawn();
-        }
-        g.player.prev.set(g.player.x, g.player.y);
-        return window.__medina.state();
-      },
-      teleport: (x, y = 0) => { g.player.spawn(x, y, 1); g.camRig.snapNext = true; },
-      checkpoint: (i) => { g.cpIndex = i; g.prepareForCheckpoint(i); g.respawn(); },
-      finale: () => { g.player.spawn(187.6, 0, 1); g.mode = 'play'; g.startFinale(); },
-      setInput: (o) => { g.input.override = o; },
-      // close camera on the boy; pose: run|walk|idle|air|hang|climb|push|pull|crawl|dead
-      closeup: (pose = 'idle', dist = 3.2, phase = 0.2, yawOff = 0) => {
-        const pl = g.player;
-        g.camRig.setOverride(() => ({ pos: new THREE.Vector3(pl.x + 0.2, pl.y + 0.9, (pl.z || 0) + dist), look: new THREE.Vector3(pl.x, pl.y + 0.62, pl.z || 0), fov: 35 }), 0.001);
-        g.camRig.overrideW = 1; g.camRig.overrideTarget = 1;
-        g.debugPose = { pose, phase, yawOff };
-      },
-      // put the boy somewhere and settle the camera instantly (for screenshots)
-      photo: (x, y = 0, facing = 1, simSec = 0.4) => {
-        g.fade = 0; g.fadeTarget = 0; g.titleFade = undefined; g.ui.showTitle(false);
-        if (g.mode === 'intro') g.beginPlay();
-        g.mode = 'play'; g.dieT = 0;
-        g.player.spawn(x, y, facing);
-        if (g.rig.scarf) g.rig.scarf.reset();
-        if (simSec > 0) window.__medina.sim(simSec, { x: 0 });
-        g.camRig.override = null; g.camRig.overrideW = 0; g.camRig.overrideTarget = 0;
-        g.camRig.groundY = g.player.y; g.camRig.snapNext = true; g.camRig.aheadX = facing * g.camRig.paramsAt(x).ahead;
-        g.ui.el('hint').classList.add('hidden'); g.ui.hintTimer = 0;
-        return window.__medina.state();
-      },
-      pause: (p) => g.setPaused(p),
-    };
-  }
-}
-
-function makeGlowTexture() {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const x = c.getContext('2d');
-  const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-  gr.addColorStop(0, 'rgba(255,220,170,1)'); gr.addColorStop(0.25, 'rgba(255,170,90,.45)'); gr.addColorStop(1, 'rgba(255,140,60,0)');
-  x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  return t;
 }

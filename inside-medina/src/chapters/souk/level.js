@@ -1,97 +1,19 @@
 import * as THREE from 'three';
-import { Batcher, boxMM, worldUV, shadeByHeight, setColor, mat4, rng, extrude } from '../assets/geom.js';
-import { building, wallWithOpenings, archFrame, arcade, dome, minaret, cornice, merlons, zellige, door, archOutline, spandrels, archBead } from '../assets/architecture.js';
-import { barrel, pot, rugRoll, hangingRug, sack, basket, cart, awning, drape, lanternMesh, bracket, laundry, wire, eave, stairs, stool, pole, souqCanopy } from '../assets/props.js';
-import { ivyCurtain, ivyPatch, leafClump, grassTufts } from '../assets/foliage.js';
-import { dressFacade } from '../assets/dressing.js';
-import { Crate, Plate, Lever, Searchlight, Guard, Trigger } from './entities.js';
-import { Drawbridge, RopeLadder } from './bridge.js';
+import { boxMM, worldUV, shadeByHeight, setColor } from '../../assets/geom.js';
+import { building, wallWithOpenings, archFrame, arcade, dome, minaret, cornice, merlons, zellige, door, spandrels, archBead } from '../../assets/architecture.js';
+import { barrel, pot, rugRoll, hangingRug, sack, basket, cart, awning, drape, lanternMesh, bracket, laundry, wire, eave, stairs, stool, pole, souqCanopy } from '../../assets/props.js';
+import { ivyCurtain, ivyPatch, leafClump, grassTufts } from '../../assets/foliage.js';
+import { Crate, Plate, Lever, Searchlight, Guard, Trigger } from '../../game/entities.js';
+import { Drawbridge, RopeLadder } from '../../game/bridge.js';
+import { FZ } from '../../game/levelkit.js';
 
-const FZ = -1.6; // facade line
+const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
 
-export function buildLevel(game) {
-  const batch = new Batcher(game.mats, { chunk: 40 });
-  const K = batch.kit();
-  const phys = game.phys;
-  const L = {
-    checkpoints: [], cameraKeys: [], triggers: [], lanterns: [], shaftSpots: [], dustRegions: [], covers: [], lightSources: [],
-    finale: null,
-  };
-  const r = rng(42);
-
-  // ---------------------------------------------------------------- helpers
-  const solid = (x0, y0, x1, y1, o) => phys.addSolid(x0, y0, x1, y1, o);
-  const vbox = (x0, y0, z0, x1, y1, z1, mat, o = {}) => {
-    const g = boxMM(x0, y0, z0, x1, y1, z1, o);
-    shadeByHeight(g, { base: o.base ?? 0, grime: o.grime ?? 1.0, grimeAmt: o.grimeAmt ?? 0.3, seed: x0 });
-    K.add(g, mat, null, { cast: o.cast !== false });
-    return g;
-  };
-  const ground = (x0, x1, { z0 = FZ - 0.3, z1 = 17, y = 0, mat = 'cobbles', collide = true } = {}) => {
-    if (collide) solid(x0, y - 3, x1, y, { ledges: false, surface: 'stone' });
-    const g = boxMM(x0, y - 0.6, z0, x1, y, z1);
-    shadeByHeight(g, { base: y - 0.6, grime: 0.1, grimeAmt: 0 });
-    K.add(g, mat, null, { cast: false });
-  };
-  // gameplay block: collider + stone visual with coping
-  const block = (x0, x1, y0, y1, { z0 = FZ, z1 = 1.3, mat = 'sandstone', coping = 'limestone', ledges = true, visual = true, surface = 'stone' } = {}) => {
-    const s = solid(x0, y0, x1, y1, { ledges, surface });
-    if (visual) {
-      vbox(x0, y0, z0, x1, y1 - (coping ? 0.12 : 0), z1, mat, { base: y0, grime: 0.8 });
-      if (coping) vbox(x0 - 0.04, y1 - 0.12, z0, x1 + 0.04, y1, z1 + 0.06, coping, { base: y1 - 0.2, grimeAmt: 0.1 });
-    }
-    return s;
-  };
-  const lantern = (x, y, z, { light = false, s = 1, bracketDir = 0, yaw, chain, intensity = 3 } = {}) => {
-    let p = new THREE.Vector3(x, y, z);
-    if (bracketDir) p = bracket(K, x, y, z, { len: 0.55, dir: bracketDir, yaw });
-    const m = lanternMesh(game.mats, { s, chain: chain ?? (bracketDir ? 0.06 : 0.3) });
-    m.position.copy(p);
-    game.scene.add(m);
-    const glow = { mesh: m, light: null, phase: r() * 10 };
-    if (light) L.lightSources.push({ pos: m.position.clone().add(new THREE.Vector3(0, m.userData.glowY, 0.15)), intensity, phase: glow.phase });
-    L.lanterns.push(glow);
-    return m;
-  };
-  const cp = (x, sx, sy, facing = 1) => L.checkpoints.push({ x, spawn: { x: sx, y: sy, facing } });
-  const cam = (x, o) => L.cameraKeys.push({ x, ...o });
-  const shaft = (x, y, z, o) => L.shaftSpots.push({ p: new THREE.Vector3(x, y, z), o });
-  const facades = (list, z = FZ) => {
-    for (const f of list) {
-      const [x0, x1, h, style, o = {}] = f;
-      const y0 = o.y0 ?? 0;
-      const b = building(K, { x0, x1, z, y0, height: h, style, seed: Math.round(x0 * 7 + 3), depth: o.depth ?? 6, ...o });
-      if (o.dress !== false && h > 2.5) dressFacade(K, { x0, x1, z, y0, top: b.top, openings: b.openings, seed: Math.round(x0 * 3 + 1), floors: Math.max(1, Math.round(h / 3.4)) });
-    }
-  };
-  const farBuilding = (x0, x1, z, h, style, o = {}) => {
-    const mats = { blue: 'plasterBlue', peach: 'plasterPeach', cream: 'plasterCream', ochre: 'plasterOchre', white: 'plasterWhite', stone: 'sandstone' };
-    const m = mats[style] || 'plasterCream';
-    const d = o.depth ?? 7;
-    const rr = rng(Math.round(x0 * 13 + z));
-    const tint = new THREE.Color().setHSL(0.08 + rr() * 0.04, 0.15, 0.82 + rr() * 0.16);
-    const g = boxMM(x0, 0, z - d, x1, h, z, {});
-    shadeByHeight(g, { base: 0, grime: 3, grimeAmt: 0.25, tint });
-    K.add(g, m, null, { cast: o.cast !== false });
-    // setback upper storey
-    if (rr() < 0.35 && x1 - x0 > 5) {
-      const w = (x1 - x0) * (0.35 + rr() * 0.3), sx = x0 + rr() * (x1 - x0 - w);
-      const u = boxMM(sx, h, z - d + 1, sx + w, h + 2.6 + rr() * 1.5, z - 1.2, {}); shadeByHeight(u, { base: h, grime: 0.5, grimeAmt: 0.1, tint }); K.add(u, m, null, { cast: o.cast !== false });
-    }
-    // rooftop clutter: stair house, water tank, laundry
-    if (rr() < 0.5) { const cx = x0 + 1 + rr() * (x1 - x0 - 2); K.add(boxMM(cx - 0.7, h, z - 3.5, cx + 0.7, h + 2.1, z - 2), m, null, { cast: false }); }
-    if (rr() < 0.3) { const cx = x0 + 1 + rr() * (x1 - x0 - 2); const t = new THREE.CylinderGeometry(0.5, 0.5, 1.1, 12); t.translate(cx, h + 0.75, z - 4.5); K.add(worldUV(t), 'iron', null, { cast: false }); }
-    if (o.parapet !== false) merlons(K, { x0: x0 + 0.1, x1: x1 - 0.1, y: h, z: z + 0.01, h: 0.5, mat: 'plasterCream' });
-    const n = Math.floor((x1 - x0) / 2.2);
-    for (let f = 1; f < h / 3.2; f++) for (let i = 0; i < n; i++) {
-      if (rr() < 0.45) continue;
-      const cx = x0 + (i + 0.5) * ((x1 - x0) / n), sy = f * 3.2 - 1.9;
-      const pts = archOutline(rr() < 0.5 ? 'pointed' : 'round', 0.62, 0.8, 0.4);
-      const sh = new THREE.Shape(); sh.moveTo(-0.31, 0); pts.forEach((v) => sh.lineTo(v.x, v.y)); sh.lineTo(0.31, 0);
-      const wg = new THREE.ShapeGeometry(sh, 6); wg.translate(cx, sy, z + 0.02); setColor(wg, 0xffffff);
-      K.add(worldUV(wg), 'darkInterior', null, { cast: false });
-    }
-  };
+// Chapter I: the souk at golden hour (beats A-F of docs/DESIGN.md).
+// A generator: it yields its progress between sections so the loader can
+// paint the loading bar; the build itself is unchanged and fully seeded.
+export function* buildLevel(game, kit) {
+  const { K, L, r, solid, vbox, ground, block, lantern, cp, cam, shaft, facades } = kit;
 
   // ================================================================ GROUND
   ground(-16, 136.8);
@@ -105,6 +27,7 @@ export function buildLevel(game) {
   solid(-16, 0, -3.2, 12, { ledges: false }); // invisible start boundary
   solid(190.6, 0, 205, 14, { ledges: false }); // end boundary (right of the hero alley)
 
+  yield 0.05;
   // ================================================================ A — THE SOUK (x -14 .. 34)
   cp(-100, 1.5, 0, 1);
   facades([
@@ -165,6 +88,7 @@ export function buildLevel(game) {
   cam(15, { dist: 13.5, height: 1.5, lookY: 2.3, fov: 34, ahead: 1.8 });
   cam(28, { dist: 14, height: 1.6, lookY: 2.3, fov: 34, ahead: 1.8 });
 
+  yield 0.2;
   // ================================================================ B — CRATE & ROOFTOPS (x 34 .. 70)
   cp(33, 33.5, 0, 1);
   L.crateA = new Crate(game, 37.2, 0, 1.0);
@@ -211,6 +135,7 @@ export function buildLevel(game) {
   cam(62, { dist: 15, height: 2.3, lookY: 2.4, fov: 36, ahead: 1.8, dofFar: 3 });
   cam(69, { dist: 14, height: 2.0, lookY: 2.2, fov: 35, ahead: 1.4 });
 
+  yield 0.35;
   // ================================================================ C — SEARCHLIGHT COURTYARD (x 70 .. 118)
   cp(71.2, 71.6, 0, 1);
   const arc = arcade(K, { x0: 71, x1: 112.4, z: -4.2, span: 2.3, pierW: 0.8, pierD: 0.8, hs: 2.4, upper: 1.3, mat: 'plasterPeach', galleryDepth: 3.0 });
@@ -265,6 +190,7 @@ export function buildLevel(game) {
   cam(108, { dist: 16.5, height: 2.9, lookY: 3.3, fov: 38, ahead: 1.0, dofFar: 2 });
   cam(115, { dist: 14, height: 2.2, lookY: 2.6, fov: 36, ahead: 1.2 });
 
+  yield 0.5;
   // ================================================================ D — BALCONY CRATE & DRAWBRIDGE (x 118 .. 141)
   cp(120.3, 120.6, 0, 1);
   facades([
@@ -305,6 +231,7 @@ export function buildLevel(game) {
   cam(134, { dist: 15.5, height: 3.6, lookY: 0.9, fov: 38, ahead: 2.2 });
   cam(139, { dist: 14, height: 2.6, lookY: 1.2, fov: 36, ahead: 2.0 });
 
+  yield 0.62;
   // ================================================================ E — THE CHASE (x 141 .. 186)
   cp(141.4, 141.5, 0, 1);
   L.guard = new Guard(game, { x: 132.4, y: 0, speed: 3.95, blockX: 182.6 });
@@ -328,13 +255,13 @@ export function buildLevel(game) {
   const cartTop = boxMM(155.35, 1.0, -0.62, 158.35, 1.25, 0.62); K.add(cartTop, 'wood');
   // crates stack
   solid(163.4, 0, 164.4, 0.95, { surface: 'wood' });
-  const cm = crateMeshStatic(game, 163.9, 0, 0.95); game.scene.add(cm);
+  kit.crateMeshStatic(163.9, 0, 0.95);
   // high wall section
   block(170, 178, 0, 2.0, { z0: FZ, z1: 1.3, mat: 'sandstone', coping: 'limestone' });
   pot(K, 172, 2.0, -1.0, { kind: 'planter' }); leafClump(K, { x: 172, y: 2.45, z: -1.0, r: 0.35, seed: 51 });
   // rubble pile with a crawl tunnel
   solid(182.6, 0.62, 185.6, 5.5, { ledges: false });
-  rubblePile(K, 182.4, 185.8, 0.62, r);
+  kit.rubblePile(182.4, 185.8, 0.62);
   laundry(K, new THREE.Vector3(147, 6.5, FZ), new THREE.Vector3(160, 5.5, 3.5), { sag: 0.6, seed: 12, cloths: 6 });
   lantern(150 + 1.1, 3.0, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.5 });
   lantern(164 + 1.1, 3.0, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.5 });
@@ -347,81 +274,79 @@ export function buildLevel(game) {
   cam(179, { dist: 11, height: 1.4, lookY: 1.5, fov: 34, ahead: 2.0 });
   cam(184, { dist: 9.5, height: 1.0, lookY: 1.1, fov: 34, ahead: 1.0 });
 
+  yield 0.74;
   // ================================================================ F — INTO THE LIGHT (hero alley along -z)
   cp(185.9, 186.2, 0, 1);
-  L.finale = buildHeroAlley(game, batch, K, L, lantern);
+  const F = buildHeroAlley(game, K, L);
   L.triggers.push(new Trigger({ id: 'finale', x0: 187.4, x1: 195, fn: (g) => g.startFinale && g.startFinale() }));
   cam(186.5, { dist: 9.5, height: 1.1, lookY: 1.3, fov: 36, ahead: 0.6 });
+  // the walk into the light (DepthWalk): the camera swings into the reference framing
+  L.finale = {
+    path: F.path.map((p) => ({ p })),
+    from: [187.6, 0], walkSpeed: 1.55, autoWalkAfter: 2, zEnd: -13.2, endHold: 4.2,
+    cameraBlend: 3.2,
+    camera: (t, g) => {
+      const k = smooth(t / 14);
+      // portrait screens get the tall reference framing, landscape a narrower lens looking less steeply up
+      const w = THREE.MathUtils.clamp((g.camera.aspect - 0.7) / 1.1, 0, 1);
+      const pos = F.camPos.clone().add(new THREE.Vector3(0.25 * w, -0.05 * k + 0.25 * w, -2.2 * k + 0.5 * w));
+      const look = F.camLook.clone().add(new THREE.Vector3(-0.3 * w, -0.4 * k - 2.6 * w, 0));
+      return { pos, look, fov: THREE.MathUtils.lerp(F.fov, 47, w) - 3 * k, shadowFocus: F.shadowFocus };
+    },
+    sunTo: { dir: F.sunDir, color: '#ffb46e', colorAmt: 0.6, sec: 7 },
+    fogMul: 0.55, grade: { contrast: 0.08, saturation: 0.1 }, letterbox: 0.075, rays: 1.6, bloom: 0.42,
+    dof: { near: 4, far: 1.5 },
+    fade: { color: [0.97, 0.9, 0.78], speed: 0.28 },
+  };
 
+  yield 0.86;
   // ================================================================ SKYLINE
-  skyline(K, farBuilding, r);
+  kit.skyline({ exclude: [[66, 118], [176, 203]], exclude3: [[174, 205]], excludeTrees: [[64, 120], [174, 205]] });
   dome(K, { x: 61, y: 10, z: -44, r: 6.5, drumH: 3.5 });
   dome(K, { x: 150, y: 9, z: -38, r: 5 });
   minaret(K, { x: 30, z: -40, w: 3.4, h: 25 });
   minaret(K, { x: -8, z: -34, w: 3, h: 20, top: 'pyramid' });
   minaret(K, { x: 160, z: -46, w: 3.2, h: 24, top: 'pyramid' });
 
-  const meshes = batch.build(game.scene);
-  L.staticMeshes = meshes;
+  yield 0.97;
+  // ================================================================ CHAPTER HOOKS
+  L.entities.push(L.crateA, L.crateB, L.plate, L.bridge, L.lever, L.ladder, L.searchlight, L.guard);
+  L.interactables.push(L.lever);
+  L.flockSpots.push(
+    { x: 4.5, y: 0, z: 1.6, w: 2.5, n: 5 }, { x: 26, y: 1.5, z: 0.6, w: 2, n: 3 }, { x: 48.5, y: 3.1, z: -0.6, w: 3, n: 4 },
+    { x: 80.5, y: 0, z: 1.8, w: 3, n: 4 }, { x: 160, y: 0, z: 1.5, w: 3, n: 4 }, { x: 188.2, y: 0, z: -19.5, w: 3, n: 7 },
+  );
+  L.bounds = { x0: -16, x1: 205, y0: -10, y1: 30 };
+  // starting at a checkpoint: solve the puzzles that precede it
+  L.prepare = (i, g) => {
+    const x = g.checkpoints[i].x;
+    if (x > 118) { L.lever.pulled = true; L.lever.t = 1; L.ladder.t = 1; L.ladder.target = 1; L.ladder.vine.enabled = true; }
+    if (x > 140) { L.crateB.setState({ x: 128.15, y: 0 }); L.bridge.setState({ angle: 0 }); }
+    if (x > 42) { L.crateA.setState({ x: 41.5, y: 0 }); }
+    if (x > 185) { g.triggers.find((t) => t.id === 'chase').fired = true; }
+  };
+  L.safeZone = (x) => x > 182.95; // the guard can't follow into the crawl tunnel
+  L.lookTarget = (pl) => (L.guard.state === 'chase' && L.guard.body.x < pl.x ? (pl.facing > 0 ? -0.8 : 0.8) : null);
+  L.mix = (x, g) => ({
+    hum: L.searchlight && x > 66 && x < 120 ? 0.9 * (1 - Math.min(1, Math.abs(x - 93) / 40)) : 0,
+    tension: L.searchlight?.state === 'alarm' || L.guard.state === 'chase' ? 1 : (x > 70 && x < 118 ? 0.35 : 0.1),
+    birds: x < 70 || x > 118,
+    chase: L.guard.state === 'chase' && !g.player.dead,
+    zone: x > 70 && x < 118 ? 'courtyard' : 'alley',
+  });
+  L.extraState = () => ({
+    guard: L.guard.state, gx: +L.guard.body.x.toFixed(2), beam: +L.searchlight.aim.x.toFixed(2),
+    plate: +L.plate.load.toFixed(2), bridge: +L.bridge.angle.toFixed(2),
+    crateA: [+L.crateA.body.x.toFixed(2), +L.crateA.body.y.toFixed(2)], crateB: [+L.crateB.body.x.toFixed(2), +L.crateB.body.y.toFixed(2)],
+    lever: L.lever.pulled, ladder: L.ladder.vine.enabled,
+  });
   return L;
-}
-
-function crateMeshStatic(game, x, y, s) {
-  const Crate0 = new Crate(game, x, y, s);
-  // not simulated: remove the physics body, keep the mesh (collider added separately)
-  game.phys.bodies.splice(game.phys.bodies.indexOf(Crate0.body), 1);
-  return Crate0.mesh;
-}
-
-function cypress(K, x, z, h) {
-  const prof = [];
-  const n = 18;
-  for (let i = 0; i <= n; i++) { const t = i / n; const rr = h * 0.13 * Math.pow(Math.sin(Math.min(1, t * 1.15) * Math.PI * 0.5 + 0.2) * (1 - t * 0.95), 0.9) + 0.02; prof.push(new THREE.Vector2(rr, t * h)); }
-  const g = new THREE.LatheGeometry(prof, 14);
-  const pos = g.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const px = pos.getX(i), py = pos.getY(i), pz = pos.getZ(i);
-    const k = 1 + 0.18 * Math.sin(py * 3.1 + Math.atan2(pz, px) * 3) * Math.sin(py * 7.3 + px * 5);
-    pos.setX(i, px * k); pos.setZ(i, pz * k);
-  }
-  g.computeVertexNormals(); g.translate(x, 0, z);
-  setColor(g, 0xffffff);
-  K.add(g, 'cypress');
-  const tr = boxMM(x - 0.1, 0, z - 0.1, x + 0.1, 0.6, z + 0.1); K.add(tr, 'woodDark');
-}
-
-function rubblePile(K, x0, x1, gapY, r) {
-  // big stones and broken beams stacked over a low tunnel
-  for (let i = 0; i < 26; i++) {
-    const cx = x0 + r() * (x1 - x0), cy = gapY + 0.2 + Math.pow(r(), 1.5) * 3.2, cz = -1.2 + r() * 2.4;
-    const s = 0.35 + r() * 0.5;
-    const g = boxMM(cx - s, cy - s * 0.6, cz - s, cx + s, cy + s * 0.6, cz + s, { round: 0.06 });
-    g.applyMatrix4(new THREE.Matrix4().makeRotationZ((r() - 0.5) * 0.5));
-    K.add(g, r() < 0.5 ? 'sandstone' : 'limestone');
-  }
-  const lintel = boxMM(x0 - 0.1, gapY, -1.3, x1 + 0.2, gapY + 0.3, 1.3); K.add(lintel, 'woodDark');
-  for (let i = 0; i < 5; i++) { const g = boxMM(x0 - 0.3 + i * 0.7, gapY + 0.2, -1.4, x0 + i * 0.7 + 0.1, gapY + 2.6, -1.25); g.applyMatrix4(new THREE.Matrix4().makeRotationZ(0.3 - i * 0.12)); K.add(g, 'woodDark'); }
-  const back = boxMM(x0, 0, -1.8, x1, gapY + 3.5, -1.5); K.add(back, 'sandstone');
-  const dark = boxMM(x0 + 0.1, 0, -1.4, x1 - 0.1, gapY, -1.3); setColor(dark, 0xffffff); K.add(dark, 'darkInterior', null, { cast: false });
-}
-
-function skyline(K, farBuilding, r) {
-  const styles = ['cream', 'peach', 'ochre', 'white', 'blue', 'cream', 'peach', 'stone'];
-  // row 2 (just behind the street facades)
-  for (let x = -40; x < 240;) { const w = 4 + r() * 6; if (x + w > 66 && x < 118) { x = 118; continue; } if (x + w > 176 && x < 203) { x = 203; continue; } farBuilding(x, x + w, -12 - r() * 5, 6 + r() * 5, styles[Math.floor(r() * styles.length)], { depth: 6 }); x += w + (r() < 0.25 ? 1.5 + r() * 3 : 0.2); }
-  // row 3
-  for (let x = -60; x < 260;) { const w = 5 + r() * 8; if (x + w > 174 && x < 205) { x = 205; continue; } farBuilding(x, x + w, -24 - r() * 12, 7 + r() * 7, styles[Math.floor(r() * styles.length)], { depth: 8, cast: false }); x += w + r() * 3; }
-  // row 4 (hazy far city)
-  for (let x = -100; x < 320;) { const w = 8 + r() * 14; farBuilding(x, x + w, -55 - r() * 40, 9 + r() * 12, styles[Math.floor(r() * styles.length)], { depth: 10, parapet: r() < 0.5, cast: false }); x += w + r() * 4; }
-  // cypress and far domes punctuating the skyline
-  for (let i = 0; i < 26; i++) { const x = -30 + i * 10 + r() * 6; if ((x > 64 && x < 120) || (x > 174 && x < 205)) continue; cypress(K, x, -20 - r() * 14, 7 + r() * 6); }
-  for (const [dx, dz, dr] of [[12, -60, 4], [88, -70, 5], [118, -52, 3.5], [212, -58, 4.5], [-22, -66, 4]]) dome(K, { x: dx, y: 9, z: dz, r: dr, drumH: 2.5 });
 }
 
 // ---------------------------------------------------------------------------
 // The hero alley: recreation of the reference composition, walked into depth.
 // ---------------------------------------------------------------------------
-function buildHeroAlley(game, batch, K, L, lantern) {
+function buildHeroAlley(game, K, L) {
   const X = 188; // alley centre line
   const xl = 185.25, xr = 190.75; // wall faces
   const zEnd = -15; // arch wall front face
@@ -448,7 +373,7 @@ function buildHeroAlley(game, batch, K, L, lantern) {
   eave(KL, { x0: 1.6, x1: 7.4, y: 6.6, z: 0.1, depth: 0.85, drop: 0.5, soffit: 'wood' });
   awning(KL, { x0: 6.6, x1: 10.6, z0: 0.05, z1: 2.2, y0: 2.9, y1: 2.2, mat: 'fabricTan', sag: 0.14, poles: true });
   const tip = bracket(K, xl + 0.01, 3.7, -9.2, { len: 0.62, yaw: Math.PI / 2 });
-  const lan = lanternMesh(game.mats, { s: 1.25 }); lan.position.copy(tip); game.scene.add(lan);
+  const lan = lanternMesh(game.mats, { s: 1.25 }); lan.position.copy(tip); game.add(lan);
   L.lanterns.push({ mesh: lan, light: null, phase: 1 });
   // right side (faces -x): arcade with red/cream horseshoe arches + stair + striped awning
   const KR = K.with(new THREE.Matrix4().makeRotationY(-Math.PI / 2).premultiply(new THREE.Matrix4().makeTranslation(xr, 0, 0)));
@@ -516,6 +441,7 @@ function buildHeroAlley(game, batch, K, L, lantern) {
     camPos: new THREE.Vector3(187.55, 0.45, 1.8),
     camLook: new THREE.Vector3(188.5, 8.4, -15),
     fov: 68,
+    shadowFocus: new THREE.Vector3(X, 3, -9),
     sunDir: new THREE.Vector3(0.3, 0.22, -0.93).normalize(),
   };
 }

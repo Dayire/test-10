@@ -1,5 +1,8 @@
 // Unified input: keyboard (physical key codes, so WASD also works on AZERTY),
-// gamepad (standard mapping) and on-screen touch controls.
+// gamepad (standard mapping) and on-screen touch controls. poll() also
+// reports the scene pointer (left mouse or a touch on the canvas, in NDC) and
+// menu navigation edges with key repeat (400 ms, then every 120 ms).
+const NAV = ['up', 'down', 'left', 'right', 'confirm', 'back'];
 export class Input {
   constructor() {
     this.keys = new Set();
@@ -9,6 +12,11 @@ export class Input {
     this.override = null; // scripted input for tests / cutscenes
     this.touch = { x: 0, y: 0, jump: false, grab: false };
     this.lastDevice = 'keyboard';
+    this.pointer = { x: 0, y: 0, active: false, pressed: false, released: false, kind: 'mouse' };
+    this._ptr = { id: null, down: false, pressed: false, released: false };
+    this.nav = Object.fromEntries(NAV.map((k) => [k, false]));
+    this._navT = {};
+    this._setupPointer();
     window.addEventListener('keydown', (e) => {
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
       if (e.repeat) return;
@@ -40,6 +48,7 @@ export class Input {
     if (this.k('Space', 'KeyK')) jump = true;
     if (this.k('ShiftLeft', 'ShiftRight', 'KeyJ', 'KeyE', 'ControlLeft', 'ControlRight', 'KeyF')) grab = true;
     if (this.k('Escape', 'KeyP')) pause = true;
+    const nav = { up: this.k('ArrowUp', 'KeyW'), down: this.k('ArrowDown', 'KeyS'), left: this.k('ArrowLeft', 'KeyA'), right: this.k('ArrowRight', 'KeyD'), confirm: this.k('Enter', 'NumpadEnter', 'Space'), back: this.k('Escape', 'Backspace') };
     let pads = [];
     try { pads = (navigator.getGamepads && navigator.getGamepads()) || []; } catch { pads = []; } // blocked by permissions policy in some frames
     for (const gp of pads) {
@@ -56,18 +65,55 @@ export class Input {
       jump = jump || b(0) || b(3);
       grab = grab || b(2) || b(1) || b(7) || b(6) || b(5);
       pause = pause || b(9);
+      nav.up ||= gy > 0.5; nav.down ||= gy < -0.5; nav.left ||= gx < -0.5; nav.right ||= gx > 0.5; nav.confirm ||= !!b(0); nav.back ||= !!b(1);
     }
     const t = this.touch;
     if (t.x) x = t.x; if (t.y) y = t.y; jump = jump || t.jump; grab = grab || t.grab;
     if (this.override) ({ x, y, jump, grab } = { x: 0, y: 0, jump: false, grab: false, ...this.override });
     this.prev = this.state;
     const any = !!(x || y || jump || grab || this.keys.size);
-    this.state = { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)), jump, grab, pause, any };
+    const P = this._ptr, ptr = this.pointer;
+    ptr.active = P.down; ptr.pressed = P.pressed; ptr.released = P.released; P.pressed = false; P.released = false;
+    this.navEdges(nav);
+    this.state = { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)), jump, grab, pause, any, pointer: ptr };
     this.jumpPressed = jump && !this.prev.jump;
     this.grabPressed = grab && !this.prev.grab;
     this.pausePressed = pause && !this.prev.pause;
     this.anyPressed = any && !this.prev.any;
     return this.state;
+  }
+
+  // nav edges with repeat: true on the press, then after 400 ms every 120 ms
+  navEdges(raw) {
+    const now = performance.now();
+    for (const k of NAV) {
+      const t = this._navT[k];
+      if (!raw[k]) { this._navT[k] = null; this.nav[k] = false; continue; }
+      if (!t) { this._navT[k] = { next: now + 400 }; this.nav[k] = true; continue; }
+      this.nav[k] = now >= t.next;
+      if (this.nav[k]) t.next = now + 120;
+    }
+    return this.nav;
+  }
+
+  // the scene pointer: left mouse or a touch on the canvas (not on the controls)
+  _setupPointer() {
+    const P = this._ptr;
+    const onScene = (e) => e.target && e.target.tagName === 'CANVAS';
+    const setPos = (e) => {
+      const r = e.target && e.target.tagName === 'CANVAS' ? e.target.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth || 1, height: window.innerHeight || 1 };
+      this.pointer.x = ((e.clientX - r.left) / Math.max(1, r.width)) * 2 - 1;
+      this.pointer.y = -(((e.clientY - r.top) / Math.max(1, r.height)) * 2 - 1);
+    };
+    window.addEventListener('pointerdown', (e) => {
+      if (!onScene(e) || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      P.id = e.pointerId; P.down = true; P.pressed = true; this.pointer.kind = e.pointerType || 'mouse';
+      setPos(e);
+    });
+    window.addEventListener('pointermove', (e) => { if (P.down && e.pointerId === P.id) setPos(e); else if (!P.down && e.pointerType === 'mouse' && onScene(e)) setPos(e); });
+    const up = (e) => { if (P.down && e.pointerId === P.id) { P.down = false; P.released = true; P.id = null; } };
+    window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+    window.addEventListener('blur', () => { if (P.down) { P.down = false; P.released = true; P.id = null; } });
   }
 
   _setupTouch() {

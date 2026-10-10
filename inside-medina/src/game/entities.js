@@ -351,7 +351,7 @@ export class Guard {
         if (k >= 1) { this.vault = null; b.vy = 0; }
         return;
       }
-      const tgtV = this.speed * Math.sign(pl.body.x - b.x || 1);
+      const tgtV = this.speed * (this.game.guardSpeedMul ?? 1) * Math.sign(pl.body.x - b.x || 1);
       b.vx = lerp(b.vx, tgtV, 1 - Math.exp(-4 * dt));
       this.facing = Math.sign(b.vx) || 1;
       // gravity
