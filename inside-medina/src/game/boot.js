@@ -87,6 +87,11 @@ export async function boot(canvas, params) {
   });
   window.addEventListener('pagehide', () => save.flush(true));
   window.addEventListener('resize', () => game.redraw());
+  // a lost GL context pauses; when it comes back the surfaces are re-baked and the chapter reloads at its checkpoint
+  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); game.contextLost = true; game.emit('contextLost', {}); if (game.mode === 'play') game.setPaused(true); });
+  canvas.addEventListener('webglcontextrestored', () => { game.contextLost = false; game.recoverContext().catch((err) => console.error(err)); });
+  // the wordless save indicator
+  game.events.on('save', () => ui.saved?.());
   let last = performance.now();
   window.__ready = true;
   const loop = (now) => {

@@ -136,6 +136,31 @@ export const scenarios = [
     check: (r) => (r.median <= r.budget && r.painted >= 10 ? true : `boot ${r.median} ms (budget ${r.budget}), ${r.painted} painted values`),
   },
   {
+    // §8.2: a lost and restored GL context re-bakes the surfaces and reloads the chapter at its checkpoint
+    name: 'context loss and restore', cp: 1, w: 480, h: 270,
+    run: async ({ page }) => {
+      const settle = () => page.waitForFunction(() => __medina.game.mode === 'play' && __medina.game.fade < 0.001, null, { timeout: 120000, polling: 100 });
+      await page.evaluate(() => __medina.photo(34, 0, 1, 0.2));
+      await settle(); await frames(page, 3);
+      const before = (await page.screenshot()).toString('base64');
+      await page.evaluate(async () => {
+        const ext = __medina.game.world.rs.renderer.getContext().getExtension('WEBGL_lose_context');
+        ext.loseContext();
+        await new Promise((r) => setTimeout(r, 400));
+        const started = __medina.game.events.next('chapterStart');
+        ext.restoreContext();
+        await started;
+      });
+      await settle();
+      await page.evaluate(() => __medina.photo(34, 0, 1, 0.2));
+      await frames(page, 3);
+      const after = (await page.screenshot()).toString('base64');
+      const ev = await page.evaluate(() => __medina.events().filter((e) => /context|chapterStart/.test(e.name)).map((e) => e.name));
+      return { ev, cp: await page.evaluate(() => __medina.state().cp), diff: await diff(page, before, after) };
+    },
+    check: (r) => (r.ev.includes('contextLost') && r.ev.includes('contextRestored') && r.cp === 1 && r.diff.differing < 3 ? true : `context recovery ${JSON.stringify(r)}`),
+  },
+  {
     // §11.2 acceptance 11 (only with --artifact: it rebuilds dist-artifact): the single-file build boots in its test page
     name: 'artifact build reaches __ready', url: false, optIn: 'artifact', w: 640, h: 360,
     run: async ({ page }) => {

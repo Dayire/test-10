@@ -66,8 +66,9 @@ export class TextureBaker {
     return rt;
   }
 
-  bake(def) {
-    const size = Math.max(64, Math.round((def.size || 1024) * this.scale));
+  // bake a surface into new render targets (kept, so a lost GL context can be re-baked in place)
+  bake(def, into = null) {
+    const size = into ? into.size : Math.max(64, Math.round((def.size || 1024) * this.scale));
     const mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
       fragmentShader: fragFor(def.glsl, !!def.clamp),
@@ -86,8 +87,9 @@ export class TextureBaker {
     const out = {};
     const passes = def.passes || ['map', 'normalMap', 'ormMap'];
     const passIndex = { map: 0, normalMap: 1, ormMap: 2 };
+    const rts = into ? into.rts : {};
     for (const p of passes) {
-      const rt = this._rt(size, p === 'map');
+      const rt = rts[p] || (rts[p] = this._rt(size, p === 'map'));
       if (def.clamp) { rt.texture.wrapS = rt.texture.wrapT = THREE.ClampToEdgeWrapping; }
       mat.uniforms.uPass.value = passIndex[p];
       r.setRenderTarget(rt);
@@ -97,8 +99,12 @@ export class TextureBaker {
     }
     r.setRenderTarget(prev);
     mat.dispose();
+    if (!into) (this.jobs ||= []).push({ def, size, rts });
     return out;
   }
+
+  // after a lost and restored GL context: render every baked surface again into its own targets
+  rebakeAll() { for (const j of this.jobs || []) this.bake(j.def, j); return (this.jobs || []).length; }
 }
 
 // ---------------------------------------------------------------------------

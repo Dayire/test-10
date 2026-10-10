@@ -42,3 +42,6 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
 #card .cl { font-size: clamp(14px, 1.7vw, 20px); letter-spacing: .32em; padding-left: .32em; font-style: italic; color: rgba(251,239,220,.78); }
 @keyframes cdraw { to { stroke-dashoffset: 0; } }
 #end .e3 { display: grid; gap: 6px; justify-items: center; margin-bottom: 18px; letter-spacing: .2em; font-size: clamp(13px, 1.4vw, 17px); }
+#saveind { position: fixed; right: calc(18px + env(safe-area-inset-right)); top: calc(16px + env(safe-area-inset-top)); width: 22px; height: 22px; transition: opacity .5s ease; }
+#saveind svg { width: 100%; height: 100%; fill: none; stroke: rgba(251,239,220,.75); stroke-width: 5; stroke-linejoin: round; animation: saveturn 1.6s linear infinite; }
+@keyframes saveturn { to { transform: rotate(360deg); } }

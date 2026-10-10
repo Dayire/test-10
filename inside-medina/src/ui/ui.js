@@ -32,6 +32,7 @@ export class UI {
       </div>
       <div id="card" class="hidden" aria-hidden="true"><svg class="cg" viewBox="0 0 100 100" aria-hidden="true"></svg><div class="cn"></div><div class="cl"></div></div>
       <div id="end" class="hidden"><div class="e1">MEDINA</div><div class="e2">thank you for walking with us</div><div class="e3"></div><button data-a="again">walk again</button><button data-a="assets">see how it was built</button></div>
+      <div id="saveind" class="hidden" aria-hidden="true"><svg viewBox="0 0 100 100">${GLYPHS.rosette}</svg></div>
       <div id="dbg" class="hidden"></div>`;
     this.el = (id) => root.querySelector('#' + id);
     this.handlers = {};
@@ -57,6 +58,8 @@ export class UI {
     if (on) { this.el('pause').querySelector('.keys').innerHTML = this.keysHtml(device, labels); this.el('pause').querySelector('.q').textContent = quality; this.el('pause').querySelector('.m').textContent = muted ? 'off' : 'on'; }
   }
   showEnd(on) { this.el('end').classList.toggle('hidden', !on); }
+  // a small turning rosette in the corner while progress is written
+  saved() { const e = this.el('saveind'); e.classList.remove('hidden'); clearTimeout(this._saveT); this._saveT = setTimeout(() => e.classList.add('hidden'), 1400); }
   debug(text) { const d = this.el('dbg'); d.classList.remove('hidden'); d.textContent = text; }
 
   // chapter card (game.hooks.card): resolves once the card covers the screen;

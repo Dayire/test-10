@@ -152,6 +152,7 @@ export class Game {
   enterChapter({ reason = 'start', card = null } = {}) {
     const def = this.def;
     this.save.begin?.(def.id, this.cpIndex, reason);
+    this.audio.setChapter?.(def.audio, def);
     this.emit('chapterStart', { id: def.id, cp: this.cpIndex, reason });
     this.setMode('intro');
     this.introT = 0;
@@ -441,6 +442,17 @@ export class Game {
     this.cinema = new DepthWalk(this, { onEnd: () => this.completeChapter(), ...this.level.finale });
     this.cinema.start();
     this.ui.hideHint?.();
+  }
+
+  // after a lost GL context comes back: baked surfaces and the env map only lived on the GPU,
+  // so bake them again in place, then reload the chapter at its checkpoint
+  async recoverContext() {
+    this.world.baker?.rebakeAll?.();
+    this.world.rebuildEnvironment?.();
+    for (const s of this.lightRig.spots) s.shadow.needsUpdate = true;
+    this.emit('contextRestored', { id: this.chapterId, cp: this.cpIndex });
+    if (this.chapterId && this.mode !== 'loading') return this.loadChapter(this.chapterId, this.cpIndex, { reason: 'restart' });
+    return this.level;
   }
 
   // promise: fade the canvas to `target` (1 = covered) in `sec`
