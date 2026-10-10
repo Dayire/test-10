@@ -25,7 +25,7 @@ export function installTestApi(g) {
     sim: (seconds, input) => {
       const n = Math.round(seconds / STEP);
       for (let i = 0; i < n; i++) {
-        if (g.mode === 'loading' || g.mode === 'boot' || !g.level) break;
+        if (g.mode === 'loading' || g.mode === 'boot' || g.suspended || !g.level) break;
         const st = typeof input === 'function' ? input(M.state()) : input;
         const prevState = g.input.state;
         const s = { x: 0, y: 0, jump: false, grab: false, pause: false, any: true, pointer: null, ...st };

@@ -36,4 +36,4 @@ export class Events {
 }
 
 // Names emitted by the engine (chapters and entities may add their own through game.emit)
-export const EVENT_NAMES = ['chapterStart', 'checkpoint', 'death', 'respawn', 'chapterEnd', 'credits', 'pause', 'mode', 'land', 'impact', 'save'];
+export const EVENT_NAMES = ['chapterStart', 'checkpoint', 'death', 'respawn', 'chapterEnd', 'credits', 'title', 'pause', 'mode', 'land', 'impact', 'save', 'loadError', 'contextLost', 'contextRestored'];

@@ -42,7 +42,7 @@ export class Game {
     this.scene = world.scene; this.mats = world.mats; this.globals = G;
     this.save = save || new Save(storage);
     this.time = 0; this.acc = 0; this.timeScale = 1;
-    this.mode = 'boot'; this.paused = false; this.menuOpen = false;
+    this.mode = 'boot'; this.paused = false; this.menuOpen = false; this.suspended = false;
     this.fade = 1; this.fadeTarget = 0; this.fadeSpeed = 0.6; this.fadeColor = new THREE.Color(0, 0, 0);
     this.stats = { deaths: 0, t0: 0 };
     this.events = new Events(); this.events.clock = () => this.time;
@@ -151,16 +151,18 @@ export class Game {
   // the chapter is built and warm: intro shot or straight to play, then reveal
   enterChapter({ reason = 'start', card = null } = {}) {
     const def = this.def;
-    this.save.begin?.(def.id, this.cpIndex, reason);
+    this.suspended = false;
+    if (this.saving) this.save.begin?.(def.id, this.cpIndex, reason);
     this.audio.setChapter?.(def.audio, def);
     this.emit('chapterStart', { id: def.id, cp: this.cpIndex, reason });
     this.setMode('intro');
     this.introT = 0;
     this.titleShown = (reason === 'boot' && !this.params.autostart) || reason === 'title';
-    const shot = def.intro;
+    const shot = this.openingShot();
     if (shot) { this.camRig.setOverride(introShot(this, shot), 0.001); this.camRig.overrideW = 1; }
+    else if (!this.titleShown) this.beginPlay(); // started at a later checkpoint: no establishing shot, straight to play
     if (this.titleShown) { this.titleFade = undefined; this.ui.showTitle(true); this.ui.titleOpacity?.(1); }
-    if (reason !== 'boot') { this.fade = 1; this.fadeTarget = 0; this.fadeSpeed = 0.8; }
+    if (reason !== 'boot') { this.fade = 1; this.fadeTarget = 0; this.fadeSpeed = 0.8; this.audioIn(1.5); }
     if (this.params.autostart && reason !== 'title') this.beginPlay();
     if (card) Promise.resolve(card.hide?.()).catch(() => {});
   }
@@ -187,6 +189,12 @@ export class Game {
   safeZone(x) { return !!this.level?.safeZone?.(x); }
   interactNear(px, py, facing) { for (const it of this.interactables) if (it.near(px, py, facing)) return it; return null; }
   setMode(m) { if (this.mode === m) return; this.mode = m; this.emit('mode', { mode: m }); }
+  // dev chapters (the lab) never touch the save
+  get saving() { return !!this.def && !this.def.dev; }
+  // the title holds the chapter at its checkpoint: no entity or system steps, so nothing threatens the boy
+  get held() { return this.mode === 'intro' && this.titleShown; }
+  // the mix comes back after a cinematic faded it out; a mute the player set stays
+  audioIn(sec = 1.5) { const a = this.audio; if (!a.muted || a.setMuted) a.fadeIn?.(sec); }
 
   // ------------------------------------------------------------------ loop
   frame(dt) {
@@ -194,7 +202,7 @@ export class Game {
     for (const f of this.hooks.frame) f(dt, this);
     let inp = this.input.poll();
     if (this.menuOpen) inp = this.input.state = { ...ZERO_INPUT };
-    if (this.input.pausePressed && !this.menuOpen && (this.mode === 'play' || this.mode === 'intro' || this.paused)) this.setPaused(!this.paused);
+    if (this.input.pausePressed && !this.menuOpen && !this.suspended && (this.mode === 'play' || this.mode === 'intro' || this.paused)) this.setPaused(!this.paused);
     if (this.mode === 'intro' && !this.paused) {
       this.introT += dt;
       if (this.params.autostart) this.beginPlay();
@@ -208,7 +216,7 @@ export class Game {
       if (this._pauseFrames > 0) { this._pauseFrames--; this.render(0, this.acc / STEP); }
       return;
     }
-    if (!this.params.hold) {
+    if (!this.params.hold && !this.suspended) {
       const sdt = dt * this.timeScale;
       this.acc += sdt;
       let first = true;
@@ -219,7 +227,7 @@ export class Game {
       }
       if (n >= 12) this.acc = 0;
       this.time += sdt;
-      if (this.mode === 'play' && this.chapterId) this.save.play(this.chapterId, sdt);
+      if (this.mode === 'play' && this.saving) this.save.play(this.chapterId, sdt);
     }
     this.render(dt, this.acc / STEP);
   }
@@ -254,22 +262,23 @@ export class Game {
 
   fixed(dt, st, first) {
     const pin = this.makePin(st, first);
-    const pl = this.player, L = this.level;
-    for (const e of this.entities) e.prestep?.();
-    for (const s of this.systems) s.prestep?.();
+    // under the title only what declares liveUnderTitle (it can never threaten the boy) keeps stepping
+    const pl = this.player, L = this.level, live = !this.held;
+    for (const e of this.entities) if (live || e.liveUnderTitle) e.prestep?.();
+    for (const s of this.systems) if (live || s.liveUnderTitle) s.prestep?.();
     pl.step(dt, pin);
-    for (const e of this.entities) e.step?.(dt);
+    for (const e of this.entities) if (live || e.liveUnderTitle) e.step?.(dt);
     this.phys.stepBodies(dt);
     // bodies falling onto the boy
-    for (const b of this.phys.bodies) {
+    if (live) for (const b of this.phys.bodies) {
       if (!b.crushes || !b.enabled) continue;
       const p = pl.body;
       if (!pl.dead && b.vy < -3 && b.x1 > p.x0 + 0.05 && b.x0 < p.x1 - 0.05 && b.y < p.y + p.h && b.y > p.y + p.h - 0.4) { pl.die('crushed'); this.sfx('crateImpact', b.x); }
     }
-    for (const s of this.systems) s.step?.(dt);
+    for (const s of this.systems) if (live || s.liveUnderTitle) s.step?.(dt);
     // kill zones: the boy's feet inside
     const kz = L?.killZones;
-    if (kz && kz.length && !pl.dead) for (const z of kz) if (pl.x >= z.x0 && pl.x <= z.x1 && pl.y >= z.y0 && pl.y <= z.y1) { pl.die(z.kind || 'fall'); break; }
+    if (live && kz && kz.length && !pl.dead) for (const z of kz) if (pl.x >= z.x0 && pl.x <= z.x1 && pl.y >= z.y0 && pl.y <= z.y1) { pl.die(z.kind || 'fall'); break; }
     if (this.mode === 'play') {
       for (const t of this.triggers) t.test(this);
       // checkpoints: grounded, x >= cp.x and y >= minY
@@ -279,7 +288,7 @@ export class Game {
         const c = cps[i];
         if (pl.x >= c.x && (c.minY === undefined || pl.y >= c.minY) && pl.state === 'ground' && !pl.dead) { this.cpIndex = i; this.cpSnap = this.snapshot(); moved = true; }
       }
-      if (moved) { this.emit('checkpoint', { id: this.chapterId, cp: this.cpIndex }); this.save.checkpoint(this.chapterId, this.cpIndex); }
+      if (moved) { this.emit('checkpoint', { id: this.chapterId, cp: this.cpIndex }); if (this.saving) this.save.checkpoint(this.chapterId, this.cpIndex); }
     }
     // player events -> sound / feedback
     for (const [name, data] of pl.events) {
@@ -305,6 +314,14 @@ export class Game {
   continueGame() { const d = this.save.data; return this.loadChapter(d.chapter, d.cp, { reason: 'continue' }); }
   startChapter(id, cp = 0) { return this.loadChapter(id, cp, { reason: 'select' }); }
 
+  // the establishing shot fits the chapter's start only; under the title a menuShot naming this checkpoint wins.
+  // Elsewhere the title shows the rail camera on the boy at his checkpoint (a far shot would frame the wrong place).
+  openingShot() {
+    const d = this.def, m = d?.menuShot;
+    if (this.titleShown && m && (m.cp ?? 0) === this.cpIndex) return m;
+    return this.cpIndex === 0 ? d?.intro || null : null;
+  }
+
   // the intro shot: the title waits for input; a chapter intro takes input after 1.5 s
   introInput() {
     if (this.mode !== 'intro') return;
@@ -328,7 +345,7 @@ export class Game {
   setPaused(p) {
     p = !!p;
     if (p === this.paused) return;
-    if (p && (this.mode === 'loading' || this.mode === 'boot')) return;
+    if (p && (this.mode === 'loading' || this.mode === 'boot' || this.suspended)) return;
     this.paused = p; this._pauseFrames = p ? 1 : 0;
     this.ui.showPause(p, this.input.lastDevice, this.world.rs.tier, this.audio.muted, this.input.keyLabels);
     if (this.audio.setPaused) this.audio.setPaused(p);
@@ -343,7 +360,7 @@ export class Game {
 
   onDeath(kind) {
     this.setMode('dying'); this.dieT = 0; this.deathKind = kind; this.stats.deaths++;
-    this.save.death(this.chapterId);
+    if (this.saving) this.save.death(this.chapterId);
     this.emit('death', { kind, x: this.player.x, y: this.player.y });
     this.sfx('death', this.player.x);
     if (kind === 'fall' || kind === 'crushed') this.camRig.addShake(0.6);
@@ -358,19 +375,26 @@ export class Game {
 
   respawn() {
     const restart = this.deathKind === 'restart';
+    this.resetToCheckpoint();
+    // a death under the title (it should not happen: the title holds the chapter) returns to the title
+    this.setMode(this.titleShown ? 'intro' : 'play');
+    this.fadeTarget = 0; this.fadeSpeed = restart ? 3.4 : 1.2;
+    this.audio.lowpass && this.audio.ctx && this.audio.lowpass.frequency.setTargetAtTime(20000, this.audio.ctx.currentTime, 0.3);
+    this.emit('respawn', { cp: this.cpIndex, restart });
+  }
+
+  // the chapter back at its checkpoint snapshot and the boy at its spawn (cinematic stopped, look restored)
+  resetToCheckpoint() {
     if (this.cinema) { this.cinema.stop(); this.cinema = null; this.camRig.clearOverride(0.01); }
     const cp = this.checkpoints[this.cpIndex];
     this.restore(this.cpSnap);
     this.player.spawn(cp.spawn.x, cp.spawn.y, cp.spawn.facing ?? 1);
-    this.player.z = 0;
+    this.player.events.length = 0;
     this.anim.setState('ground', 0.01);
     if (this.rig.scarf) this.rig.scarf.reset();
     this.camRig.groundY = cp.spawn.y; this.camRig.snapNext = true;
-    this.setMode('play');
+    this._vy = undefined;
     this.deathKind = null; this.dieT = 0;
-    this.fadeTarget = 0; this.fadeSpeed = restart ? 3.4 : 1.2;
-    this.audio.lowpass && this.audio.ctx && this.audio.lowpass.frequency.setTargetAtTime(20000, this.audio.ctx.currentTime, 0.3);
-    this.emit('respawn', { cp: this.cpIndex, restart });
   }
 
   // back to the last checkpoint without counting a death (fade out and in, under 0.6 s)
@@ -395,23 +419,35 @@ export class Game {
     this.director.restore();
     this.cpIndex = 0; this.cpSnap = this.initialSnap;
     this.deathKind = null;
+    // chosen from the pause menu over the title: the title gives way to play
+    if (this.titleShown) { this.titleShown = false; this.titleFade = undefined; this.ui.showTitle(false); }
     this.respawn();
     this.camRig.clearOverride(0.01);
     this.ui.showEnd(false);
     return Promise.resolve(this.level);
   }
 
+  // the title over the save's chapter at its checkpoint: a dip to black (the sim waits), the chapter back at its
+  // checkpoint (the state Continue loads), the establishing shot, and the chapter held until play begins
   async toTitle() {
     if (this.paused) this.setPaused(false);
+    if (this.mode === 'loading' || this.mode === 'boot') return this.loader.busy || this.level;
     const d = this.save.exists ? this.save.data : null;
-    if (d && d.chapter !== this.chapterId) return this.loadChapter(d.chapter, d.cp, { reason: 'title' });
-    if (!this.level) return this.loadChapter('souk', 0, { reason: 'title' });
-    this.cinema?.stop(); this.cinema = null;
-    this.restartChapterLook();
+    if (d && d.chapter !== this.chapterId && this.saving) return this.loadChapter(d.chapter, d.cp, { reason: 'title' });
+    if (!this.level || !this.saving) return this.loadChapter(d?.chapter || 'souk', d?.cp ?? 0, { reason: 'title' });
+    this.suspended = true;
+    try { await this.fadeTo(1, { color: '#000000', sec: 0.4 }); } finally { this.suspended = false; }
+    if (!this.level || this.mode === 'loading') return this.level;
+    this.resetToCheckpoint();
+    this.restartChapterLook(); this.director.restore();
     this.setMode('intro'); this.introT = 0; this.titleShown = true; this.titleFade = undefined;
-    this.ui.showEnd(false); this.ui.showTitle(true); this.ui.titleOpacity?.(1);
-    if (this.def.intro) { this.camRig.setOverride(introShot(this, this.def.intro), 1.5); }
+    this.ui.showEnd(false); this.ui.hideHint?.(); this.ui.showTitle(true); this.ui.titleOpacity?.(1);
+    const shot = this.openingShot();
+    if (shot) { this.camRig.setOverride(introShot(this, shot), 0.001); this.camRig.overrideW = 1; }
+    else { this.camRig.clearOverride(0.01); this.camRig.snapNext = true; }
     this.fadeTarget = 0; this.fadeSpeed = 0.8;
+    this.audioIn(1.5);
+    this.emit('title', { id: this.chapterId, cp: this.cpIndex });
     return this.level;
   }
   restartChapterLook() { const look = this.def?.look; if (Array.isArray(look)) this.director.apply(look[0].preset).keys(look); else this.director.apply(look || 'goldenHour'); }
@@ -420,12 +456,24 @@ export class Game {
   completeChapter() {
     if (this.mode === 'chapterEnd' || this.mode === 'loading' || this.mode === 'credits' || !this.def) return null;
     const id = this.def.id, next = this.def.next ?? null;
+    if (this.def.dev) return this.endDevChapter();
     this.setMode('chapterEnd');
     this.save.chapterEnd(id, next);
     this.emit('chapterEnd', { id, next });
     this.level?.onComplete?.(this);
     if (next) return this.loadChapter(next, 0, { reason: 'chain' });
     return this.rollCredits();
+  }
+
+  // a dev chapter's end (the lab): no save, no credits; it starts over behind a short dip to black
+  async endDevChapter() {
+    this.setMode('chapterEnd');
+    this.emit('chapterEnd', { id: this.def.id, next: null, dev: true });
+    this.level?.onComplete?.(this);
+    this.suspended = true;
+    try { await this.fadeTo(1, { color: '#000000', sec: 0.6 }); } finally { this.suspended = false; }
+    if (this.mode !== 'chapterEnd') return this.level;
+    return this.restartChapter();
   }
 
   async rollCredits() {

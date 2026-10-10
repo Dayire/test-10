@@ -70,8 +70,9 @@ export async function boot(canvas, params) {
   ui.hideLoading();
   ui.on('resume', () => game.setPaused(false));
   ui.on('checkpoint', () => game.restartCheckpoint());
-  ui.on('restart', () => game.restartChapter());
-  ui.on('title', () => game.toTitle());
+  // a failed load already reports itself (loadError, console) and recovers in the loader
+  ui.on('restart', () => game.restartChapter()?.catch?.(() => {}));
+  ui.on('title', () => game.toTitle().catch(() => {}));
   ui.on('quality', () => { const order = ['low', 'medium', 'high', 'ultra']; const i = order.indexOf(world.rs.tier); game.applySettings({ quality: order[(i + 1) % order.length] }); ui.showPause(true, input.lastDevice, world.rs.tier, audio.muted, input.keyLabels); game.redraw(); });
   ui.on('mute', () => { audio.muted = !audio.muted; if (audio.setMuted) audio.setMuted(audio.muted); else if (audio.master) audio.master.gain.value = audio.muted ? 0 : 0.9; ui.showPause(true, input.lastDevice, world.rs.tier, audio.muted, input.keyLabels); });
   ui.on('assets', () => { location.hash = 'assets'; location.reload(); });

@@ -61,45 +61,76 @@ export class ChapterLoader {
     this.game = game;
     this.busy = null;
     this.stats = null;
+    this.scope = []; // chapter-lived subscriptions (kit.on, kit.onFrame, kit.registerExt), undone by unload
+    this.card = null;
   }
 
   // loadChapter(id, cp, {reason, onProgress}) -> promise of L. reason: boot | start | chain | continue | select | restart | title
+  // Loads run one at a time, in call order. A failure before the old chapter is disposed uncovers it again;
+  // a failure after falls back to the souk under the title (unless the souk itself failed).
   load(id, cp = 0, opts = {}) {
     const run = async () => {
       try { return await this._load(id, cp, opts); }
-      catch (e) { console.error(e); this.game.emit('loadError', { id, cp, message: String(e?.message || e) }); throw e; }
-      finally { this.busy = null; }
+      catch (e) {
+        console.error(e);
+        this.game.emit('loadError', { id, cp, message: String(e?.message || e) });
+        this.recover(id, e, opts);
+        throw e;
+      }
     };
-    this.busy = (this.busy || Promise.resolve()).then(run, run);
-    return this.busy;
+    const p = (this.busy || Promise.resolve()).then(run, run);
+    const tail = p.catch(() => {});
+    this.busy = tail;
+    tail.then(() => { if (this.busy === tail) this.busy = null; });
+    return p;
+  }
+
+  recover(id, e, { reason = 'start' } = {}) {
+    const g = this.game, card = this.card;
+    this.card = null;
+    g.suspended = false;
+    if (e?.stage === 'cover') {
+      // nothing was disposed: the old chapter carries on where it was
+      if (card) Promise.resolve(card.hide?.()).catch(() => {});
+      if (g.level) { g.fadeTarget = 0; g.fadeSpeed = 1.2; }
+      return;
+    }
+    if (id === 'souk' || reason === 'boot') return; // nothing safer to fall back to (boot reports the error)
+    this.load('souk', 0, { reason: 'title' }).then(() => card && card.hide?.(), () => card && card.hide?.()).catch(() => {});
   }
 
   async _load(id, cp, { reason = 'start', onProgress = null } = {}) {
     const g = this.game, t0 = performance.now();
-    const m = meta(id);
-    if (!m) throw new Error(`unknown chapter ${id}`);
     const prog = (p, msg) => { try { onProgress?.(p, msg); } catch { /* ui gone */ } };
     const phases = {}; let tp = t0;
     const mark = (k) => { const t = performance.now(); phases[k] = Math.round(t - tp); tp = t; };
-    // 1. cover the screen: the card (U's or the stub) on top of a canvas fade to the exit colour
-    let card = null;
-    if (reason !== 'boot') {
-      // a chain fades to the finished chapter's exit colour, everything else to black
-      const exit = reason === 'chain' && g.def ? (meta(g.def.id)?.exit || '#000000') : '#000000';
-      if (g.paused) g.setPaused(false);
-      if (g.fade < 0.999) await g.fadeTo(1, { color: exit, sec: reason === 'restart' ? 0.35 : 0.8 });
-      if (g.hooks.card && reason !== 'restart' && reason !== 'title') card = await g.hooks.card(m, { reason, from: g.def?.id ?? null });
-    }
+    // 1. cover the screen (the sim waits from here): the card (U's or the stub) over a canvas fade to the
+    // exit colour; the module is imported before anything is disposed
+    let def;
+    try {
+      const m = meta(id);
+      if (!m) throw new Error(`unknown chapter ${id}`);
+      g.suspended = true;
+      if (reason !== 'boot') {
+        // a chain fades to the finished chapter's exit colour, everything else to black
+        const exit = reason === 'chain' && g.def ? (meta(g.def.id)?.exit || '#000000') : '#000000';
+        if (g.paused) g.setPaused(false);
+        if (g.fade < 0.999) await g.fadeTo(1, { color: exit, sec: reason === 'restart' ? 0.35 : 0.8 });
+        if (g.hooks.card && reason !== 'restart' && reason !== 'title') this.card = await g.hooks.card(m, { reason, from: g.def?.id ?? null });
+      }
+      mark('cover');
+      def = await getChapter(id);
+      mark('import');
+    } catch (e) { if (e && typeof e === 'object') e.stage = 'cover'; throw e; }
+    const card = this.card;
     // 2. suspend the sim
     g.setMode('loading');
     // 3-4. dispose the old chapter
     this.unload();
     // 5. per-chapter game fields
     g.resetChapterState();
-    mark('cover');
+    mark('unload');
     prog(0.02, 'opening the gate…');
-    const def = await getChapter(id);
-    mark('import');
     g.def = def; g.chapterId = id;
     // 6. time of day (re-bakes the env map when the sky changes)
     if (Array.isArray(def.look)) g.director.apply(def.look[0].preset).keys(def.look);
@@ -118,7 +149,7 @@ export class ChapterLoader {
     const K = batch.kit();
     const r = rng(def.seed ?? 42);
     const helpers = createLevelKit(g, { K, root, L, r });
-    const kit = { ...helpers, K, root, L, r, batch, mats: g.mats, phys: g.phys, game: g, add: (o) => g.add(o), track: (o) => g.track(o) };
+    const kit = { ...helpers, K, root, L, r, batch, mats: g.mats, phys: g.phys, game: g, add: (o) => g.add(o), track: (o) => g.track(o), ...this.scopedKit() };
     prog(0.46, 'raising walls…');
     let out = def.build(g, kit);
     if (out && typeof out.next === 'function') {
@@ -148,8 +179,19 @@ export class ChapterLoader {
     prog(1, 'ready');
     this.stats = { id, ms: Math.round(performance.now() - t0), reason, phases };
     // 13. reveal
+    this.card = null;
     g.enterChapter({ reason, card });
     return L;
+  }
+
+  // subscriptions that live as long as the chapter: unload() undoes them
+  scopedKit() {
+    const g = this.game, S = this.scope;
+    return {
+      on: (name, fn) => { const off = g.events.on(name, fn); S.push(off); return off; },
+      onFrame: (fn) => { g.hooks.frame.push(fn); const off = () => { const i = g.hooks.frame.indexOf(fn); if (i >= 0) g.hooks.frame.splice(i, 1); }; S.push(off); return off; },
+      registerExt: (name, fn) => { g.registerExt(name, fn); S.push(() => { if (g.ext[name] === fn) delete g.ext[name]; }); return fn; },
+    };
   }
 
   async warm(phases = {}) {
@@ -174,7 +216,8 @@ export class ChapterLoader {
     if (!g.root) return null;
     const L = g.level;
     for (const e of [...(L?.entities || []), ...(L?.systems || [])]) { try { e.dispose?.(); } catch (err) { console.error(err); } }
-    g.cinema?.stop?.(); g.cinema = null;
+    for (const off of this.scope.splice(0)) { try { off(); } catch (err) { console.error(err); } }
+    g.cinema?.stop?.({ audio: false }); g.cinema = null;
     g.player.scripted = null; g.player.lever = null; g.player.grip = null;
     g.camRig.reset();
     g.lightRig.releaseAll();

@@ -10,7 +10,7 @@ const v3 = (a) => (a && a.isVector3 ? a.clone() : new THREE.Vector3(...a));
 // cfg: { path: [{p, pause?, pose?, onArrive?}], walkSpeed, autoWalkAfter,
 //   camera(t, game) -> {pos, look, fov, shadowFocus?}, cameraBlend,
 //   sunTo?: {dir, color?, colorAmt?, sec}, fogMul?, grade?: {contrast, saturation},
-//   letterbox?, rays?, bloom?, dof?: {near, far}, zEnd, endHold, fade, onEnd(game) }
+//   letterbox?, rays?, bloom?, dof?: {near, far}, zEnd, endHold, fade, audioFade (sec, false = keep), onEnd(game) }
 export class DepthWalk {
   constructor(game, cfg) {
     this.game = game;
@@ -23,7 +23,7 @@ export class DepthWalk {
     this.path.forEach((w, i) => { w.s = L[Math.round((i / Math.max(1, n - 1)) * div)]; });
     this.t = 0; this.s = 0; this.next = 1; this.pauseT = 0; this.pose = null;
     this.done = false; this.endT = 0; this.ended = false;
-    this.sunFrom = null;
+    this.sunFrom = null; this.fadedAudio = false;
   }
   get dof() { return this.cfg.dof; }
 
@@ -84,7 +84,7 @@ export class DepthWalk {
     if (!this.done && pl.z < c.zEnd) {
       this.done = true; this.endT = 0;
       g.fadeColor.setRGB(...c.fade.color); g.fadeTarget = 1; g.fadeSpeed = c.fade.speed;
-      g.audio.fadeOut?.(6);
+      if (c.audioFade !== false) { g.audio.fadeOut?.(c.audioFade ?? 6); this.fadedAudio = true; }
     }
     if (this.done) {
       this.endT += dt;
@@ -92,10 +92,14 @@ export class DepthWalk {
     }
   }
 
-  stop() {
+  // stopped early (death, restart, title) the look and the faded mix come back; the loader passes
+  // {audio: false} because the next chapter fades its own mix in when it is revealed
+  stop({ audio = true } = {}) {
     const g = this.game;
     if (g.player.scripted) g.player.scripted = null;
     g.director.restore();
+    if (this.fadedAudio && audio) g.audioIn?.(1.5);
+    this.fadedAudio = false;
   }
 }
 
