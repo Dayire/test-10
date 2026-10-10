@@ -165,7 +165,7 @@ dev chapter such as the lab never touches the save or rolls the credits: `chapte
 a dip to black and `restartChapter()`), `rollCredits()`, `restartCheckpoint()` (no death counted, fade out 0.25 s
 and in 0.3 s; over the title or a chapter intro it only resumes, the chapter already stands at its checkpoint),
 `restartChapter()` (in place, exactly as a fresh load at checkpoint 0: the initial snapshot, then `placeAt(0)`, which
-runs `prepare(0)`, takes the checkpoint snapshot and spawns), `titleHere()` (the title in place over this chapter at
+runs `prepare(0)`, takes the checkpoint snapshot and spawns; Continue then returns to checkpoint 0), `titleHere()` (the title in place over this chapter at
 its checkpoint), `toTitle()` (the save's chapter at its
 checkpoint, loaded if it is another one; otherwise a 0.4 s dip to black while the sim waits, the chapter back at its
 checkpoint snapshot exactly as a respawn leaves it, the look and mix restored, the opening shot cut in, the title

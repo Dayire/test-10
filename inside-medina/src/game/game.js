@@ -420,6 +420,7 @@ export class Game {
     this.restartChapterLook(); this.director.restore();
     this.restore(this.initialSnap);
     this.placeAt(0);
+    if (this.saving) this.save.begin?.(this.def.id, 0, 'restart'); // Continue returns here, as after a fresh load
     this.deathKind = null;
     // chosen from the pause menu over the title: the title gives way to play
     if (this.titleShown) { this.titleShown = false; this.titleFade = undefined; this.ui.showTitle(false); }

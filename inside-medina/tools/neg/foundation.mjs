@@ -143,8 +143,9 @@ export const scenarios = [
         for (let i = 0; i < 40 * 120 && !G.cinema?.done; i++) M.sim(1 / 120, { x: 1 });
         await frames(2); await wait(1500);
         out.faded = { mode: G.mode, done: !!G.cinema?.done, gain: gain(), ...look() };
+        const cp0 = M.save().cp;
         await G.restartChapter(); await frames(3); await wait(2000);
-        out.restart = { mode: G.mode, x: M.state().x, z: M.state().z, gain: gain(), ...look() };
+        out.restart = { mode: G.mode, x: M.state().x, z: M.state().z, gain: gain(), saveCp: [cp0, M.save().cp], ...look() };
         // 2. the title in the middle of the walk
         M.checkpoint(6); M.finale(); M.sim(6, { x: 1 }); await frames(2);
         out.walking = { mode: G.mode, z: M.state().z, ...look() };
@@ -159,6 +160,7 @@ export const scenarios = [
     },
     check: (r) => {
       if (!r.faded.done || !(r.faded.letterbox > 0.05)) return `the walk never reached its end fade: ${JSON.stringify(r.faded)}`;
+      if (r.restart.saveCp[0] !== 6 || r.restart.saveCp[1] !== 0) return `Continue after restart chapter returns to cp ${r.restart.saveCp[1]} (was ${r.restart.saveCp[0]})`;
       if (r.restart.mode !== 'play' || Math.abs(r.restart.x - 1.5) > 0.2 || r.restart.letterbox !== 0 || r.restart.cur || r.restart.ov || r.restart.sunY !== r.sunY0) return `restart chapter kept the finale's look: ${JSON.stringify(r.restart)}`;
       if (r.faded.gain !== null && (!(r.gain0 > 0.8) || !(r.faded.gain < 0.85) || !(r.restart.gain > 0.8))) return `restart chapter left the mix faded: ${r.faded.gain} -> ${r.restart.gain}`;
       if (!(r.walking.letterbox > 0)) return `no letterbox during the walk: ${JSON.stringify(r.walking)}`;
