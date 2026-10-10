@@ -51,17 +51,29 @@ async function startBaseServer() {
   if (!fs.existsSync(path.join(dir, 'index.html'))) {
     const prefix = execSync('git rev-parse --show-prefix', { cwd: root, encoding: 'utf8' }).trim().replace(/\/$/, '');
     const top = execSync('git rev-parse --show-toplevel', { cwd: root, encoding: 'utf8' }).trim();
-    fs.mkdirSync(dir, { recursive: true });
+    // extracted beside it and renamed into place, so a concurrent run never sees a half-written tree
+    const tmp = `${dir}.part-${process.pid}`;
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.mkdirSync(tmp, { recursive: true });
     // from the top level: run in a subdirectory, git archive would keep only that subdirectory of the tree
-    execSync(`git archive --format=tar ${ref}${prefix ? ':' + prefix : ''} | tar -x -C "${dir}"`, { cwd: top, stdio: 'pipe' });
+    execSync(`git archive --format=tar ${ref}${prefix ? ':' + prefix : ''} | tar -x -C "${tmp}"`, { cwd: top, stdio: 'pipe' });
+    try { fs.renameSync(tmp, dir); } catch { fs.rmSync(tmp, { recursive: true, force: true }); } // another run won
   }
-  if (!fs.existsSync(path.join(dir, 'node_modules'))) fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'dir');
+  try { fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'dir'); } catch (e) { if (e.code !== 'EEXIST') throw e; }
   const port = await new Promise((res, rej) => { const srv = net.createServer(); srv.on('error', rej); srv.listen(0, '127.0.0.1', () => { const p = srv.address().port; srv.close(() => res(p)); }); });
-  // its own dependency cache: the shared node_modules/.vite belongs to the main dev server
-  const cfg = path.join(dir, 'vite.base.config.mjs');
-  fs.writeFileSync(cfg, `import base from './vite.config.js';\nexport default { ...base, cacheDir: '.vite-base', server: { ...(base.server || {}), host: '127.0.0.1', port: ${port}, strictPort: true, hmr: false } };\n`);
+  // this run's own config and dependency cache (the shared node_modules/.vite belongs to the main dev server, and
+  // two suites may serve the base tree at once), both removed when the server stops
+  const tag = `${process.pid}-${port}`;
+  const cfg = path.join(dir, `vite.base.${tag}.config.mjs`), cache = `.vite-base-${tag}`;
+  fs.writeFileSync(cfg, `import base from './vite.config.js';\nexport default { ...base, cacheDir: '${cache}', server: { ...(base.server || {}), host: '127.0.0.1', port: ${port}, strictPort: true, hmr: false } };\n`);
   const child = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), '--config', cfg, '--clearScreen', 'false'], { cwd: dir, stdio: 'ignore' });
-  const stop = () => { try { child.kill('SIGTERM'); } catch { /* gone */ } };
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    try { child.kill('SIGTERM'); } catch { /* gone */ }
+    for (const f of [cfg, path.join(dir, cache)]) try { fs.rmSync(f, { recursive: true, force: true }); } catch { /* in use */ }
+  };
   process.once('exit', stop);
   const t0 = Date.now();
   while (Date.now() - t0 < 60000) {

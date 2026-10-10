@@ -7,8 +7,9 @@ import * as THREE from 'three';
 // a beam's hit spot) are moved and dimmed by their owner and win a slot ahead
 // of static ones by priority, but only near the view (update's `range`), so an
 // off-screen guard never holds a light. A dynamic source may carry its own
-// colour, distance and decay (uniforms only: no recompile). The pool size is
-// fixed at boot by device class.
+// colour, distance and decay (uniforms only: no recompile). Lights hand over
+// with a fade while the camera moves, and at once across a camera cut. The
+// pool size is fixed at boot by device class.
 export class LightPool {
   constructor(scene, n = 4, { color = 0xffa550, distance = 6, decay = 1.8 } = {}) {
     this.color = new THREE.Color(color); this.distance = distance; this.decay = decay;
@@ -38,8 +39,10 @@ export class LightPool {
   style(l, s) { l.color.copy(s?.color || this.color); l.distance = s?.distance ?? this.distance; l.decay = s?.decay ?? this.decay; }
   setMul(m) { this.mul = m; }
 
-  // range: priority counts only for sources within this x distance of the focus (view half-width + margin)
-  update(focus, time, dt, { range = Infinity } = {}) {
+  // range: priority counts only for sources within this x distance of the focus (view half-width + margin).
+  // snap: the view cut (respawn, checkpoint start, teleport): every light goes to its source at once, so the
+  // lanterns of the new view are lit in the first frame; without it lights fade (the no-cut rule below)
+  update(focus, time, dt, { range = Infinity, snap = false } = {}) {
     const S = this.sources;
     const order = this._order; order.length = 0;
     for (const s of S) {
@@ -58,6 +61,7 @@ export class LightPool {
       const s = l.userData.src;
       if (s && want.includes(s)) taken.add(s);
       else if (s) { l.userData.src = undefined; l.userData.was = s; }
+      if (snap && l.userData.src === undefined) { l.userData.was = undefined; l.intensity = 0; this.style(l, null); }
     }
     for (const s of want) {
       if (taken.has(s)) continue;
@@ -69,7 +73,7 @@ export class LightPool {
       free.userData.src = s; free.userData.was = undefined; free.position.copy(s.pos); free.intensity = 0; taken.add(s);
       this.style(free, s);
     }
-    const k = 1 - Math.exp(-6 * dt);
+    const k = snap ? 1 : 1 - Math.exp(-6 * dt);
     for (const l of this.lights) {
       const s = l.userData.src;
       if (s === undefined) {

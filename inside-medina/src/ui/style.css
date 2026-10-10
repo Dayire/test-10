@@ -1,6 +1,7 @@
 html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
 #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
-#ui { position: fixed; inset: 0; pointer-events: none; font-family: 'Cormorant Garamond', Georgia, 'Times New Roman', serif; color: #f3e6d2; }
+#ui { position: fixed; inset: 0; z-index: 6; pointer-events: none; font-family: 'Cormorant Garamond', Georgia, 'Times New Roman', serif; color: #f3e6d2; }
+/* the touch controls sit under #ui (z 6), so its overlays (card, pause, credits, loading) cover them */
 #touch { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
 #touch .tstick { position: absolute; left: 28px; bottom: 28px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,240,220,.08); border: 1px solid rgba(255,240,220,.25); pointer-events: auto; touch-action: none; }
 #touch .tknob { position: absolute; left: 40px; top: 40px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255,240,220,.28); }

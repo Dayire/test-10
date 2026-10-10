@@ -7,6 +7,8 @@ const v3 = (a) => (a && a.isVector3 ? a.clone() : new THREE.Vector3(...a));
 
 // DepthWalk: the boy leaves the play plane and walks a Catmull-Rom path into
 // depth while the camera, sun and grade follow a script (Chapter I's finale).
+// The pose of the waypoint the boy stands at (walk.pose, walk.poseT seconds into it) reaches the animator as
+// ctx.pose / ctx.poseT through player.animContext().
 // cfg: { path: [{p, pause?, pose?, onArrive?}], walkSpeed, autoWalkAfter,
 //   camera(t, game) -> {pos, look, fov, shadowFocus?}, cameraBlend,
 //   sunTo?: {dir, color?, colorAmt?, sec}, fogMul?, grade?: {contrast, saturation},
@@ -21,7 +23,7 @@ export class DepthWalk {
     // arc length at each waypoint (pauses and arrivals)
     const div = 400, L = this.curve.getLengths(div), n = this.path.length;
     this.path.forEach((w, i) => { w.s = L[Math.round((i / Math.max(1, n - 1)) * div)]; });
-    this.t = 0; this.s = 0; this.next = 1; this.pauseT = 0; this.pose = null;
+    this.t = 0; this.s = 0; this.next = 1; this.pauseT = 0; this.pose = null; this.poseT = 0; this.posePause = false;
     this.done = false; this.endT = 0; this.ended = false;
     this.sunFrom = null; this.fadedAudio = false;
   }
@@ -43,8 +45,12 @@ export class DepthWalk {
     const inp = g.input.state;
     const want = Math.max(inp.x, inp.y, this.t > c.autoWalkAfter ? 0.55 : 0, g.params.autostart ? 1 : 0);
     const v = c.walkSpeed * Math.min(1, want);
-    if (this.pauseT > 0) { this.pauseT -= dt; p.fvx = 0; }
-    else {
+    this.poseT += dt;
+    if (this.pauseT > 0) {
+      this.pauseT -= dt; p.fvx = 0;
+      // a waypoint's pose lasts its pause (one without a pause keeps it to the next waypoint)
+      if (this.pauseT <= 0 && this.posePause) { this.pose = null; this.posePause = false; }
+    } else {
       p.fvx = (p.fvx || 0) + (v - (p.fvx || 0)) * (1 - Math.exp(-3 * dt));
       this.s = Math.min(this.len, this.s + p.fvx * dt);
     }
@@ -52,7 +58,7 @@ export class DepthWalk {
     while (this.next < this.path.length && this.s >= this.path[this.next].s) {
       const w = this.path[this.next++];
       if (w.pause) { this.pauseT = w.pause; this.s = w.s; }
-      this.pose = w.pose || null;
+      this.pose = w.pose || null; this.poseT = 0; this.posePause = !!(w.pose && w.pause);
       w.onArrive?.(g, this);
     }
     const t = this.s / this.len;

@@ -57,11 +57,11 @@ const skyKey = (L) => SKY_FIELDS.map((k) => { const v = L[k]; return v?.isColor 
 const keyCache = new WeakMap();
 const keyOf = (L) => { let k = keyCache.get(L); if (!k) keyCache.set(L, k = skyKey(L)); return k; };
 const disposeEnv = (t) => { if (t) { if (t.renderTarget) t.renderTarget.dispose(); else t.dispose?.(); } };
-// the sky shader's uniforms for a look
-function writeSky(U, c) {
+// the sky shader's uniforms for a look (sunColor: the sky's sun glow, when it differs from the light's)
+function writeSky(U, c, sunColor = c.sunColor) {
   U.uSunDir.value.copy(c.sunDir);
   U.uZenith.value.copy(c.zenith); U.uHorizon.value.copy(c.horizon); U.uGround.value.copy(c.groundCol);
-  U.uSunColor.value.copy(c.sunColor); U.uCloudLit.value.copy(c.cloudLit); U.uCloudShade.value.copy(c.cloudShade);
+  U.uSunColor.value.copy(sunColor); U.uCloudLit.value.copy(c.cloudLit); U.uCloudShade.value.copy(c.cloudShade);
   U.uExposure.value = c.skyExposure;
   if (U.uSunDisk) U.uSunDisk.value = c.sunDisk;
   if (U.uNight) U.uNight.value = c.night ?? c.moon;
@@ -113,16 +113,19 @@ export class LookDirector {
     for (const k of this.xKeys || []) this.envFor(k.L);
     return this;
   }
-  // a timed blend; call prebake(preset) under the chapter's card first, or the target's map is baked here
+  // a timed blend on game time (step(dt), called by the game's fixed step: it pauses with the game, waits through
+  // loads and follows __medina.sim); call prebake(preset) under the chapter's card first, or the target's map is
+  // baked here. A blend that must stay in step with gameplay (a clock) drives blendAt() from its own step instead.
   blendTo(preset, sec = 1) {
     this.xKeys = null;
     const to = resolved(preset);
     this.blend = { from: copyLook({}, this.base), to, t: 0, dur: Math.max(1e-3, sec), name: typeof preset === 'string' ? preset : 'custom' };
     this.blend.fromEnv = this.envSnapshot();
     this.envFor(to);
-    if (sec <= 0) this.update(0, 1);
+    if (sec <= 0) { this.blend.t = 1; this.update(); }
     return this;
   }
+  step(dt) { const b = this.blend; if (b && b.t < 1) b.t = Math.min(1, b.t + dt / b.dur); }
   // set the blend position directly (clocks that own their own time)
   blendAt(from, to, t) {
     this.blend = null; this.xKeys = null;
@@ -185,10 +188,10 @@ export class LookDirector {
     if (grain !== undefined) this.user.grain = grain / 60;
   }
 
-  update(x = 0, dt = 0) {
+  // per rendered frame: the timed blend where step() has brought it, or the x keys at the boy's x
+  update(x = 0) {
     const b = this.blend;
     if (b) {
-      b.t = Math.min(1, b.t + dt / b.dur);
       lerpLook(this.base, b.from, b.to, smooth(b.t));
       this.followEnv(b.fromEnv, b.to, smooth(b.t));
       if (b.t >= 1) { this.blend = null; this.name = b.name; }
@@ -225,8 +228,10 @@ export class LookDirector {
     G.uFogSunColor.value.copy(c.fogSunColor);
     G.uFogParams.value.x = c.fogDensity; G.uFogParams.value.y = c.fogFalloff;
     G.uFogStart.value = c.fogStart; G.uWindStrength.value = c.wind;
+    // the sky's sun glow keeps the preset's colour under an override (a cinematic tints the light, not the sky,
+    // as Chapter I's finale always has); an override may set skySunColor for the sky itself
     const U = w.sky?.uniforms;
-    if (U) writeSky(U, c);
+    if (U) writeSky(U, c, this.ov.skySunColor || this.base.sunColor);
     const P = w.rs?.post?.params;
     if (P) {
       P.exposure = c.exposure * this.user.exposure; P.bloom = c.bloom; P.bloomThreshold = c.bloomThreshold;

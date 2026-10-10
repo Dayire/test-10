@@ -437,6 +437,8 @@ export class Player {
       climbT: this.climbT, hangSwing: this.state === 'hang' ? Math.sin(this.hangT * 3) * Math.exp(-this.hangT * 2) : 0,
       climbSpeed: this.climbSpeed || 0, deathT: this.deathT, deathKind: this.deathKind, leverT: this.lever?.t ?? 0,
       lookYaw,
+      // a scripted walk's waypoint pose ('reach', 'sit'...) and its age in seconds (DepthWalk)
+      pose: (this.scripted && this.game.cinema?.pose) || null, poseT: this.game.cinema?.poseT ?? 0,
     };
   }
 

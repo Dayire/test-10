@@ -36,7 +36,9 @@ the engine calls their newer APIs only through optional chaining.
 1. `storage.init()` (`?nosave=1` keeps everything in memory), `save.load()`.
 2. Device class (FULL_GAME §8.4): coarse pointer with `deviceMemory ≤ 4` or `hardwareConcurrency ≤ 4` → low tier, texture scale 0.5, pool 4; other coarse pointers → medium, 0.5, 4; desktop → high, 1, 6. The pool size is fixed here and never follows the tier.
 3. `createWorld(canvas, {tier, texScale, bake: false})`, GLB overrides, `SESSION_SURFACES`, `new Game(...)`, `game.initOnce({pool})`, the `hooks.card` / `hooks.credits` stubs from `ui.js`, saved settings.
-4. `game.loadChapter(id, cp, {reason: 'boot', onProgress})` paints the loading bar (bake slices, build sections, compile).
+4. Where to start: `?chapter=` / `?cp=` (`?cp=` alone: the souk), else the save's `{chapter, cp}` (FULL_GAME §7.1: the
+   title shows the save's place; a new player gets the souk), else the souk. Booting never writes the save.
+   `game.loadChapter(id, cp, {reason: 'boot', onProgress})` paints the loading bar (bake slices, build sections, compile).
    `world.bakeSlice` is 200 ms on a software rasteriser (SwiftShader: every present is expensive), 33 ms on desktop
    GPUs and 16 ms on touch devices (about one surface per frame, so input and menus stay responsive).
 5. The loop: `rs.beginFrame?.(now)` (false skips the frame), `rs.trackFrame(ms, {paused, hidden})`, `game.frame(dt)`.
@@ -48,7 +50,7 @@ targets, rebuilds the env map, reloads the chapter at its checkpoint).
 | URL parameter | Effect |
 |---|---|
 | `?chapter=<id>&cp=<n>` | start there (`?cp=` alone: souk) |
-| `?continue=1` | start at the save's `{chapter, cp}` |
+| `?continue=1` | start at the save's `{chapter, cp}` (also the default when a save exists and no `?chapter=`/`?cp=` is given) |
 | `?autostart=1` | skip the title and every intro (test contract) |
 | `?hold=1` | requestAnimationFrame never advances the simulation; only `__medina.sim` does (determinism) |
 | `?nosave=1` | saves stay in memory |
@@ -128,7 +130,8 @@ Loads are queued: each runs after the previous one settles, in call order.
 8. FX on the root (`Shafts(root, director.sunDir, G)`, its dust, `Dust(root)`, `Flock(root, mats, L.flockSpots)`), glow sprites, pool sources;
 9. camera keys, sorted checkpoints, the initial snapshot, `L.prepare(cp)`, the checkpoint snapshot, spawn;
 10. `renderer.compileAsync` with hidden objects made visible, one warm-up render;
-11. `enterChapter`: `save.begin`, `audio.setChapter?.()`, `chapterStart`, the opening shot (title on boot), fade in, the mix faded back in (`audioIn`), card hidden, `suspended` cleared. `openingShot()`: under the title a `menuShot` whose `cp` is this checkpoint; otherwise `intro` at checkpoint 0 only. A start at a later checkpoint has no establishing shot (it would frame the wrong place): the title shows the rail camera on the boy at his checkpoint, and without the title play begins at once.
+11. `enterChapter`: `save.begin` (not for `boot` and `title`: the title shows a place without choosing it; the boot's
+    place becomes the save's when play begins from it, `beginOnPlay`), `audio.setChapter?.()`, `chapterStart`, the opening shot (title on boot), fade in, the mix faded back in (`audioIn`), card hidden, `suspended` cleared. `openingShot()`: under the title a `menuShot` whose `cp` is this checkpoint; otherwise `intro` at checkpoint 0 only. A start at a later checkpoint has no establishing shot (it would frame the wrong place): the title shows the rail camera on the boy at his checkpoint, and without the title play begins at once.
 
 **Failures** emit `loadError {id, cp, message, attempt}` and reject. A failure while covering (unknown id, the
 import) leaves the old chapter in place: the card hides and the screen fades back in. When that chapter has ended
@@ -153,8 +156,10 @@ it sweeps a separate show aim and never detects; play resumes from its real (che
 swings back onto it within about a second. A chapter's own intro (no title) runs live. `setMode(m)` emits `mode`.
 
 **Fixed step (120 Hz)**: pin → entity `prestep` → system `prestep` → `player.step` → entity `step` →
-`phys.stepBodies` → crush test (`body.crushes`) → system `step` → kill zones → (play) triggers and checkpoints →
-player events → dying → cinematic update (finale, cutscene). Rendering interpolates with `alpha`.
+`phys.stepBodies` → crush test (`body.crushes`) → system `step` → `director.step` (timed look blends) → kill zones →
+(play) triggers and checkpoints → player events → dying → cinematic update (finale, cutscene). While a restart from
+the checkpoint fades (`deathKind 'restart'`) the step only counts down to the respawn: nothing moves and nothing can
+kill the boy. Rendering interpolates with `alpha`.
 
 **Pin** (what the boy reads): `x, y, jump, grab, jumpPressed, upPressed, downPressed, grabPressed, pointerPressed,
 aimTarget` (the pointer's ray on z = 0 while `pointer.active`, or a scripted `{x, y}`).
@@ -162,16 +167,20 @@ aimTarget` (the pointer's ray on z = 0 while `pointer.active`, or a scripted `{x
 **Flow API**: `newGame()`, `continueGame()`, `startChapter(id, cp)`, `loadChapter(id, cp, opts)`,
 `completeChapter()` (save, `chapterEnd`, `L.onComplete`, then the next chapter behind its card or the credits; a
 dev chapter such as the lab never touches the save or rolls the credits: `chapterEnd {id, next: null, dev: true}`,
-a dip to black and `restartChapter()`), `rollCredits()`, `restartCheckpoint()` (no death counted, fade out 0.25 s
-and in 0.3 s; over the title or a chapter intro it only resumes, the chapter already stands at its checkpoint),
+a dip to black and `restartChapter()`), `rollCredits()` (fades to the chapter's `exit` colour first when the screen is not
+covered yet, so the lines never sit on the live scene; the title then fades in from that colour), `restartCheckpoint()`
+(no death counted, fade out 0.25 s and in 0.3 s; the chapter holds meanwhile, so a lamp's dart or a fall cannot land
+during it, and a restart chosen while a death plays adds no second death; over the title or a chapter intro it only
+resumes, the chapter already stands at its checkpoint),
 `restartChapter()` (in place, exactly as a fresh load at checkpoint 0: the initial snapshot, then `placeAt(0)`, which
 runs `prepare(0)`, takes the checkpoint snapshot and spawns; Continue then returns to checkpoint 0), `titleHere()` (the title in place over this chapter at
-its checkpoint), `toTitle()` (the save's chapter at its
+its checkpoint; never moves the save), `toTitle()` (the save's chapter at its
 checkpoint, loaded if it is another one; otherwise a 0.4 s dip to black while the sim waits, the chapter back at its
 checkpoint snapshot exactly as a respawn leaves it, the look and mix restored, the opening shot cut in, the title
 shown and the chapter held; emits `title`), `setPaused(p)` (freeze-frame: one dimmed frame, then no rendering;
 `audio.setPaused?.(p)` or a suspended context), `setMenuOpen(b)` (input zeroed), `startFinale()` (`L.finale` as a
-DepthWalk), `fadeTo(target, {color, sec})`, `recoverContext()`, `redraw()`, `resetToCheckpoint()` (the
+DepthWalk), `fadeTo(target, {color, sec})`, `recoverContext()` (under the title the chapter reloads under the title),
+`redraw()`, `resetToCheckpoint()` (the
 checkpoint snapshot and spawn, the cinematic stopped; respawn and the title use it), `audioIn(sec)` (fades the
 mix back in unless the player muted it). A respawn returns to `intro` when the title is up. Dev chapters
 (`def.dev`) never write the save (`game.saving` is false): no `begin`, checkpoint, death or play-time writes.
@@ -213,7 +222,9 @@ of a bot give identical end states (`tools/playtest.mjs --runs 2`).
 camera(t, game, walk) → {pos, look, fov, shadowFocus?}, cameraBlend 3.2, sunTo?: {dir, color, colorAmt, sec},
 fogMul?, grade?: {contrast, saturation}, letterbox?, rays?, bloom?, dof?: {near, far}, zEnd, endHold 4.2,
 fade: {color, speed}, audioFade 6 (seconds; false keeps the mix), onEnd(game)}`. It drives the boy along a
-centripetal Catmull-Rom curve, pauses at waypoints (`walk.pose` names the pose for the animator), writes every look
+centripetal Catmull-Rom curve, pauses at waypoints (`walk.pose` names the waypoint's pose for as long as its pause
+lasts, or until the next waypoint when it has none; `walk.poseT` counts seconds into it; both reach the animator as
+`ctx.pose` / `ctx.poseT` through `player.animContext()`, and L maps a pose such as `reach` to an animator state), writes every look
 change as a LookDirector override and restores the preset on `stop()`. When the boy passes `zEnd` the screen fades
 to `fade.color` and the mix fades out; `endHold` seconds later `onEnd` runs (default `completeChapter()`).
 `stop({audio = true})` (death, restart, title) also fades the mix back in if the walk had faded it; the loader
@@ -230,10 +241,14 @@ contrast, shadowTint, highlightTint, lift, rays, rayColor, letterbox`; `lanternP
 poolColor, glowColor`; `envIntensity`; `shadowBias, shadowNormalBias`.
 
 **LookDirector** (`game.director`): `apply(preset)`, `look(def.look, chapterId)` (the loader and restarts: `apply`,
-plus `keys` for an x-keyed look), `keys([{x, preset}])` with `update(x, dt)`, `blendTo(preset, sec)`, `blendAt(from,
-to, t)`, `prebake(preset)`, `override(fields)` / `restore()`, `get(name)`, `rebake()`, `resetEnvs()`,
+plus `keys` for an x-keyed look), `keys([{x, preset}])` with `update(x)` (every rendered frame), `blendTo(preset, sec)`
+(on game time: the fixed step calls `step(dt)`, so a timed blend pauses with the game, waits through loads and follows
+`__medina.sim` under `?hold=1`), `blendAt(from, to, t)` (a blend that must stay in step with gameplay, such as a clock,
+drives this from its own step), `prebake(preset)`, `override(fields)` / `restore()`, `get(name)`, `rebake()`, `resetEnvs()`,
 `setUser({brightness, grain})`. It
-owns `director.sunDir` (= `world.sunDir`, read by shafts, atmosphere and the sun light) and writes the sky (and
+owns `director.sunDir` (= `world.sunDir`, read by shafts, atmosphere and the sun light) and writes the sky (its sun
+glow keeps the preset's `sunColor` under an override, which tints the light only, as Chapter I's finale always has; an
+override's `skySunColor` sets the sky's own) (and
 `uNight, uStars, uMoonDir, uMoonColor, uMoonSize` when the sky has them), sun, hemi, fog, post, the pool colour and
 multiplier, `glowMul` and `glowColor` (the game's lantern loop applies both to the glow sprites),
 `glassGlow.emissiveIntensity`, env intensity and `shafts.setSun?.(dir, colour)`. **Environment maps** are cached by
@@ -255,8 +270,10 @@ every chapter. A searchlight takes a spot within view half-width + 10 m of the c
 {intensity, color?, distance?, decay?})` (the owner moves it every frame; it wins a light ahead of static sources
 while it is within view half-width + 6 m of the camera's look, and competes by distance like any source beyond;
 its own colour, distance and decay apply while it holds a light, and stay on a released light until it has faded
-out), `update(focus, time, dt, {range})`, `remove`, `clear`, `setColor`, `setMul`. A static source takes a light
-only once one has faded out (no cut); a priority source takes the dimmest free light at once.
+out), `update(focus, time, dt, {range, snap})`, `remove`, `clear`, `setColor`, `setMul`. A static source takes a light
+only once one has faded out (no cut); a priority source takes the dimmest free light at once. On a camera cut
+(`snap`: the game passes `camRig.snapNext`, set by respawns, checkpoint starts, the title, teleports and photos) every
+source takes its light at full intensity in the first frame.
 
 **Materials and surfaces**: `mats.register(defs)`, `mats.setEnv(tex, scale)`, `registerSurfaces(defs)`,
 `SURFACES`, `bakeAsync(baker, names, onProgress, out, slice)`, `world.bake(names, onProgress)`,
@@ -278,7 +295,8 @@ use `distPortrait` and a 52° horizontal field-of-view floor (46° in landscape)
 `poll()` → `{x, y, jump, grab, pause, any, pointer}`; edges `jumpPressed, grabPressed, pausePressed,
 anyPressed`; `pointer = {x, y (NDC), active, pressed, released, kind}` (left mouse or a touch on the canvas);
 `nav = {up, down, left, right, confirm, back}` edges with repeat (400 ms, then 120 ms); `lastDevice`,
-`keyLabels`, `override` (scripted input).
+`keyLabels`, `override` (scripted input). The on-screen controls (`#touch`, z-index 5) sit under `#ui` (z-index 6), so
+the card, pause, credits and loading screens cover them; hiding them in menus is U's (FULL_GAME §7.5).
 
 ## 10. Saves (`src/core/storage.js`, `src/core/save.js`)
 
@@ -301,8 +319,8 @@ counts), ext{}`. `window.__info()` adds the state to `info()`.
 | Command | What |
 |---|---|
 | `node tools/playtest.mjs --chapter souk [--cp N] [--from step] [--to step] [--runs 2]` | the chapter bot (`tools/bots/<chapter>.js` on `tools/bots/lib.js`); exit 0 on pass; several runs must agree on the end-state hash |
-| `node tools/negative.mjs --chapter souk` | `tools/neg/<chapter>.mjs` as assertions; `--selftest-fail` must exit 1 |
-| `node tools/negative.mjs --suite foundation [--artifact] [--base-port N \| --absolute] [--rounds 5]` | chain and Continue (with the finale's look and mix left behind), throwing storage, restart and title mid-finale, title during the chase, lab end, loader queue / failures / scoped subscriptions, a chain whose import fails (retries, then the title), restart chapter equal to a fresh start, the live and harmless title over the courtyard, x-keyed env maps swapped without a bake, the sim waiting through a load's fade, title shadow focus, look round trip, context loss, boot budget; `--artifact` also rebuilds and boots the single-file build. The boot budget is timed against the pre-foundation tree under the same load: by default the suite extracts that commit (`git archive`, cached in the OS temp dir) and serves it on a free port, `--base-port` names a running server of it instead, `--absolute` uses the recorded baseline (idle machine only); one warm-up boot each, then `--rounds` (default 5) alternating boots, compared by median |
+| `node tools/negative.mjs --chapter souk` | `tools/neg/<chapter>.mjs` as assertions (the souk's include restart from checkpoint: not a death, not during the last quarter second of a lamp's alarm, not a second death while one plays); `--selftest-fail` must exit 1 |
+| `node tools/negative.mjs --suite foundation [--artifact] [--base-port N \| --absolute] [--rounds 5]` | chain and Continue (with the finale's look and mix left behind), the title over the save's place never writing over it (pause, hidden page, title, play), throwing storage, restart and title mid-finale, title during the chase, lab end, loader queue / failures / scoped subscriptions, a chain whose import fails (retries, then the title), restart chapter equal to a fresh start, the live and harmless title over the courtyard, x-keyed env maps swapped without a bake, the sim waiting through a load's fade, title shadow focus, look round trip, context loss, boot budget; `--artifact` also rebuilds and boots the single-file build. The boot budget is timed against the pre-foundation tree under the same load: by default the suite extracts that commit (`git archive`, cached in the OS temp dir) and serves it on a free port with a config and dependency cache of its own run (removed afterwards, so concurrent suites never share them), `--base-port` names a running server of it instead, `--absolute` uses the recorded baseline (idle machine only); one warm-up boot each, then `--rounds` (default 5) alternating boots, compared by median |
 | `node tools/cycle.mjs [--cycles 3] [--path souk,lab,souk,sundown,souk]` | memory flat, programs stable, light census constant, no page errors |
 | `node tools/probe.mjs "<query>" "<js>"`, `tools/tour.mjs`, `tools/shot.mjs` | ad hoc evaluation and screenshots; all take `--port`, `BASE=` and `--chapter` |
 | `npm test`, `npm run test:souk`, `npm run test:foundation`, `npm run cycle` | the suites above |

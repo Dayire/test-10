@@ -14,6 +14,7 @@ import { DepthWalk, introShot } from './cinematics.js';
 import { installTestApi } from './testapi.js';
 import { Save } from '../core/save.js';
 import { storage } from '../core/storage.js';
+import { meta } from '../chapters/index.js';
 
 // The engine: one Game for the session (camera, light rig, boy, test API)
 // and one chapter at a time (game.level = L, built by the ChapterLoader).
@@ -282,6 +283,8 @@ export class Game {
       if (!pl.dead && b.vy < -3 && b.x1 > p.x0 + 0.05 && b.x0 < p.x1 - 0.05 && b.y < p.y + p.h && b.y > p.y + p.h - 0.4) { pl.die('crushed'); this.sfx('crateImpact', b.x); }
     }
     for (const s of this.systems) if (live || s.liveUnderTitle) s.step?.(dt);
+    // timed look blends run on game time: they pause with the game, wait through loads and follow __medina.sim
+    this.director.step(dt);
     // kill zones: the boy's feet inside
     const kz = L?.killZones;
     if (live && kz && kz.length && !pl.dead) for (const z of kz) if (pl.x >= z.x0 && pl.x <= z.x1 && pl.y >= z.y0 && pl.y <= z.y1) { pl.die(z.kind || 'fall'); break; }
@@ -447,7 +450,8 @@ export class Game {
     if (d && d.chapter !== this.chapterId && this.saving) return this.loadChapter(d.chapter, d.cp, { reason: 'title' });
     if (!this.level || !this.saving) return this.loadChapter(d?.chapter || 'souk', d?.cp ?? 0, { reason: 'title' });
     this.suspended = true;
-    try { await this.fadeTo(1, { color: '#000000', sec: 0.4 }); } finally { this.suspended = false; }
+    // a screen already covered (the credits' exit colour) keeps its colour and the title fades in from it
+    try { await this.fadeTo(1, { color: this.fade > 0.999 ? null : '#000000', sec: 0.4 }); } finally { this.suspended = false; }
     if (!this.level || this.mode === 'loading') return this.level;
     return this.titleHere();
   }
@@ -495,9 +499,14 @@ export class Game {
     return this.restartChapter();
   }
 
+  // the credits over the chapter's exit colour: an ending that has not covered the screen yet (a finale's walk
+  // does) fades to it first, so the lines never sit on the live scene
   async rollCredits() {
     this.setMode('credits');
     const lines = this.level?.credits || this.def?.credits || DEFAULT_CREDITS;
+    this.ui.hideHint?.();
+    if (this.fade < 0.999) await this.fadeTo(1, { color: meta(this.def?.id)?.exit || '#fff3dc', sec: 1.6 });
+    if (this.mode !== 'credits') return this.level;
     this.emit('credits', { lines });
     try { if (this.hooks.credits) await this.hooks.credits(lines, this); } catch (e) { console.error(e); }
     return this.toTitle().catch(() => null);
@@ -626,12 +635,11 @@ export class Game {
         l.mesh.rotation.z = Math.sin(this.time * 0.8 + l.phase) * 0.03;
       }
       this.charLight.position.set(x + 0.6, this._vy + 1.5, z + 1.6);
-      // priority sources (a guard's lantern, a beam's hit spot) win a light only near the view
-      this.lightPool.update(this.camRig.look, this.time, dt, { range: (this.viewHalfW || 12) + 6 });
       this.dust?.update(dt);
       this.flock?.update(dt, x, this._vy, Math.abs(pl.body.vx) + (pl.state === 'air' ? 2 : 0), (bx) => this.sfx('wings', bx));
-      // camera
+      // camera (a snap is a cut: respawn, checkpoint start, teleport)
       const ppos = this._v.set(x, this._vy, z);
+      const cut = this.camRig.snapNext;
       const cp = this.camRig.update(dt, pl, ppos, pl.facing, pl.state === 'ground');
       // depth of field follows the boy
       const fd = this.camera.position.distanceTo(this._focus.set(x, this._vy + 0.7, z));
@@ -646,8 +654,11 @@ export class Game {
       if (this.titleFade !== undefined) { this.titleFade = Math.max(0, this.titleFade - dt * 0.35); this.ui.titleOpacity(this.titleFade); if (this.titleFade <= 0) { this.ui.showTitle(false); this.titleFade = undefined; } }
       // view half-width at the play plane (lamps acquire rig spots near the view)
       this.viewHalfW = Math.abs(this.camera.position.z) * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) * this.camera.aspect;
-      // time of day (writes sun, sky, fog, post and the lantern pool)
-      this.director.update(x, dt);
+      // pool lights follow the new view: priority sources (a guard's lantern, a beam's hit spot) win a light only
+      // near it; on a cut every source takes its light at once (no fade across a cut)
+      this.lightPool.update(this.camRig.look, this.time, dt, { range: this.viewHalfW + 6, snap: cut });
+      // time of day (writes sun, sky, fog, post and the lantern pool; timed blends advance in fixed())
+      this.director.update(x);
       // shadow frustum follows the view: the override's shadowFocus, else the camera's look
       const sf = this.camRig.shadowFocus;
       if (sf) this._focus.copy(sf);
