@@ -155,10 +155,17 @@ void main(){
     vec2 off = cc * dot(cc, cc) * uCA;
     col = vec3(S(uv - off).r, S(uv).g, S(uv + off).b);
   } else col = S(uv);
-  if (uDofOn > .5) { vec4 d = texture2D(tDof, uv * uDofMax); col = mix(col, dec(d.rgb), d.a); }
-  if (uAOOn > .5) col *= mix(1., texture2D(tAO, uv * uAOMax).r, uAO);
-  float dirt = uDirt > 0. ? dot(texture2D(tDirt, uv).rgb, vec3(.333)) : 0.;
   vec3 bloom = texture2D(tBloom, uv * uBloomMax).rgb / BLOOM_STORE;
+  if (uAOOn > .5) {
+    // occlusion only darkens ambient light: it fades out in direct light and inside the glow of
+    // lamps and emissives (where bloom says local light dominates); applied before depth of field
+    // so defocused silhouettes never carry sharp occlusion
+    float lum = dot(col, vec3(.2126, .7152, .0722)), gl = dot(bloom, vec3(.2126, .7152, .0722));
+    float k = uAO * (1. - smoothstep(.01, .12, gl)) * (1. - .6 * smoothstep(.3, 1.2, lum));
+    col *= mix(1., texture2D(tAO, uv * uAOMax).r, k);
+  }
+  if (uDofOn > .5) { vec4 d = texture2D(tDof, uv * uDofMax); col = mix(col, dec(d.rgb), d.a); }
+  float dirt = uDirt > 0. ? dot(texture2D(tDirt, uv).rgb, vec3(.333)) : 0.;
   col += bloom * uBloom * (1. + dirt * uDirt * 5.);
   if (uFlareOn > .5) col += texture2D(tFlare, uv * uFlareMax).rgb / BLOOM_STORE * uFlare * (1. + dirt * uDirt * 6.);
   if (uRaysOn > .5) col += texture2D(tRays, uv * uRaysMax).r * uRayColor * uRays;
@@ -204,7 +211,7 @@ export class PostFX {
       focus: 13, nearRange: 3.5, farStart: 14, farRamp: 60, nearBlur: 10, farBlur: 5,
       sunScreen: new THREE.Vector2(0.5, 1.2), sunVisible: 0,
       // new: lens flare and dirt, ambient occlusion, user brightness / grain
-      flare: 0.3, flareThreshold: 3.5, dirt: 0, ao: 0.55, aoRadius: 0.55,
+      flare: 0.3, flareThreshold: 1.2, flareStreak: 1, dirt: 0, ao: 0.55, aoRadius: 0.55,
       userExposure: 1, userGamma: 1, grainScale: 1,
     };
     this.limits = { bloom: Infinity, flare: Infinity, rays: Infinity, dirt: Infinity };
@@ -257,7 +264,11 @@ export class PostFX {
     }, { NTAPS: q.dofTaps || 36, ...D });
     this.mRayMask = sm(RAYMASK, { tColor: { value: null }, tDepth: { value: null }, uSun: { value: new THREE.Vector2() }, uMax: { value: new THREE.Vector2(1, 1) }, uAspect: { value: 1 } }, D);
     this.mRayBlur = sm(RAYBLUR, { tMask: { value: null }, uSun: { value: new THREE.Vector2() }, uMax: { value: new THREE.Vector2(1, 1) }, uTexel: { value: new THREE.Vector2() }, uDensity: { value: .9 }, uDecay: { value: .96 } }, { RSAMPLES: 48 });
-    this.mFlare = q.flare ? sm(FLARE_FS, { tBloom: { value: null }, uMax: { value: new THREE.Vector2(1, 1) }, uTexel: { value: new THREE.Vector2() }, uThreshold: { value: .9 }, uAspect: { value: 1 } }) : null;
+    this.mFlare = q.flare ? sm(FLARE_FS, {
+      tGhost: { value: null }, tStreak: { value: null }, uGhostMax: { value: new THREE.Vector2(1, 1) }, uGhostTexel: { value: new THREE.Vector2() },
+      uStreakMax: { value: new THREE.Vector2(1, 1) }, uStreakTexel: { value: new THREE.Vector2() }, uThreshold: { value: 1 }, uAspect: { value: 1 },
+      uGhost: { value: 1 }, uHalo: { value: 0 }, uStreak: { value: 0 },
+    }) : null;
     this.mAO = q.ssao ? sm(SSAO_FS, { tDepth: { value: null }, uMax: { value: new THREE.Vector2(1, 1) }, uTexel: { value: new THREE.Vector2() }, uProjInv: { value: new THREE.Matrix4() }, uRadius: { value: .5 }, uProjY: { value: 1 }, uTime: { value: 0 } }) : null;
     this.mAOBlur = q.ssao ? sm(SSAO_BLUR_FS, { tAO: { value: null }, tDepth: { value: null }, uMax: { value: new THREE.Vector2(1, 1) }, uTexel: { value: new THREE.Vector2() }, uDepthMax: { value: new THREE.Vector2(1, 1) }, uNearFar: { value: new THREE.Vector2() } }) : null;
     this.dirtTex = q.flare ? dirtTexture() : null;
@@ -376,15 +387,16 @@ export class PostFX {
       low = this.up[i]; lowMax = ext[i];
     }
 
-    // --- lens flare from the quarter-res bloom level
-    // flares belong to the sun: lamps only ghost faintly while the sun is off screen
-    const flareAmt = Math.min(P.flare * (0.35 + 0.65 * P.sunVisible), L.flare);
+    // --- lens flare: ghosts and halo belong to the sun; lamps only ghost faintly and streak
+    const flareAmt = Math.min(P.flare, L.flare);
     const flareOn = !!this.mFlare && flareAmt > 0.01;
     let flareMax = null;
     if (flareOn) {
-      const f = this.mFlare.uniforms;
-      f.tBloom.value = this.down[1].texture; f.uMax.value.copy(ext[1]); f.uTexel.value.set(1 / this.down[1].width, 1 / this.down[1].height);
-      f.uThreshold.value = P.flareThreshold * (q.ldr ? 0.25 : 1); f.uAspect.value = iw / ih;
+      const f = this.mFlare.uniforms, g = this.down[2], s1 = this.down[1];
+      f.tGhost.value = g.texture; f.uGhostMax.value.copy(ext[2]); f.uGhostTexel.value.set(1 / g.width, 1 / g.height);
+      f.tStreak.value = s1.texture; f.uStreakMax.value.copy(ext[1]); f.uStreakTexel.value.set(1 / s1.width, 1 / s1.height);
+      f.uThreshold.value = P.flareThreshold * (1 - 0.6 * P.sunVisible) * (q.ldr ? 0.25 : 1); f.uAspect.value = iw / ih;
+      f.uGhost.value = 0.3 + 0.7 * P.sunVisible; f.uHalo.value = P.sunVisible; f.uStreak.value = P.flareStreak;
       flareMax = this._vp(this.rtFlare, sub(iw, 4), sub(ih, 4));
       this._pass(this.mFlare, this.rtFlare);
     }

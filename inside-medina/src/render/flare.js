@@ -1,33 +1,53 @@
 import * as THREE from 'three';
 
-// Screen-space lens flare built from the bloom chain (so the sun, lanterns and beam glints all
-// flare without any per-light work): mirrored ghosts with a chromatic shift and a soft halo.
+// Screen-space lens flare built from the bloom chain, so the sun, lanterns and beam glints flare
+// without any per-light work:
+//  - ghosts: soft discs mirrored through the centre, read from a blurred (1/8) bloom level so a
+//    small lamp never turns into a hard coloured dot; radial dispersion tints only their rims;
+//  - halo: a thin ring around the centre, from the sun only (uHalo follows its visibility);
+//  - streak: a short horizontal smear of the brightest small sources (lamps, glints) from the
+//    sharper 1/4 level.
 // Lens dirt is a procedural smudge texture lit by bloom and flare, raised for the finale.
 export const FLARE_FS = /* glsl */ `
-uniform sampler2D tBloom; uniform vec2 uMax, uTexel; uniform float uThreshold, uAspect;
+uniform sampler2D tGhost, tStreak; uniform vec2 uGhostMax, uGhostTexel, uStreakMax, uStreakTexel;
+uniform float uThreshold, uAspect, uGhost, uHalo, uStreak;
 varying vec2 vUv;
-vec3 B(vec2 uv){
-  uv = clamp(uv, uTexel, uMax - uTexel);
-  vec3 c = texture2D(tBloom, uv).rgb;
-  return max(c - uThreshold, 0.);
+vec3 G(vec2 uv){
+  float inside = step(0., uv.x) * step(uv.x, 1.) * step(0., uv.y) * step(uv.y, 1.);
+  vec3 c = texture2D(tGhost, clamp(uv * uGhostMax, uGhostTexel * .5, uGhostMax - uGhostTexel * .5)).rgb;
+  return max(c - uThreshold, 0.) * inside;
 }
-vec3 chroma(vec2 uv, vec2 dir, float k){
-  return vec3(B((uv + dir * k) * uMax).r, B(uv * uMax).g, B((uv - dir * k) * uMax).b);
-}
+vec3 disperse(vec2 uv, float k){ vec2 d = (uv - .5) * k; return vec3(G(uv + d).r, G(uv).g, G(uv - d).b); }
+vec3 Sk(vec2 uv){ return max(texture2D(tStreak, clamp(uv * uStreakMax, uStreakTexel * .5, uStreakMax - uStreakTexel * .5)).rgb - uThreshold * 2., 0.); }
 void main(){
-  vec2 uv = 1. - vUv;                // mirrored through the centre
-  vec2 gv = (vec2(.5) - uv) * .42;   // ghost spacing
   vec3 acc = vec3(0.);
-  for (int i = 0; i < 4; i++){
-    vec2 o = fract(uv + gv * float(i));
-    float w = pow(1. - length(vec2(.5) - o) / .7071, 6.);
-    vec3 tint = i == 1 ? vec3(.85, .92, 1.) : i == 2 ? vec3(1., .88, .74) : vec3(.95, .95, 1.);
-    acc += chroma(o, normalize(gv + 1e-5) * .0025, float(i + 1)) * w * tint;
+  if (uGhost > 0.) {
+    vec2 uv = 1. - vUv;                // mirrored through the centre
+    vec2 gv = (vec2(.5) - uv) * .44;   // ghost spacing
+    for (int i = 0; i < 4; i++){
+      vec2 o = uv + gv * float(i);
+      float w = pow(clamp(1. - length(vec2(.5) - o) / .7071, 0., 1.), 5.);
+      vec3 tint = i == 0 ? vec3(1., .86, .7) : i == 1 ? vec3(.8, .9, 1.) : i == 2 ? vec3(1., .8, .62) : vec3(.86, .94, 1.);
+      acc += disperse(o, .012 + .006 * float(i)) * w * tint * (i == 0 ? .6 : 1.);
+    }
+    acc *= uGhost;
   }
-  vec2 hv = normalize((vec2(.5) - uv) * vec2(uAspect, 1.) + 1e-5) / vec2(uAspect, 1.) * .38;
-  vec2 ho = fract(uv + hv);
-  float hw = pow(1. - length(vec2(.5) - ho) / .7071, 5.) * smoothstep(.05, .35, length((vUv - .5) * vec2(uAspect, 1.)));
-  acc += chroma(ho, hv * .02, 1.) * hw * vec3(1., .82, .6) * .7;
+  if (uHalo > 0.) {
+    vec2 uv = 1. - vUv;
+    vec2 hv = normalize((vec2(.5) - uv) * vec2(uAspect, 1.) + 1e-5) / vec2(uAspect, 1.) * .36;
+    vec2 ho = uv + hv;
+    float hw = pow(clamp(1. - length(vec2(.5) - ho) / .7071, 0., 1.), 4.) * smoothstep(.1, .4, length((vUv - .5) * vec2(uAspect, 1.)));
+    acc += disperse(ho, .03) * hw * vec3(1., .84, .66) * .35 * uHalo;
+  }
+  if (uStreak > 0.) {
+    vec3 s = vec3(0.);
+    for (int i = 1; i <= 8; i++){
+      float fi = float(i), w = exp(-fi * .32);
+      vec2 o = vec2(fi * uStreakTexel.x * 2.5 / uStreakMax.x, 0.);
+      s += (Sk(vUv + o) + Sk(vUv - o)) * w;
+    }
+    acc += s * vec3(1., .78, .55) * .14 * uStreak;
+  }
   gl_FragColor = vec4(acc, 1.);
 }`;
 
