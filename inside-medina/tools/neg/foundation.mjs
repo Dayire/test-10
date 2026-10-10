@@ -3,6 +3,8 @@
 // The chain into the next chapter and Continue, a throwing localStorage, the
 // title shot's shadow focus, the LookDirector round trip and the boot budget.
 import fs from 'fs';
+import http from 'http';
+import { execSync } from 'child_process';
 import { gameUrl, waitReady, ROOT } from '../lib/harness.mjs';
 
 const baseline = JSON.parse(fs.readFileSync(new URL('docs/baselines/souk.json', ROOT), 'utf8'));
@@ -132,5 +134,30 @@ export const scenarios = [
       return { readyMs: ms, median: ms[1], budget: Math.round(baseline.boot.readyMs.warm * 1.1), baselineWarm: baseline.boot.readyMs.warm, painted: runs[1].painted.length, values: runs[1].painted.join(' ') };
     },
     check: (r) => (r.median <= r.budget && r.painted >= 10 ? true : `boot ${r.median} ms (budget ${r.budget}), ${r.painted} painted values`),
+  },
+  {
+    // §11.2 acceptance 11 (only with --artifact: it rebuilds dist-artifact): the single-file build boots in its test page
+    name: 'artifact build reaches __ready', url: false, optIn: 'artifact', w: 640, h: 360,
+    run: async ({ page }) => {
+      execSync('npm run build:artifact', { cwd: new URL('.', ROOT), stdio: 'pipe' });
+      const dir = new URL('dist-artifact/', ROOT);
+      const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
+      const server = http.createServer((req, res) => {
+        const f = new URL('.' + decodeURIComponent(req.url.split('?')[0]), dir);
+        if (!f.href.startsWith(dir.href) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); res.end(); return; }
+        res.writeHead(200, { 'content-type': types[f.pathname.slice(f.pathname.lastIndexOf('.'))] || 'application/octet-stream' });
+        fs.createReadStream(f).pipe(res);
+      });
+      await new Promise((r) => server.listen(0, '127.0.0.1', r));
+      try {
+        const t0 = Date.now();
+        await page.goto(`http://127.0.0.1:${server.address().port}/test.html`);
+        await waitReady(page);
+        const st = await page.evaluate(() => ({ chapter: __medina.chapter(), mode: __medina.game.mode, lights: __medina.lights() }));
+        const kb = Math.round((fs.statSync(new URL('game.js', dir)).size + fs.statSync(new URL('medina.html', dir)).size) / 1024);
+        return { ...st, readySec: +((Date.now() - t0) / 1000).toFixed(1), kb };
+      } finally { server.close(); }
+    },
+    check: (r) => (r.chapter === 'souk' && r.mode === 'intro' ? true : `artifact ${JSON.stringify(r)}`),
   },
 ];
