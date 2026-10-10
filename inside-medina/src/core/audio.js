@@ -2,16 +2,24 @@
 // The engine lives in src/audio/: Mixer (buses, reverb zones, pause, mute, limiter), Voices
 // (≤ 32 pooled voices), Synth (instruments), Music (look-ahead scheduler, maqam themes),
 // Ambience (beds and gameplay loops) and the sfx / stinger / ui name tables.
-import { Mixer } from '../audio/mixer.js';
+import { Mixer, VERBS } from '../audio/mixer.js';
 import { Voices } from '../audio/voices.js';
 import { Synth } from '../audio/instruments.js';
 import { Music } from '../audio/music.js';
 import { Ambience } from '../audio/ambience.js';
 import { playSfx, playStinger, playUi, SFX_NAMES, STINGERS, UI_SOUNDS } from '../audio/sfx.js';
-import { degreeHz, D3 } from '../audio/maqam.js';
+import { degreeHz, D3, MAQAM, THEME_MAQAM } from '../audio/maqam.js';
 
 export { SFX_NAMES, STINGERS, UI_SOUNDS };
 const THEME_VERB = { menu: 'menu', souk: 'courtyard', sundown: 'souk', night: 'alley', dawn: 'open', credits: 'minaret', lab: 'courtyard' };
+// themes are chapter ids (and menu / credits); a maqam name alone names its chapter
+export const THEME_IDS = new Set(Object.keys(THEME_MAQAM));
+const MAQAM_THEME = { hijaz: 'souk', bayati: 'sundown', saba: 'night', rast: 'dawn', ajam: 'dawn' };
+// music states, and the names chapter zones may use for them
+export const MUSIC_STATES = new Set(['silent', 'explore', 'tension', 'chase', 'clock', 'credits', 'finale', 'test']);
+const MUSIC_ALIAS = { none: 'silent', quiet: 'silent', stealth: 'tension', souk: 'explore', calm: 'explore' };
+const musicState = (v) => (typeof v !== 'string' ? null : MUSIC_STATES.has(v) ? v : MUSIC_ALIAS[v] ?? null);
+const fin = (v, d) => (Number.isFinite(v) ? v : d);
 // Chapter I places, used when the chapter definition brings no zones of its own: the souk alleys
 // ring short, the walled courtyard and the finale square long (x in metres)
 export const THEME_ZONES = {
@@ -22,7 +30,8 @@ export class Audio {
   constructor() {
     this.ctx = null; this.started = false; this._muted = false;
     this.listenerX = 0;
-    this.theme = 'souk'; this.zones = null; this.zone = null; this.paused = false;
+    this.theme = 'souk'; this.zones = null; this.zone = null; this.zoneOverride = null; this.paused = false;
+    this._zk = this._zo = undefined; this._zm = {};
     this.pendingVolumes = null; this.pendingChapter = null;
     this.muteInBackground = true;
     this.duckUntil = 0; this.duckAmt = 0; this.duckRelease = 1.5; this.boostUntil = 0;
@@ -51,29 +60,36 @@ export class Audio {
     this.master.gain.setValueAtTime(0, ctx.currentTime);
     this.master.gain.linearRampToValueAtTime(0.9, ctx.currentTime + 2.5);
     this.started = true;
-    this.setChapter(this.pendingChapter || { theme: this.theme });
+    const pc = this.pendingChapter;
+    this.setChapter(...(pc || [{ theme: this.theme }]));
     this.music.start(!this.offline);
     if (!this.offline && typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => { this.mix.background = document.hidden && this.muteInBackground; this.mix.applyMaster(0.08); });
-      // iOS "interrupted" (calls, Siri) and suspended contexts resume on the next gesture
-      const resume = () => { if (this.ctx.state !== 'running' && this.ctx.state !== 'closed') this.ctx.resume().catch(() => {}); };
+      // iOS "interrupted" (calls, Siri) and contexts the platform suspended resume on the next gesture; a
+      // context the game itself suspended (an older pause path) and the paused game stay as they are
+      const suspend = ctx.suspend.bind(ctx), resume0 = ctx.resume.bind(ctx);
+      ctx.suspend = (...a) => { this.appSuspended = true; return suspend(...a); };
+      ctx.resume = (...a) => { this.appSuspended = false; return resume0(...a); };
+      const resume = () => { if (!this.paused && !this.appSuspended && this.ctx.state !== 'running' && this.ctx.state !== 'closed') resume0().catch(() => {}); };
       for (const ev of ['pointerdown', 'touchend', 'keydown']) window.addEventListener(ev, resume, { passive: true });
     }
   }
 
   get muted() { return this._muted; }
   set muted(m) { this._muted = !!m; if (this.mix) this.mix.muted = this._muted; }
+  // the mute that survives fadeIn (it acts on the user master, fades act on master)
+  setMuted(on) { this.muted = on; }
 
-  setListener(x) { this.listenerX = x; }
-  pan(x) { return Math.max(-1, Math.min(1, ((x ?? this.listenerX) - this.listenerX) / 9)); }
-  dist(x) { return Math.max(0.15, 1 - Math.abs((x ?? this.listenerX) - this.listenerX) / 30); }
+  setListener(x) { if (Number.isFinite(x)) this.listenerX = x; }
+  pan(x) { return Math.max(-1, Math.min(1, (fin(x, this.listenerX) - this.listenerX) / 9)); }
+  dist(x) { return Math.max(0.15, 1 - Math.abs(fin(x, this.listenerX) - this.listenerX) / 30); }
   hit(x, o) { return this.synth.noiseHit(this.mix.sfx, { ...o, gain: (o.gain ?? 0.3) * this.dist(x), pan: this.pan(x) }); }
   tone(x, o) { return this.synth.tone(this.mix.sfx, { ...o, gain: (o.gain ?? 0.3) * this.dist(x), pan: this.pan(x) }); }
 
   // ------------------------------------------------------------------ events
   play(name, x, data) {
     if (!this.started || this._muted) return;
-    playSfx(this, name, x ?? this.listenerX, data || {});
+    playSfx(this, name, fin(x, this.listenerX), data || {});
   }
   // menu sounds: on the ui bus, never ducked by pause
   ui(name, data) { if (this.started && !this._muted) playUi(this, name, data || {}); }
@@ -146,20 +162,36 @@ export class Audio {
   }
 
   // ------------------------------------------------------------------ chapter, zones, settings
-  // def: { theme | id, verb?, zones: [{ x0, x1, verb, amb, music, tension, hum, drips }] }
-  setChapter(def = {}) {
-    if (!this.started) { this.pendingChapter = def; this.theme = def.theme || def.id || this.theme; return; }
-    const theme = def.theme || def.id || 'souk';
-    this.theme = theme; this.zones = def.zones || THEME_ZONES[theme] || null; this.zone = null;
-    this.music.setTheme(theme); this.amb.setTheme(theme);
-    this.mix.setVerb(def.verb || THEME_VERB[theme] || 'courtyard', 2);
+  // audio: the chapter's audio block { theme, verb?, zones: [{ x0, x1, verb, amb, music, tension, hum, drips }] };
+  // chapter: the chapter definition (its id names the theme when audio.theme is a maqam name).
+  // theme: a chapter id (souk, sundown, night, dawn, lab), menu or credits; a maqam name instead
+  // (hijaz, bayati, saba, rast) keeps the chapter's theme and sets the maqam.
+  setChapter(audio = {}, chapter = null) {
+    const a = audio || {}, raw = a.theme;
+    const theme = THEME_IDS.has(raw) ? raw : THEME_IDS.has(chapter?.id) ? chapter.id : THEME_IDS.has(a.id) ? a.id : MAQAM_THEME[raw] || 'souk';
+    const maqam = MAQAM[raw] ? raw : null;
+    if (!this.started) { this.pendingChapter = [a, chapter]; this.theme = theme; return; }
+    this.theme = theme;
+    this.zones = Array.isArray(a.zones) && a.zones.length ? a.zones : THEME_ZONES[theme] || null;
+    this.zone = null; this._zk = this._zo = undefined;
+    this.music.setTheme(theme, maqam); this.amb.setTheme(theme);
+    this.mix.setVerb(VERBS[a.verb] ? a.verb : THEME_VERB[theme] || 'courtyard', 2);
   }
-  // zone: { verb, amb, music, tension, hum } or a reverb name
-  setZone(zone) {
-    if (!this.started) return;
-    const z = typeof zone === 'string' ? { verb: zone } : zone || {};
-    this.zone = zone; this.amb.zone = z;
-    this.mix.setVerb(z.verb || THEME_VERB[this.theme] || 'courtyard', 1.5);
+  // force a place: a reverb name or { verb, amb, music, tension, hum, drips } over the chapter zone under the
+  // listener (null clears it); mix.zone does the same per frame
+  setZone(zone) { this.zoneOverride = zone ?? null; if (this.started) this.applyZone(this.listenerX); }
+  // the zone in effect: the chapter zone under the listener, its fields overridden by the forced zone
+  applyZone(x, over = this.zoneOverride) {
+    const xz = this.zones ? this.zones.find((q) => x >= q.x0 && x < q.x1) || null : null;
+    if (xz === this._zk && over === this._zo) return this._zm;
+    this._zk = xz; this._zo = over;
+    const z = this._zm = { ...(xz || {}) };
+    if (typeof over === 'string') z.verb = over;
+    else if (over && typeof over === 'object') Object.assign(z, over);
+    this.zone = xz || over ? z : null;
+    this.amb.zone = z;
+    this.mix.setVerb(VERBS[z.verb] ? z.verb : THEME_VERB[this.theme] || 'courtyard', 1.5);
+    return z;
   }
   // volumes 0–10: master, music, sfx (effects), amb (ambience), ui; flags: mono, reducedRange, muteInBackground
   setVolumes(v = {}) {
@@ -168,23 +200,28 @@ export class Audio {
     this.mix.setVolumes(v);
   }
   // pause: duck and filter the game buses over 0.3 s; the ui bus keeps playing
-  setPaused(p) { this.paused = !!p; if (this.started) this.mix.setPaused(this.paused); }
+  setPaused(p) {
+    this.paused = !!p;
+    if (!this.started) return;
+    this.mix.setPaused(this.paused);
+    // unpausing is a gesture: a context the platform interrupted meanwhile resumes with it
+    if (!p && !this.offline && !this.appSuspended && this.ctx.state !== 'running' && this.ctx.state !== 'closed') this.ctx.resume().catch(() => {});
+  }
 
   // ------------------------------------------------------------------ per-frame
   // mix: { crateSpeed, hum, tension, height, birds, chase, finale, zone, music: { state, intensity }, loops: {}, drummer, drummerX }
   update(dt, mix = {}) {
     if (!this.started) return;
+    mix = mix || {};
     const t = this.ctx.currentTime;
-    // the game's mix.zone wins; otherwise the chapter zone under the listener
-    const x = this.listenerX, xz = this.zones ? this.zones.find((q) => x >= q.x0 && x < q.x1) || null : null;
-    const want = mix.zone !== undefined && mix.zone !== null ? mix.zone : xz;
-    if (want !== this.zone) this.setZone(want);
-    const zm = this.zone && typeof this.zone === 'object' ? this.zone : {};
+    // the chapter zone under the listener, overridden by mix.zone (or setZone when mix names none)
+    const zm = this.applyZone(fin(this.listenerX, 0), mix.zone ?? this.zoneOverride);
     const m = mix.music || {};
-    const tension = mix.tension ?? zm.tension ?? 0.1;
-    const state = m.state ?? zm.music ?? (mix.finale ? 'finale' : mix.chase ? 'chase' : 'explore');
+    const tension = fin(mix.tension, fin(zm.tension, 0.1));
+    // an explicit state, then the game's flags (finale, chase), then the zone's music, then explore
+    const state = musicState(m.state) ?? (mix.finale ? 'finale' : mix.chase ? 'chase' : null) ?? musicState(zm.music) ?? 'explore';
     this.musicState = state;
-    this.music.setState(state === 'finale' ? 'silent' : state, m.intensity ?? tension);
+    this.music.setState(state === 'finale' ? 'silent' : state, fin(m.intensity, tension));
     // music bus: Chapter I explores over the drone alone, as it always has
     if (state !== 'finale') {
       let level = { silent: 0, explore: this.theme === 'souk' || this.theme === 'lab' ? 0 : 0.85, tension: 0.85, chase: 0.9, clock: 1, credits: 1, test: 1 }[state] ?? 0.85;
@@ -194,7 +231,7 @@ export class Audio {
     // ducking under death and alarms
     const duck = t < this.duckUntil ? 1 - this.duckAmt : 1;
     this.mix.musicUser.gain.setTargetAtTime(Math.pow(this.mix.volumes.music / 10, 2) * duck, t, t < this.duckUntil ? 0.08 : this.duckRelease / 3);
-    this.amb.update(dt, { ...mix, tension, hum: mix.hum ?? zm.hum });
+    this.amb.update(fin(dt, 0), { ...mix, tension, hum: mix.hum ?? zm.hum });
     if (!this.music.timer) this.music.tick();
   }
   drum(g, f = 90) { this.synth.drum(this.mix.music, f > 100 ? 'tek' : 'doum', { gain: g }); }

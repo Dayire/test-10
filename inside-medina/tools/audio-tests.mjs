@@ -18,6 +18,7 @@ await page.goto(BASE + 'package.json');
 await page.evaluate(async (base) => {
   const mod = await import(base + 'src/core/audio.js');
   window.AudioMod = mod;
+  window.VoicesMod = await import(base + 'src/audio/voices.js');
   // deterministic randomness for comparable renders
   let seed = 99;
   window.seedRandom = (s) => { seed = s; Math.random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }; };
@@ -207,13 +208,117 @@ await run('allNames', async () => page.evaluate(async () => {
   return { names: list.length + loops.length + 1, failed, err, ...m, ok: !failed.length && !err && m.nan === 0 && m.peakDb <= -1 };
 }));
 
+// 8. the densest cues fit the pool: no steal or drop, and the same peak as with an unlimited pool; footsteps
+// during the dawn finale are never dropped
+await run('voiceBudget', async () => page.evaluate(async () => {
+  // each cue over the music that plays under it in the game
+  const cues = {
+    catch: { theme: 'sundown', sec: 5, mix: { music: { state: 'clock', intensity: 1 } }, at: (A) => A.stinger('catch') },
+    lockOpen: { theme: 'sundown', sec: 6, mix: { music: { state: 'explore' } }, at: (A) => A.play('lockOpen', A.listenerX, { degree: 2 }) },
+    answeredLight: { theme: 'dawn', sec: 9, mix: { finale: true }, at: (A) => A.stinger('answeredLight') },
+    dawnFinale: { theme: 'dawn', sec: 16, mix: { finale: true }, at: (A) => A.finale() },
+    dawnFinaleSteps: { theme: 'dawn', sec: 16, mix: { finale: true }, at: (A) => A.finale(), steps: 0.3 },
+  };
+  const render = (c, pool) => window.renderOffline({
+    sec: c.sec, seed: 3,
+    setup: (A, ctx) => {
+      if (pool) A.synth.voices = A.voices = new window.VoicesMod.Voices(ctx, pool);
+      A.setChapter({ theme: c.theme }); A.master.gain.cancelScheduledValues(0); A.master.gain.value = 0.9;
+      if (c.mix.finale) A.mix.music.gain.value = 1;
+    },
+    onTick: (A, t) => {
+      A._mix = { ...c.mix, birds: 0 };
+      if (Math.abs(t - 0.5) < 0.026) c.at(A);
+      if (c.steps && t > 0.5 && Math.round(t * 20) % Math.round(c.steps * 20) === 0) { A.play('step', A.listenerX + 1, { speed: 4 }); A._steps = (A._steps || 0) + 2; }
+    },
+  });
+  const out = {};
+  let ok = true;
+  for (const [name, c] of Object.entries(cues)) {
+    const small = await render(c), big = await render(c, 512);
+    const a = window.measure(small.buf), b = window.measure(big.buf), s = small.A.stats;
+    const pass = !small.err && s.stolen === 0 && s.dropped === 0 && a.nan === 0 && Math.abs(a.peakDb - b.peakDb) <= 0.5;
+    ok = ok && pass;
+    out[name] = { stolen: s.stolen, dropped: s.dropped, started: s.started, steps: small.A._steps, peakDb: a.peakDb, peakDbUnlimited: b.peakDb, err: small.err, pass };
+  }
+  return { ok, ...out };
+}));
+
+// 9. a stolen voice fades out over ~10 ms (no step in the waveform) and the new note starts on time
+await run('stealFade', async () => page.evaluate(async () => {
+  const { buf, A } = await window.renderOffline({
+    sec: 1.5, seed: 4,
+    setup: (A) => {
+      A.setVolumes({ amb: 0, music: 0 }); A.mix.sends.sfx.gain.value = 0;
+      A.master.gain.cancelScheduledValues(0); A.master.gain.value = 0.9;
+      const B = A.mix.sfx, V = A.voices, ctx = A.ctx;
+      // the victim: a sustained sine (at a crest when the steal comes), lowest priority, nearest its end;
+      // 31 silent reserved voices fill the rest of the pool
+      const v = V.acquire(B, 0, 1.45, 0), o = ctx.createOscillator(); o.frequency.value = 220.25;
+      v.env.gain.setValueAtTime(0.25, 0); V.feed(v, o, false); o.start(0); o.stop(1.45);
+      for (let i = 0; i < 31; i++) V.acquire(B, 0, 1.47 + 0.002 * i, 0); // reserved, silent
+    },
+    onTick: (A, t) => {
+      A._mix = { birds: 0 };
+      if (Math.abs(t - 1.0) < 0.026) A._v = A.synth.tone(A.mix.sfx, { f: 3000, dur: 0.2, gain: 1e-6, prio: 1 });
+    },
+  });
+  const d = buf.getChannelData(0), sr = buf.sampleRate;
+  const maxStep = (t0, t1) => { let m = 0; for (let i = Math.floor(t0 * sr) + 1; i < Math.floor(t1 * sr); i++) m = Math.max(m, Math.abs(d[i] - d[i - 1])); return m; };
+  const before = maxStep(0.9, 0.99), steal = maxStep(0.99, 1.04);
+  const after = window.measure(buf, 1.06, 1.3), during = window.measure(buf, 0.9, 0.99);
+  const s = A.stats;
+  return { stolen: s.stolen, dropped: s.dropped, newVoice: !!A._v, maxStepBefore: +before.toFixed(5), maxStepAtSteal: +steal.toFixed(5), rmsBeforeDb: during.rmsDb, rmsAfterDb: after.rmsDb,
+    ok: s.stolen === 1 && !!A._v && steal <= before * 1.5 && after.rmsDb < during.rmsDb - 40 };
+}));
+
+// 10. the chapter audio schema the foundation passes (FULL_GAME §11.2): maqam-named themes resolve to the
+// chapter, zone amb names a bed or place, unknown music names fall back, null zones and frozen inputs are fine
+await run('schema', async () => page.evaluate(async () => {
+  const souk = { theme: 'hijaz', zones: [
+    { x0: -100, x1: 70, verb: 'alley', amb: 'souk', music: 'souk', tension: 0.1 },
+    { x0: 70, x1: 118, verb: 'courtyard', amb: 'courtyard', music: 'stealth', tension: 0.35, hum: 1 },
+    { x0: 118, x1: 300, verb: 'alley', amb: 'souk', music: 'souk', tension: 0.1 }] };
+  const stub = (theme) => ({ theme, zones: [{ x0: -100, x1: 100, verb: 'alley', amb: 'souk', music: 'none', tension: 0.1 }] });
+  const cases = [['souk', souk, 'hijaz'], ['sundown', stub('bayati'), 'bayati'], ['night', stub('saba'), 'saba'], ['dawn', stub('rast'), 'rast'], ['lab', stub('hijaz'), 'hijaz']];
+  const out = {};
+  let ok = true;
+  for (const [id, audio, maqam] of cases) {
+    const seen = { verbs: new Set(), states: new Set() };
+    const { buf, A, err } = await window.renderOffline({
+      sec: 8, seed: id.length,
+      setup: (A) => A.setChapter(audio, { id, audio }),
+      onTick: (A, t) => {
+        const x = t * 14; A.setListener(x);
+        // the foundation's mix: generic fields, then the chapter's; zone null for the first half
+        A._mix = Object.freeze({ crateSpeed: 0, hum: 0, tension: 0.1, height: 0, birds: true, chase: t > 5 && t < 7, finale: false,
+          zone: t < 4 ? null : x > 70 && x < 118 ? 'courtyard' : 'alley', music: null, loops: Object.freeze({}) });
+        if (Math.abs(t - 4) < 0.026) A.setZone('alley');
+        seen.verbs.add(A.mix.verbName); seen.states.add(A.musicState);
+      },
+    });
+    const m = window.measure(buf);
+    const pass = !err && m.nan === 0 && A.theme === id && A.music.maqam === maqam && seen.states.has('chase') && !seen.states.has('souk') && !seen.states.has('none') && (id !== 'souk' || seen.verbs.has('courtyard'));
+    ok = ok && pass;
+    out[id] = { theme: A.theme, maqam: A.music.maqam, verbs: [...seen.verbs], states: [...seen.states], err, nan: m.nan, pass };
+  }
+  // Chapter I's chase keeps its own pulse (0.21 s steps), not the maqsum, when the chapter names its maqam
+  const pulse = await window.renderOffline({ sec: 3, setup: (A) => { A.setChapter(souk, { id: 'souk' }); A.music.trace = []; }, onTick: (A) => { A._mix = { chase: true, zone: null }; } });
+  const tr = pulse.A.music.trace.map((e) => e[0]), gaps = tr.slice(1).map((v, i) => +(v - tr[i]).toFixed(3)).filter((g) => g > 0.01);
+  out.soukChase = { gaps: [...new Set(gaps)].slice(0, 6), pulse: gaps.length > 4 && gaps.every((g) => Math.abs(g - 0.21) < 0.002 || Math.abs(g - 0.42) < 0.002) };
+  ok = ok && out.soukChase.pulse;
+  return { ok, ...out };
+}));
+
 // 7. Karplus–Strong buffers are cached per pitch
 await run('ksCache', async () => page.evaluate(async () => {
   const ctx = new OfflineAudioContext(2, 4800, 48000);
   const A = new window.AudioMod.Audio(); A.start(ctx);
-  const t0 = performance.now(); for (let i = 0; i < 40; i++) A.synth.oud(A.mix.music, 146.83); const first = A.synth.ks.size;
-  for (let i = 0; i < 40; i++) A.synth.oud(A.mix.music, 220); const ms = performance.now() - t0;
-  return { buffers: A.synth.ks.size, firstPitchBuffers: first, ms: +ms.toFixed(1), ok: first === 1 && A.synth.ks.size === 2 };
+  // 40 notes of a pitch (an oud's brightness) read one buffer; the instrument itself reads the same entry
+  const S = A.synth, t0 = performance.now();
+  for (let i = 0; i < 40; i++) S.ksBuffer(146.83, 0.45); S.oud(A.mix.music, 146.83); const first = S.ks.size;
+  for (let i = 0; i < 40; i++) S.ksBuffer(220, 0.45); S.oud(A.mix.music, 220); const ms = performance.now() - t0;
+  return { buffers: S.ks.size, firstPitchBuffers: first, ms: +ms.toFixed(1), ok: first === 1 && S.ks.size === 2 };
 }));
 
 const ok = Object.values(results).every((r) => r.ok) && !errors.length;

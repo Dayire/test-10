@@ -89,13 +89,25 @@ export class Synth {
     return v;
   }
   oud(dest, f, o = {}) { return this.pluck(dest, f, { bright: 0.45, body: 900, ...o }); }
-  // qanun: bright plucks; long notes are played as a tremolo of re-plucks
-  qanun(dest, f, { when, dur = 0.3, gain = 0.2, pan = 0.2 } = {}) {
+  // qanun: bright plucks; a long note is a tremolo of re-plucks of one string, all on one voice
+  // (each re-pluck is a buffer source with its own accent and release)
+  qanun(dest, f, { when, dur = 0.3, gain = 0.2, pan = 0.2, prio = 2 } = {}) {
     const t = this.t(when);
-    if (dur < 0.5) return this.pluck(dest, f, { when: t, gain, bright: 0.85, body: 2400, dur: 1.6, pan });
-    const n = Math.min(12, Math.floor(dur * 13));
-    for (let i = 0; i < n; i++) this.pluck(dest, f, { when: t + i / 13, gain: gain * (i ? 0.55 + 0.1 * Math.sin(i) : 1), bright: 0.85, body: 2400, dur: 0.9, pan });
-    return null;
+    if (dur < 0.5) return this.pluck(dest, f, { when: t, gain, bright: 0.85, body: 2400, dur: 1.6, pan, prio });
+    const n = Math.min(12, Math.floor(dur * 13)), len = (n - 1) / 13 + 0.9;
+    const v = this.voices.acquire(dest, t, t + len, prio);
+    if (!v) return null;
+    const ctx = this.ctx, buf = this.ksBuffer(f, 0.85);
+    v.filter.type = 'peaking'; v.filter.frequency.setValueAtTime(2400, t); v.filter.gain.setValueAtTime(5, t); v.filter.Q.setValueAtTime(1.2, t);
+    v.env.gain.setValueAtTime(gain, t); v.env.gain.setValueAtTime(0, t + len);
+    for (let i = 0; i < n; i++) {
+      const ti = t + i / 13, s = this.src(buf), a = ctx.createGain();
+      a.gain.setValueAtTime(i ? 0.55 + 0.1 * Math.sin(i) : 1, ti); a.gain.setTargetAtTime(0, ti + 0.6, 0.08);
+      s.connect(a); this.voices.feed(v, a); v.srcs.push(s);
+      s.start(ti); s.stop(ti + 0.9);
+    }
+    this.voices.setPan(v, pan);
+    return v;
   }
   // ney: breathy band of noise plus a vibrato sine, soft attack
   ney(dest, f, { when, dur = 1.2, gain = 0.12, pan = -0.1, vib = 5.2 } = {}) {

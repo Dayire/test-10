@@ -16,9 +16,11 @@ export class Music {
   rnd() { this.rng = (this.rng * 16807) % 2147483647; return this.rng / 2147483647; }
   start(realtime = true) { this.genT = this.ctx.currentTime + 0.05; if (realtime && !this.timer) this.timer = setInterval(() => this.tick(), TIMER_MS); }
   stop() { if (this.timer) clearInterval(this.timer); this.timer = null; }
-  setTheme(theme) {
-    if (theme === this.theme) return;
-    this.theme = theme; this.maqam = THEME_MAQAM[theme] || 'hijaz';
+  // maqam: a chapter may name its own (a maqam name); otherwise the theme's
+  setTheme(theme, maqam = null) {
+    const mq = maqam || THEME_MAQAM[theme] || 'hijaz';
+    if (theme === this.theme && mq === this.maqam) return;
+    this.theme = theme; this.maqam = mq;
     this.queue.length = 0; this.genT = Math.max(this.genT, this.ctx.currentTime + 0.05); this.phraseT = this.ctx.currentTime + 1.5;
   }
   setState(state, intensity = this.intensity) {

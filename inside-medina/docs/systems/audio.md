@@ -22,10 +22,15 @@ Owner files: `src/core/audio.js` (the engine facade), `src/audio/{mixer,voices,i
   "Reduced dynamic range" lowers the glue threshold to −32 dB at 7:1 with make-up gain; "mono" folds
   the output to one channel.
 - Visibility: with "mute in background" the master goes silent while the page is hidden. iOS
-  "interrupted" or suspended contexts resume on the next pointer, touch or key event.
-- Voices: every transient sound plays through a pool of 32 pre-built strips (filter → envelope →
-  panner); only the sources are new. A full pool steals its oldest voice of equal or lower priority
-  with a 10 ms fade (ui 3 > music 2 > sfx 1 > ambience 0). Karplus–Strong strings are rendered once per
+  "interrupted" or platform-suspended contexts resume on the next pointer, touch or key event, and when the
+  game unpauses; never while the game is paused or after the game suspended the context itself.
+- Voices: at most 32 transient sounds at once, each on a pre-built strip (filter → envelope → panner);
+  only the sources are new. Priorities: ui 3 > music 2 > sfx 1 > ambience 0. A full pool steals a voice of
+  equal or lower priority, the lowest priority first and then the one nearest its end. A steal is a real
+  12 ms fade: the stolen strip keeps its filter, pan and bus and ramps out while the new note starts at once
+  on one of 8 spare strips (a burst that outruns the spares drops the new note instead of cutting).
+  Music may hold at most 24 voices and steals from itself beyond that, so effects and menu sounds always
+  find one. A qanun tremolo (up to 12 re-plucks) is one voice. Karplus–Strong strings are rendered once per
   (pitch, brightness) and cached (up to 96 buffers, oldest evicted first).
 
 ## API (`new Audio()`)
@@ -39,15 +44,29 @@ Owner files: `src/core/audio.js` (the engine facade), `src/audio/{mixer,voices,i
 | `fadeIn(sec)`, `fadeOut(sec)`, `muted` | Kept. |
 | `setPaused(p)` | Duck and filter the game buses (the ui bus keeps playing). |
 | `setVolumes({master, music, sfx \| effects, amb \| ambience, ui, mono, reducedRange, muteInBackground})` | 0–10, perceptual (gain = (v/10)²). Stored until `start`. |
-| `setChapter({theme \| id, verb?, zones?})` | Theme: `menu`, `souk`, `sundown`, `night`, `dawn`, `credits`, `lab`. Zones: `[{x0, x1, verb, amb, music, tension, hum, drips}]`; the souk has default zones (alleys 1.2 s, the courtyard and finale square 2.6 s). |
-| `setZone(zone \| verbName)` | Force a place; `mix.zone` does the same per frame and wins over the chapter zones. |
+| `setMuted(on)` | Same as `muted = on`: acts on the user master, so fades never undo it. |
+| `setChapter(audio, chapter?)` | `audio = {theme, verb?, zones?}`, `chapter` = the chapter definition. See the schema below. |
+| `setZone(zone \| verbName \| null)` | Force a place over the chapter zone under the listener (fields of an object override the zone's); `mix.zone` does the same per frame; `null` clears it. |
 | `ui(name)` | `hover, confirm, back, slider ({value}), toggle ({on}), card, open, close`. |
 | `stinger(name, data)` | `checkpoint, lockOpen ({degree}), ropeSnap, dazzle, chapterEnd, answeredLight, catch`. |
 | `setListener(x)`, `stats` | Listener x; voices, steals, music state, reverb, context state. |
 
 Music states (`mix.music.state`): `silent`, `explore`, `tension`, `chase`, `clock` (Chapter II's sunset
-clock; `intensity` 0–1 pushes the tempo 70 → 96 bpm), `credits`, `finale`. Without a state, `chase` and
-`finale` flags choose as in Chapter I.
+clock; `intensity` 0–1 pushes the tempo 70 → 96 bpm), `credits`, `finale`. Precedence: an explicit
+`mix.music.state`, then the game's `finale` and `chase` flags, then the zone's `music`, then `explore`.
+`update` never throws: non-finite numbers in the mix or the zones are ignored.
+
+### Chapter schema (`setChapter(def.audio, def)`)
+
+| Field | Values |
+|---|---|
+| `theme` | A chapter id (`souk, sundown, night, dawn, lab`), `menu` or `credits`; or a maqam name (`hijaz, bayati, saba, rast`), which keeps the theme of `def.id` and sets that maqam. |
+| `verb` | The chapter's default reverb place. |
+| `zones[]` | `{x0, x1, verb, amb, music, tension, hum, drips}`; without zones the souk has its defaults (alleys 1.2 s, the courtyard and the finale square 2.6 s). |
+| `zones[].verb` | `alley, souk, courtyard, madrasa, cistern, minaret, open` (`menu` for the title). |
+| `zones[].amb` | A number (bed level, 1 = as is); a place that colours the chapter's bed (`alley, souk, courtyard, madrasa, cistern, minaret, open, roof`: the cistern kills the wind and adds drips, the courtyard halves the murmur…); or another theme's bed (`night`, `dawn`…). |
+| `zones[].music` | A music state, or `none` (silent), `stealth` (tension), `souk` (explore); anything else is ignored. |
+| `zones[].tension, hum, drips` | Numbers, used when the mix gives none. |
 
 ## Music
 
@@ -55,7 +74,9 @@ A look-ahead scheduler (`Music`): a 25 ms timer schedules everything that falls 
 the audio clock, so onsets are sample-accurate whatever the frame rate; offline renders drive `tick()`.
 Instruments: oud (Karplus–Strong), qanun (bright KS, tremolo on long notes), ney (bandpassed breath +
 vibrato sine), darbuka / bendir (doum, tek, ka), singing bowl (partials 1, 2.76, 5.4), the drone pad.
-Every chapter sits on D (`maqam.js`): Hijaz (menu, I), Bayati (II), Saba (III), Rast → Ajam (IV).
+Every chapter sits on D (`maqam.js`): Hijaz (menu, I), Bayati (II), Saba (III), Rast → Ajam (IV). The
+drone pad is tonic, fifth and a beating unison; at night it keeps to tonic and octave (Saba's colour is in
+its melody, and a detuned fifth would clash with the ney's A).
 
 | Context | Music | Ambience |
 |---|---|---|
@@ -92,7 +113,12 @@ node tools/audio-tests.mjs --port 5174 [--sec 20] [--only themes,jitter,...]
 `themes` (20 s of every theme with a scripted game mix: no NaN, peak ≤ −1 dBFS, RMS −30…−14 dBFS),
 `jitter` (real-time context under a 4× CPU throttle with 8 ms of main-thread work per frame: onsets found
 by an AudioWorklet are within 5 ms of their schedule), `muteFadeIn`, `uiWhilePaused`, `voiceCap` (200
-rapid steps), `allNames` (every sfx, loop, stinger, ui sound and the finale), `ksCache`.
+rapid steps), `allNames` (every sfx, loop, stinger, ui sound and the finale), `voiceBudget` (the catch over
+the sunset clock, a lock opening, the answered light, the dawn finale, and the dawn finale with a footstep
+every 0.3 s: no steal, no drop, and the same peak as with a 512-voice pool), `stealFade` (a stolen sustained
+note leaves no step in the waveform and is silent 50 ms later), `schema` (the foundation's chapter blocks:
+maqam-named themes, place and bed names, unknown music names, null zones, frozen mix objects; Chapter I's
+chase keeps its 0.21 s pulse), `ksCache`.
 
 Last run (SwiftShader container, 4 CPUs): every test passes.
 
