@@ -12,6 +12,11 @@ import { degreeHz, D3 } from '../audio/maqam.js';
 
 export { SFX_NAMES, STINGERS, UI_SOUNDS };
 const THEME_VERB = { menu: 'menu', souk: 'courtyard', sundown: 'souk', night: 'alley', dawn: 'open', credits: 'minaret', lab: 'courtyard' };
+// Chapter I places, used when the chapter definition brings no zones of its own: the souk alleys
+// ring short, the walled courtyard and the finale square long (x in metres)
+export const THEME_ZONES = {
+  souk: [{ x0: -1e9, x1: 72.5, verb: 'alley' }, { x0: 72.5, x1: 112.2, verb: 'courtyard' }, { x0: 112.2, x1: 186, verb: 'alley' }, { x0: 186, x1: 1e9, verb: 'courtyard' }],
+};
 
 export class Audio {
   constructor() {
@@ -145,7 +150,7 @@ export class Audio {
   setChapter(def = {}) {
     if (!this.started) { this.pendingChapter = def; this.theme = def.theme || def.id || this.theme; return; }
     const theme = def.theme || def.id || 'souk';
-    this.theme = theme; this.zones = def.zones || null; this.zone = null;
+    this.theme = theme; this.zones = def.zones || THEME_ZONES[theme] || null; this.zone = null;
     this.music.setTheme(theme); this.amb.setTheme(theme);
     this.mix.setVerb(def.verb || THEME_VERB[theme] || 'courtyard', 2);
   }
@@ -170,11 +175,10 @@ export class Audio {
   update(dt, mix = {}) {
     if (!this.started) return;
     const t = this.ctx.currentTime;
-    if (this.zones) {
-      const x = this.listenerX, z = this.zones.find((q) => x >= q.x0 && x < q.x1) || null;
-      if (z !== this.zone) this.setZone(z);
-    }
-    if (mix.zone !== undefined && mix.zone !== this._mixZone) { this._mixZone = mix.zone; this.setZone(mix.zone); }
+    // the game's mix.zone wins; otherwise the chapter zone under the listener
+    const x = this.listenerX, xz = this.zones ? this.zones.find((q) => x >= q.x0 && x < q.x1) || null : null;
+    const want = mix.zone !== undefined && mix.zone !== null ? mix.zone : xz;
+    if (want !== this.zone) this.setZone(want);
     const zm = this.zone && typeof this.zone === 'object' ? this.zone : {};
     const m = mix.music || {};
     const tension = mix.tension ?? zm.tension ?? 0.1;
