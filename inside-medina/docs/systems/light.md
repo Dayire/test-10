@@ -181,4 +181,7 @@ Measured on the dev server (headless Chromium, SwiftShader):
 | lab bot | all twelve rooms, 0 deaths, 287.4 s of game time, 0 jumps while gripping, trace p95 0.20 ms |
 | lab negatives | 16 / 16 (wrong notch ×12 in six rooms, one beam never burns, bolt dash, tripwires, darted guard, dazzle, sunset clock, lost mirror, death restores, finger aim, lit = seen, sun shafts, p95, census) |
 | trace cost | p95 0.20 ms, median 0.10 ms over 600 passes with 22 sources (budget 0.35 ms) |
-| Chapter I | souk bot hash unchanged (`7bd4df65`), souk negatives green under the one searchlight rule |
+| Chapter I | souk bot hash unchanged (`7bd4df65`), souk negatives 13 / 13 under the one searchlight rule |
+| census | `tools/cycle.mjs`: 13 loads, `{dir 1, hemi 1, point 7, spot 2}` in every chapter, memory flat |
+| LDR cone (P.md #9) | `?ldr=1&tier=low` courtyard cone matches the float path (mean luma 83.0 vs 85.8); `perf.mjs --check ldr` passes |
+| foundation | 15 / 17: the two failures assume the one-preset lab stub (requests/L.md #6; both pass with that patch) |

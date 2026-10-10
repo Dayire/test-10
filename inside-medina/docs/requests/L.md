@@ -52,3 +52,19 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 - **Reason.** FULL_GAME §8.1, §8.3.
 - **Test.** `tools/mobile-tests.mjs`: "finger aim tilts a lab mirror to the touched notch" (a pointer held on the
   canvas while gripping `M2` in `?chapter=lab&cp=3`).
+
+## 6. `tools/neg/foundation.mjs` (F, frozen): two scenarios written against the lab stub
+
+- **Change.** In `lab end keeps the save`, reach the lab's real end instead of running right from x 26 (the stub's
+  end): `M.checkpoint(12); const H = G.level.light.get('H'); H.setState({ ...H.getState(), alpha: 3.2 });
+  M.teleport(475, 12, 1);` then sim with `{ x: 0 }` as before. In `x-keyed look swaps the env map`, compare the
+  lab's maps with its own distinct presets instead of 1: `const lk = G.def.look; out.lab = { envs: D.envs.size,
+  presets: new Set(Array.isArray(lk) ? lk.map((k) => k.preset) : [lk]).size };` and
+  `if (r.lab.envs !== r.lab.presets) ...`.
+- **Reason.** The Sunwork lab replaces the one-preset stub: its end is the heliostat at x 475 (twelve rooms of gates
+  stand between x 26 and it), and its look follows the day through five presets (sunset, dusk, night, dawn,
+  sunrise), so a chapter that frees every other map holds 5, not 1. Both scenarios still test what they were for
+  (a dev end keeps the save and reloads the lab at x 1.5; a new chapter drops the maps it does not use).
+- **Test.** With exactly this patch (applied locally, run, then reverted), `node tools/negative.mjs --suite foundation
+  --only "lab end keeps"` and `--only "x-keyed look"` pass; without it they are the suite's only two failures
+  (15 / 17).
