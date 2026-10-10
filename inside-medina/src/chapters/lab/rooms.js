@@ -110,7 +110,8 @@ export function* buildLab(game, kit) {
   const G3 = gate('G3', 46.0, 2.2, 2.0, () => (L3.done ? 1 : 0));
   wall(45.6, 46.4, [[2.2, 2.4], [3.2, 12]], { windows: [[2.4, 3.2]] });
   sun('sun3', 46.45, 2.93);
-  cam(32, { dist: 17.5, height: 2.4, lookY: 2.9, fov: 39, ahead: 1.0, focusBias: 1.5 });
+  // portrait (a 52° horizontal floor): rooms whose source, tool and target span ≤ 14 m come closer on a phone
+  cam(32, { dist: 17.5, distPortrait: 15.5, height: 2.4, lookY: 2.9, fov: 39, ahead: 1.0, focusBias: 1.5 });
   room('kerb', () => { M1.setState({ x: 40.0, y: 0, alpha: -15 }); L3.setState({ level: 1, done: true }); G3.setState({ open: 1 }); });
 
   // ================================================================ 4 TILT: an anchored mirror, tilted (II-B2)
@@ -120,7 +121,7 @@ export function* buildLab(game, kit) {
   const G4 = gate('G4', 62.0, 2.4, 2.2, () => (L4.done ? 1 : 0));
   wall(61.6, 62.4, [[2.4, 2.6], [3.4, 12]], { windows: [[2.6, 3.4]] });
   sun('sun4', 62.45, 3.20);
-  cam(48, { dist: 17.5, height: 2.8, lookY: 3.6, fov: 39, ahead: 0.8, focusBias: 1.2 });
+  cam(48, { dist: 17.5, distPortrait: 14, height: 2.8, lookY: 3.6, fov: 39, ahead: 0.8, focusBias: 1.2 });
   room('tilt', () => { M2.setState({ x: 55.0, y: 0, alpha: -45 }); L4.setState({ level: 1, done: true }); G4.setState({ open: 1 }); });
   L.hints.push({ x0: 53.5, x1: 55, after: 3, glyph: 'tilt', unless: (g) => L4.done || g.player.grip?.mirror !== M2 || M2.target !== 30 });
   yield 0.3;
@@ -148,7 +149,7 @@ export function* buildLab(game, kit) {
   const G6 = gate('G6', 104.0, 2.4, 2.2, () => 1 - B1.level);
   wall(103.6, 104.4, [[2.4, 2.8], [3.6, 12]], { windows: [[2.8, 3.6]] });
   sun('sun6', 104.45, 3.21);
-  cam(82, { dist: 17.5, height: 2.2, lookY: 2.6, fov: 39, ahead: 0.8, focusBias: 3 });
+  cam(82, { dist: 17.5, distPortrait: 14, height: 2.2, lookY: 2.6, fov: 39, ahead: 0.8, focusBias: 3 });
   room('bolt', () => { CR3.setState({ x: 95.4, y: 0 }); B1.setState({ level: 0, done: false }); G6.setState({ open: 1 }); });
   yield 0.4;
 
