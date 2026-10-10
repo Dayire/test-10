@@ -540,7 +540,14 @@ export class Player {
       // wheel's angle, the capstan's turning speed
       tilt: m ? { age: this.tilt.age, dir: this.tilt.dir, rim: m.rimHeight?.(this) ?? 0.5 } : null,
       crankA: this.state === 'crank' ? (lv?.wheel ?? 0) : 0, capstanV: this.state === 'capstan' ? (lv?.speed ?? 0) : 0,
+      // where the hands hold the prop (world points; the animator reaches them with two-bone IK)
+      hands: this.handTargets(),
     };
+  }
+  handTargets() {
+    const H = this._hands || (this._hands = { a: new THREE.Vector3(), b: new THREE.Vector3() });
+    const it = this.grip?.mirror || ((this.state === 'crank' || this.state === 'capstan') ? this.lever : null);
+    return it?.handHolds?.(this, H.a, H.b) && !this.dead ? H : null;
   }
 
   targetYaw() {

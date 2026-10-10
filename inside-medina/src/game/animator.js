@@ -10,6 +10,29 @@ const sat = (x) => Math.max(0, Math.min(1, x));
 const smooth = (x) => { x = sat(x); return x * x * (3 - 2 * x); };
 const lerp = (a, b, t) => a + (b - a) * t;
 
+// two-bone reach: after the FK pose is applied, turn the elbow so shoulder → wrist spans the distance to the
+// target, then swing the shoulder so the wrist lands on it; the result is blended over the FK pose by w
+const _s = new THREE.Vector3(), _e = new THREE.Vector3(), _w = new THREE.Vector3(), _t = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3();
+const _q = new THREE.Quaternion(), _qw = new THREE.Quaternion(), _qp = new THREE.Quaternion(), _qS = new THREE.Quaternion(), _qE = new THREE.Quaternion();
+function reachArm(S, E, W, T, w, palm = 0.05) {
+  _qS.copy(S.quaternion); _qE.copy(E.quaternion);
+  S.getWorldPosition(_s); E.getWorldPosition(_e); W.getWorldPosition(_w);
+  const l1 = _s.distanceTo(_e), l2 = _e.distanceTo(_w);
+  // the wrist stops a palm short of the hold
+  _t.subVectors(T, _s); const dt = _t.length();
+  _t.multiplyScalar(Math.max(0, dt - palm) / Math.max(dt, 1e-6)).add(_s);
+  const d = Math.min(l1 + l2 - 1e-3, Math.max(Math.abs(l1 - l2) + 1e-3, _s.distanceTo(_t)));
+  const inner = Math.acos(Math.max(-1, Math.min(1, (l1 * l1 + l2 * l2 - d * d) / (2 * l1 * l2))));
+  E.rotation.x = -(Math.PI - inner); // the elbow bends about its x (0 = a straight arm)
+  S.updateWorldMatrix(false, true);
+  W.getWorldPosition(_w);
+  _q.setFromUnitVectors(_a.subVectors(_w, _s).normalize(), _b.subVectors(_t, _s).normalize());
+  S.getWorldQuaternion(_qw); S.parent.getWorldQuaternion(_qp);
+  S.quaternion.copy(_qp.invert().multiply(_q.multiply(_qw)));
+  if (w < 1) { S.quaternion.slerpQuaternions(_qS, S.quaternion.clone(), w); E.quaternion.slerpQuaternions(_qE, E.quaternion.clone(), w); }
+  S.updateWorldMatrix(false, true);
+}
+
 function blankPose() {
   const j = {};
   for (const k of JOINTS) j[k] = [0, 0, 0];
@@ -157,6 +180,21 @@ export class Animator {
     const spread = Math.abs(o.hipL[0] - o.hipR[0]);
     this.rig.j.skirt.scale.set(1 + spread * 0.05, 1, 1 + spread * 0.35);
     this.rig.apply(this.out);
+    this.reach2(ctx.hands, dt);
+  }
+
+  // hands on a prop (ctx.hands {a, b}: world points, the player gives them for a mirror's rim, a crank, the
+  // capstan's bar): two-bone IK over the pose, eased in and out; each hand takes the nearer point
+  reach2(H, dt) {
+    this.ikW = (this.ikW || 0) + ((H ? 1 : 0) - (this.ikW || 0)) * (1 - Math.exp(-12 * dt));
+    if (H) { (this.ikA || (this.ikA = new THREE.Vector3())).copy(H.a); (this.ikB || (this.ikB = new THREE.Vector3())).copy(H.b); }
+    if (this.ikW < 0.01 || !this.ikA) return;
+    const R = this.rig, J = R.j;
+    R.root.updateMatrixWorld(true);
+    J.shoulderL.getWorldPosition(_s); J.shoulderR.getWorldPosition(_e);
+    const swap = _s.distanceTo(this.ikA) + _e.distanceTo(this.ikB) > _s.distanceTo(this.ikB) + _e.distanceTo(this.ikA);
+    reachArm(J.shoulderL, J.elbowL, J.wristL, swap ? this.ikB : this.ikA, this.ikW);
+    reachArm(J.shoulderR, J.elbowR, J.wristR, swap ? this.ikA : this.ikB, this.ikW);
   }
 
   // ---- poses -------------------------------------------------------------

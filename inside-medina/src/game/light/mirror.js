@@ -4,6 +4,7 @@ import { DEG, NOTCH, angleOf, alphaFor, notchOf } from './trace.js';
 import { magnet } from './logic.js';
 import { trayMesh, mirrorStand, axleMesh, crankBracket, crankHandle, capstanMesh } from '../../assets/lightprops.js';
 
+const _m = new THREE.Matrix4(), _p = new THREE.Vector3();
 const TILT = 25 * DEG; // trays lean toward the camera so their polished face shows (visual only, §6.1)
 const RATE = 100;      // degrees per second: one 15° notch in 0.15 s
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -120,6 +121,17 @@ export class Mirror {
     return Math.max(0.55, Math.min(1.7, near - player.y));
   }
 
+  // where his hands hold the tray (world points for the animator's reach): two points on the near rim, 35° either
+  // side of the point nearest him, just over the lip
+  handHolds(player, a, b) {
+    const t = this.tray; if (!t) return false;
+    const sx = Math.sign(player.x - this.x) || -1, r = this.r;
+    t.updateWorldMatrix(true, false);
+    a.set(sx * r * 0.82, 0.05 * r, r * 0.57).applyMatrix4(t.matrixWorld);
+    b.set(sx * r * 0.82, 0.05 * r, -r * 0.57).applyMatrix4(t.matrixWorld);
+    return true;
+  }
+
   prestep() { this.prev.set(this.bx, this.by); }
   step(dt) {
     this.aimT -= dt;
@@ -211,6 +223,14 @@ export class Crank {
     this.wheel = -this.mirror.alpha * DEG * 2;
     this.mesh.userData.wheel.rotation.z = this.wheel;
   }
+  // one hand on the knob, the other on the rim opposite it (world points for the animator's reach)
+  handHolds(player, a, b) {
+    const w = this.mesh.userData.wheel;
+    w.updateWorldMatrix(true, false);
+    a.set(0, 0.24, 0.1).applyMatrix4(w.matrixWorld);
+    b.set(0, -0.24, 0.02).applyMatrix4(w.matrixWorld);
+    return true;
+  }
   getState() { return {}; }
   setState() { this.held = false; }
 }
@@ -259,6 +279,21 @@ export class Capstan {
     if (this.held && this.input) { this.loopT -= dt; if (this.loopT <= 0) { this.loopT = 0.12; this.game.sfx('capstan', this.x, { speed: Math.abs(this.speed) }); } }
   }
   render() { if (this.mesh) this.mesh.userData.wheel.rotation.y = this.mirror.alpha * DEG * 6; }
+  // both hands on the bar that crosses in front of him (the nearest of the four to where his hands reach), one
+  // nearer the drum: world points for the animator's reach. A bar that turns past him hands over to the next.
+  handHolds(player, a, b) {
+    const w = this.mesh?.userData.wheel; if (!w) return false;
+    w.updateWorldMatrix(true, false);
+    const inv = _m.copy(w.matrixWorld).invert();
+    // where his hands would rest: in front of him at bar height, on the play plane's near side of the drum
+    const p = _p.set(player.x + this.faceDir * 0.24, this.y + 0.72, 0.02).applyMatrix4(inv);
+    const ph = Math.atan2(-p.z, p.x); // the bar angle that points there (bars run along (cos θ, 0, −sin θ))
+    const q = Math.round(ph / (Math.PI / 2)) * (Math.PI / 2);
+    const c = Math.cos(q), s = -Math.sin(q);
+    a.set(c * 0.62, 0.72, s * 0.62).applyMatrix4(w.matrixWorld);
+    b.set(c * 0.44, 0.72, s * 0.44).applyMatrix4(w.matrixWorld);
+    return true;
+  }
   getState() { return {}; }
   setState() { this.held = false; this.input = false; this.speed = 0; }
 }
