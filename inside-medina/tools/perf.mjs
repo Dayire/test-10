@@ -43,15 +43,25 @@ async function open(query, { w = W, h = H } = {}) {
 function installHooks() {
   const M = window.__medina, G = M.game, rs = G.world.rs, r = rs.renderer, scene = G.scene;
   const P = window.__perf = { frames: [], cur: null };
-  const fresh = () => ({ shadowCalls: 0, shadowTris: 0, shadowUpdates: 0, sceneCalls: 0, sceneTris: 0, postCalls: 0 });
+  const fresh = () => ({ shadowCalls: 0, shadowTris: 0, shadowUpdates: 0, sceneCalls: 0, sceneTris: 0, postCalls: 0, flockMain: 0, flockShadow: 0 });
   const sm = r.shadowMap, smRender = sm.render;
   sm.render = function (...a) {
     const c = r.info.render.calls, t = r.info.render.triangles;
-    smRender.apply(this, a);
+    P.inShadow = true;
+    try { smRender.apply(this, a); } finally { P.inShadow = false; }
     if (!P.cur) return;
     const dc = r.info.render.calls - c;
     P.cur.shadowCalls += dc; P.cur.shadowTris += r.info.render.triangles - t; if (dc) P.cur.shadowUpdates++;
   };
+  // draws of the flock's own meshes (per-bird groups in the old tree, instanced meshes in the new one)
+  P.flockObjs = () => { const F = G.flock, set = new Set(); if (!F) return set; if (F.group) F.group.traverse((o) => set.add(o)); else for (const b of F.birds) b.g.traverse((o) => set.add(o)); return set; };
+  let flockSet = P.flockObjs();
+  const rbd = r.renderBufferDirect;
+  r.renderBufferDirect = function (cam, sc, geo, mat, obj, grp) {
+    if (P.cur && flockSet.has(obj)) { if (P.inShadow) P.cur.flockShadow++; else P.cur.flockMain++; }
+    return rbd.call(this, cam, sc, geo, mat, obj, grp);
+  };
+  P.refreshFlock = () => { flockSet = P.flockObjs(); };
   const rr = r.render;
   r.render = function (s, cam) {
     const c = r.info.render.calls, t = r.info.render.triangles;
@@ -121,8 +131,8 @@ async function measureSpot(page, s) {
     shadowCallsPerUpdate60: upd60.length ? round(avg(upd60, 'shadowCalls')) : 0, shadowTris60: Math.round(avg(s60, 'shadowTris')),
     shadowUpdateRate: round(upd.length / on.length), mainCalls: round(avg(on, 'mainCalls')), postCalls: round(avg(on, 'postCalls')),
     calls: round(avg(on, 'calls')), calls60: round(avg(s60, 'calls')), tris: Math.round(avg(on, 'tris')), shadowTris: Math.round(avg(on, 'shadowTris')), mainTris: Math.round(avg(on, 'mainTris')),
-    flockCalls: round(avg(on, 'calls') - avg(off, 'calls')), flockMain: round(avg(on, 'mainCalls') - avg(off, 'mainCalls')),
-    flockShadow: round(avg(on, 'shadowCalls') - avg(off, 'shadowCalls')), programs: on[on.length - 1].programs,
+    flockCalls: round(avg(on, 'flockMain') + avg(on, 'flockShadow')), flockMain: round(avg(on, 'flockMain')), flockShadow: round(avg(on, 'flockShadow')),
+    flockToggle: round(avg(on, 'calls') - avg(off, 'calls')), programs: on[on.length - 1].programs,
   };
 }
 
@@ -136,7 +146,7 @@ async function flockStress(page) {
   await page.evaluate(() => window.__perf.flock(false));
   const off = await collect(page, 4);
   await page.evaluate(() => { window.__perf.flock(true); window.__perf.flockReset(); });
-  return { birds, calls: round(avg(on, 'calls') - avg(off, 'calls')), main: round(avg(on, 'mainCalls') - avg(off, 'mainCalls')), shadow: round(avg(on, 'shadowCalls') - avg(off, 'shadowCalls')) };
+  return { birds, calls: round(avg(on, 'flockMain') + avg(on, 'flockShadow')), main: round(avg(on, 'flockMain')), shadow: round(avg(on, 'flockShadow')), toggle: round(avg(on, 'calls') - avg(off, 'calls')) };
 }
 
 if (only !== 'checks') {

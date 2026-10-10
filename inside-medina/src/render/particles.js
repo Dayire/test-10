@@ -9,8 +9,8 @@ import { LAYERS, SOFT, SOFT_GLSL } from './layers.js';
 const KINDS = {
   //          id  blend  life      size          colour     alpha  speed  spread
   embers:   { id: 0, add: true,  life: [1.2, 2.6], size: [0.035, 0.07], color: 0xff8a3a, alpha: 1.0, speed: 0.9, spread: 0.25 },
-  smoke:    { id: 1, add: false, life: [3.0, 5.0], size: [0.35, 0.8],   color: 0x6e645c, alpha: 0.32, speed: 0.45, spread: 0.2 },
-  moths:    { id: 2, add: false, life: [14, 22],   size: [0.05, 0.075], color: 0xd9c7a8, alpha: 0.95, speed: 1.0, spread: 0.6 },
+  smoke:    { id: 1, add: false, life: [3.0, 5.0], size: [0.35, 0.8],   color: 0x6e645c, alpha: 0.45, speed: 0.45, spread: 0.2 },
+  moths:    { id: 2, add: false, life: [14, 22],   size: [0.06, 0.09],  color: 0xd9c7a8, alpha: 0.95, speed: 1.0, spread: 0.6 },
   dust:     { id: 3, add: false, life: [0.9, 1.8], size: [0.12, 0.3],   color: 0xc7a882, alpha: 0.4, speed: 0.8, spread: 0.6 },
   feathers: { id: 4, add: false, life: [3.0, 4.5], size: [0.06, 0.1],   color: 0x8d8a92, alpha: 1.0, speed: 1.2, spread: 0.5 },
 };
@@ -72,8 +72,14 @@ void main(){
   float r2 = dot(vQ, vQ);
   float a;
   if (vKind < .5) a = exp(-r2 * 4.) + exp(-r2 * 30.) * .8;                          // ember: hot core + glow
-  else if (vKind < 1.5) a = smoothstep(1., .2, sqrt(r2)) * (.55 + .45 * vn(vQ * 2.5 + vSeed * 13. + vAge * 1.5)) * softFade(.8);
-  else if (vKind < 2.5) { vec2 q = abs(vQ); a = smoothstep(.95, .7, length(vec2(q.x * .8 - .45, q.y * 1.3))) + step(q.x, .08) * step(q.y, .6); }
+  else if (vKind < 1.5) a = smoothstep(1., .2, sqrt(r2)) * (.55 + .45 * vn(vQ * 2.5 + vSeed * 13. + vAge * 1.5)) * softFade(.35);
+  else if (vKind < 2.5) {   // moth: fore and hind wing lobes either side of a thin body
+    vec2 q = vec2(abs(vQ.x), vQ.y);
+    float fore = 1. - smoothstep(.75, 1., length((q - vec2(.47, .16)) / vec2(.45, .5)));
+    float hind = 1. - smoothstep(.75, 1., length((q - vec2(.32, -.38)) / vec2(.28, .32)));
+    float body = (1. - smoothstep(.07, .12, q.x)) * (1. - smoothstep(.5, .62, abs(q.y)));
+    a = max(max(fore, hind) * (.7 + .3 * q.x), body);
+  }
   else if (vKind < 3.5) a = smoothstep(1., 0., sqrt(r2)) * (.6 + .4 * vn(vQ * 3. + vSeed * 7.)) * softFade(.4);
   else { float spine = smoothstep(.12, 0., abs(vQ.x)) * step(vQ.y, .9); a = max(smoothstep(1., .75, length(vQ * vec2(1., .95))) * (.75 + .25 * sin(vQ.y * 40.)), spine); }
   a *= vC.a;

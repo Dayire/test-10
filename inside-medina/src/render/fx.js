@@ -34,46 +34,51 @@ function pigeonParts() {
 }
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1);
-const _e = new THREE.Euler(), _w = new THREE.Matrix4(), _h = new THREE.Matrix4(), _mir = new THREE.Matrix4().makeScale(-1, 1, 1), _zero = new THREE.Matrix4().makeScale(0, 0, 0);
+const _e = new THREE.Euler(), _w = new THREE.Matrix4(), _h = new THREE.Matrix4(), _mir = new THREE.Matrix4().makeScale(-1, 1, 1);
 const Y = new THREE.Vector3(0, 1, 0);
 
+// Pigeons: three instanced draws (body, head, wings) for the whole flock. Each frame the birds within
+// RANGE metres of the boy are packed at the front of the instance buffers and the draw count is cut to
+// them, with bounds around just those, so a stretch of the level without birds costs no draw at all.
+const RANGE = 30;
 export class Flock {
   constructor(scene, mats, spots) {
     this.birds = [];
     for (const s of spots) {
       for (let i = 0; i < s.n; i++) {
         const home = new THREE.Vector3(s.x + (Math.random() - 0.5) * s.w, s.y, s.z + (Math.random() - 0.5) * 0.8);
-        this.birds.push({ pos: home.clone(), home, yaw: Math.random() * Math.PI * 2, head: 0, flap: 0.05, state: 'idle', t: Math.random() * 5, v: new THREE.Vector3(), peck: Math.random() * 3 });
+        // grey to warm grey, darker wings
+        const v = 0.85 + Math.random() * 0.3, warm = Math.random() * 0.06;
+        const color = new THREE.Color(0x7c7a82).multiplyScalar(v); color.r += warm;
+        const wing = new THREE.Color(0x5f5c66).multiplyScalar(v);
+        this.birds.push({ pos: home.clone(), home, yaw: Math.random() * Math.PI * 2, head: 0, flap: 0.05, state: 'idle', t: Math.random() * 5, v: new THREE.Vector3(), peck: Math.random() * 3, color, wing });
       }
     }
     const n = Math.max(1, this.birds.length);
     const parts = pigeonParts();
+    this.geos = [parts.body, parts.head, parts.wing];
     this.mat = patchMaterial(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }));
     this.wingMat = patchMaterial(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, side: THREE.DoubleSide }));
     this.body = new THREE.InstancedMesh(parts.body, this.mat, n);
     this.head = new THREE.InstancedMesh(parts.head, this.mat, n);
     this.wings = new THREE.InstancedMesh(parts.wing, this.wingMat, n * 2);
-    this.geos = [parts.body, parts.head, parts.wing];
+    this.meshes = [this.body, this.head, this.wings];
     this.group = new THREE.Group(); this.group.name = 'flock';
-    const c = new THREE.Color();
-    for (const [k, im] of [['body', this.body], ['head', this.head], ['wings', this.wings]]) {
-      im.frustumCulled = false; // birds fly far from their spots; three draws whatever the view
-      im.castShadow = k !== 'wings'; im.receiveShadow = true;
+    this.meshes.forEach((im, k) => {
+      im.castShadow = k !== 2; im.receiveShadow = true;
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.setColorAt(0, this.birds[0]?.color || new THREE.Color()); // allocate the colour buffer
+      im.instanceColor.setUsage(THREE.DynamicDrawUsage);
       this.group.add(im);
-    }
-    this.birds.forEach((b, i) => {
-      // grey to warm grey, darker wings
-      const v = 0.85 + Math.random() * 0.3, warm = Math.random() * 0.06;
-      c.setHex(0x7c7a82).multiplyScalar(v); c.r += warm; this.body.setColorAt(i, c); this.head.setColorAt(i, c);
-      c.setHex(0x5f5c66).multiplyScalar(v); this.wings.setColorAt(i * 2, c); this.wings.setColorAt(i * 2 + 1, c);
     });
-    if (!this.birds.length) { this.body.count = this.head.count = this.wings.count = 0; }
+    this.focusX = this.birds.length ? this.birds[0].home.x : 0;
+    this.drawn = 0;
     scene.add(this.group);
     this.write();
   }
   reset() { for (const b of this.birds) { b.state = 'idle'; b.pos.copy(b.home); b.head = 0; b.flap = 0.05; } this.write(); }
   update(dt, px, py, speed, onScatter) {
+    this.focusX = px;
     for (const b of this.birds) {
       b.t += dt;
       if (b.state === 'idle') {
@@ -100,22 +105,34 @@ export class Flock {
     this.write();
   }
   write() {
-    this.birds.forEach((b, i) => {
-      if (b.state === 'gone') { this.body.setMatrixAt(i, _zero); this.head.setMatrixAt(i, _zero); this.wings.setMatrixAt(i * 2, _zero); this.wings.setMatrixAt(i * 2 + 1, _zero); return; }
+    const { body, head, wings } = this;
+    let k = 0;
+    for (const b of this.birds) {
+      if (b.state === 'gone' || Math.abs(b.pos.x - this.focusX) > RANGE) continue;
       _q.setFromAxisAngle(Y, b.yaw);
       _m.compose(b.pos, _q, _s);
-      this.body.setMatrixAt(i, _m);
-      _h.makeTranslation(0, b.head, 0); this.head.setMatrixAt(i, _w.multiplyMatrices(_m, _h));
+      body.setMatrixAt(k, _m); body.setColorAt(k, b.color);
+      _h.makeTranslation(0, b.head, 0); head.setMatrixAt(k, _w.multiplyMatrices(_m, _h)); head.setColorAt(k, b.color);
       _h.makeRotationFromEuler(_e.set(0, 0, b.flap));
-      this.wings.setMatrixAt(i * 2, _w.multiplyMatrices(_m, _h));
-      this.wings.setMatrixAt(i * 2 + 1, _w.multiplyMatrices(_m, _mir).multiply(_h));
-    });
-    this.body.instanceMatrix.needsUpdate = this.head.instanceMatrix.needsUpdate = this.wings.instanceMatrix.needsUpdate = true;
+      wings.setMatrixAt(k * 2, _w.multiplyMatrices(_m, _h));
+      wings.setMatrixAt(k * 2 + 1, _w.multiplyMatrices(_m, _mir).multiply(_h));
+      wings.setColorAt(k * 2, b.wing); wings.setColorAt(k * 2 + 1, b.wing);
+      k++;
+    }
+    this.drawn = k;
+    body.count = head.count = k; wings.count = k * 2;
+    for (const im of this.meshes) {
+      im.visible = k > 0;
+      if (!k) continue;
+      im.instanceMatrix.clearUpdateRanges(); im.instanceMatrix.addUpdateRange(0, im.count * 16); im.instanceMatrix.needsUpdate = true;
+      im.instanceColor.clearUpdateRanges(); im.instanceColor.addUpdateRange(0, im.count * 3); im.instanceColor.needsUpdate = true;
+      im.computeBoundingSphere();
+    }
   }
   dispose() {
     for (const g of this.geos) g.dispose();
     this.mat.dispose(); this.wingMat.dispose();
-    for (const im of [this.body, this.head, this.wings]) im.dispose();
+    for (const im of this.meshes) im.dispose();
     this.group.removeFromParent();
   }
 }
