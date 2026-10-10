@@ -1,6 +1,10 @@
 import * as THREE from 'three';
+import { G } from './atmosphere.js';
 
 const O = new THREE.Vector3(), X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0);
+const WHITE = new THREE.Color(1, 1, 1);
+// the golden-hour sun's intensity: the reference of G.uSunLight (and of the rim's 0.55)
+export const SUN_REF = 7;
 
 // Sun + sky fill. The shadow frustum follows the camera focus and is snapped
 // to shadow-map texels so shadows never shimmer while scrolling.
@@ -24,6 +28,7 @@ export class Lighting {
     this._tmp = new THREE.Vector3(); this._lp = new THREE.Vector3();
     this._m = new THREE.Matrix4();
     this._mi = new THREE.Matrix4();
+    this.rimAuto = true;
   }
 
   // half-width of the sun's shadow frustum in metres (a chapter's L.shadowExtent; the loader passes 22 otherwise)
@@ -43,6 +48,11 @@ export class Lighting {
   }
 
   update(focus) {
+    // what follows the key light (written by the LookDirector before this runs): its relative strength, and the
+    // characters' rim in its colour (half way to white), weaker as it dims (the moon gives a faint cool rim)
+    const k = Math.max(0, this.sun.intensity) / SUN_REF;
+    G.uSunLight.value = k;
+    if (this.rimAuto) { G.uRimColor.value.copy(this.sun.color).lerp(WHITE, 0.5); G.uRimStrength.value = 0.55 * Math.sqrt(Math.min(1, k)); }
     // light-space basis (scratch vectors: this runs every frame)
     const d = this.sunDir;
     const up = Math.abs(d.y) > 0.99 ? X : Y;

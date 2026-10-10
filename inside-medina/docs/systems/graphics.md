@@ -45,6 +45,9 @@ class, not MSAA off.
 | dynamic range (of that) | 0.8–1 (0.6–0.75 px) | 0.7–1 | 0.8–1 | 0.75–1 |
 | AA | FXAA (+CAS below 1) | MSAA 2 + FXAA | MSAA 4 | MSAA 4 |
 | sun shadow map / refresh | 1024 / 30 Hz | 2048 / 30 Hz | 2048 / every frame | 4096 / every frame |
+| shadowed spots refresh | 15 Hz | 15 Hz | every frame | every frame |
+| merged static casters (proxies) | on | on | on | on |
+| shadow reach (proxies behind the play plane) | 8 m | 14 m | all | all |
 | small-caster cull | on | on | off | off |
 | DOF taps (half res) | off | 16 | 36 | 48 |
 | god rays | off | on | on | on |
@@ -76,21 +79,66 @@ old chain), `render(scene, camera, time)`, `tier`, `q`, `w`, `h`, `cssW`, `cssH`
 | `particles` | The GPU particle system (also reachable as `particles` from `particles.js`). |
 | `dyn`, `auto`, `cap`, `shadows` | DynRes, AutoQuality, FrameCap, ShadowPolicy (tests and tuning). |
 
-**Dynamic resolution** (`DynRes`): the cost is GPU time when the timer query exists, otherwise the frame
-interval. Above 110 % of budget the scale drops (scale² ∝ pixels, aiming at 92 %), at most every 250 ms;
-after 5 s under 80 % it climbs 0.05 every 500 ms. A vsync-locked interval carries no headroom
-information, so it probes one step up with exponential back-off.
+**Frame clock.** `trackFrame` sums the intervals it is given, so every window below runs on the rAF clock (a
+stubbed `requestAnimationFrame` or a synthetic feed drives it exactly like a display). Paused and hidden frames,
+a stall (over 1 s and over three times the recent average), and the frames right after a discontinuity are not
+counted: a chapter root added to or removed from the scene, a camera jump of more than 4 m that its recent
+motion does not explain (respawn, checkpoint, cut), or `rs.markDiscontinuity()`.
+
+**Dynamic resolution** (`DynRes`): the cost is GPU time when the timer query exists (the interval counts only
+when our own CPU/GPU work fills the frame), otherwise the frame interval. Decisions use the 75th percentile of
+the frames rendered at the current scale over at least 0.4 s: three frames or more, or any number on a slow clock
+(frames averaging 150 ms or more, where one frame covers that time), so a single hitch (a GC pause, a compile)
+never moves the scale. Above 112 % of budget the scale drops (scale² ∝ pixels, aiming at 92 %), one step per
+window; after 5 s under 80 % it climbs 0.05 per window. A vsync-locked interval carries no headroom information:
+it probes one step up after 4 s at budget, and a probe that does not hold returns to the scale it left and
+doubles the wait.
+
+Without a timer a long interval may be the display's, not ours: iOS Low Power Mode and browser battery saving
+throttle `requestAnimationFrame` to 30 Hz with the GPU idle. So the first drop of an overload starts a **trial**:
+if the delivered period does not get shorter even at the floor, lower resolution cannot help; the scale returns
+to the highest one that reached that period and the period becomes the budget (`dyn.limited`). When the
+resolution never helped and the CPU is idle (`dyn.displayLimited`) it is the tier's budget too, so a throttled
+phone keeps its tier and its resolution after a dip of about 1.4 s. Frames faster than the limit end it; a tier
+change clears it.
 
 **Auto quality** (`AutoQuality`): p90 of 10 s windows. Steps down when p90 > 130 % of budget with the
-dynamic scale already at its floor; steps up (desktop only) after 30 s of headroom at full scale; at most
-one change per 30 s, and an upgrade that does not hold doubles the wait before the next one.
-`?slowgpu=N` replaces the frame cost with a synthetic GPU (4 ms + N·2.4 ms·scale²) for tests.
+dynamic scale at its floor or limited; steps up (desktop only, never while limited) after 30 s of headroom at
+full scale; at most one change per 30 s, and an upgrade that does not hold doubles the wait before the next one.
+A step down whose next window is not faster (median) is undone 30 s later, also on touch devices (an undo, not
+an upgrade), and is not tried again at that frame time.
+`?slowgpu=N` replaces the frame cost with a synthetic GPU (4 ms + N·2.4 ms·scale²·tier, the tier factor 0.55 on
+low, 1 on medium, 1.35 on high, 1.8 on ultra) for tests.
 
-**Shadow policy** (`ShadowPolicy`): low/medium refresh the sun map at 30 Hz (time based), immediately
-after a camera snap (≥ 1.5 m or ≥ 10° in a frame) or `rs.shadows.invalidate()`. Shadowed spot lights
-whose 40 m cone is off-screen or dark keep their old map. On low/medium, static casters under 0.4 m tall
-or more than 30 m behind the play plane stop casting; a caster counts as static once its world matrix
-has been the same over two scans, so moving props and characters are never culled.
+**Shadow policy** (`ShadowPolicy`): low/medium refresh the sun map at 30 Hz (time based) and shadowed spots
+at 15 Hz on the frames the sun skips (at 30 fps, every other frame together with the sun), all at once after a
+camera snap (≥ 1.5 m or ≥ 10° in a frame) or `rs.shadows.invalidate()`; high and ultra refresh every frame.
+Shadowed spot lights whose lit cone (truncated 2 m below its aim point, tested as an apex and an octagon
+against the camera frustum) is off-screen, or dark, keep their old map.
+
+*Merged static casters.* The level's batches (`batch:*` meshes with `matrixAutoUpdate = false`, or
+`userData.staticCaster`) cast through proxies: their triangles in world space, 16-bit positions per tile (12 m of
+x × a depth band: z ≥ −10, −20, −35, −60, beyond), one draw per tile instead of one per material and chunk. The
+proxies use one front-sided material, so the depth pass draws back faces as for the batches (double-sided
+sources are written with both windings); they cast into every shadow map and are invisible to every other pass
+(`intersectsFrustum` answers only in the shadow pass, against the tile's world box). Alpha-tested, displaced or
+clipped materials keep their own draws. A chapter root's proxies are built in the frame it arrives (a loader's
+warm-up render, behind the card: about 70 ms for the souk here); a later change to a root is merged a few
+milliseconds per frame (`rs.shadows.building`), and until then its batches cast as authored. Their vertex arrays
+are freed once uploaded, so a restored context drops and rebuilds them (`rs.shadows.reset()`), and the shadow
+pass hook follows the new `renderer.shadowMap` three creates on a restore. A root whose set of batches or their
+visibility changes is rebuilt; set `userData.noProxy` on a batch that must keep casting on its own.
+In the sun's map a proxy also needs its shadow to land in view: its box swept along the light to below the
+ground must meet the camera frustum (3 m margin), which changes nothing on screen. On low/medium
+(`shadowReach` 8 / 14 m) a proxy whose shadow, from its front top edge along the current sun, cannot land
+within that many metres behind the play plane stops casting into the sun's map: background roofs lose the
+shadows of buildings further back. The sun direction is read every frame, so a low sun keeps its long shadows.
+
+*Small casters.* On low/medium, other static casters under 0.4 m tall or more than 30 m behind the play plane
+stop casting, as do meshes flagged `userData.smallCaster` (the flock); a caster counts as static once its world
+matrix has been the same over two scans, so moving props and characters are never culled. The policy restores
+only the `castShadow` values it changed itself: a flag another package changes is the authored value from then
+on (a proxied batch is the exception, see `noProxy`). Spot lights are tracked in a `WeakMap`.
 
 ## Layers and the soft pass (`layers.js`)
 
@@ -130,18 +178,29 @@ bright there (the Chapter I searchlight cone is the one left, requests/P.md #9).
   writes every frame) are drawn, so menu, intro and cinematic shots far from the boy still show theirs.
 - **Shafts** (`new Shafts(scene, sunDir, G)`, `add(p, o)`, `addDust(regions, n)`, `setSun(dir, colour,
   intensity?)`, `dispose()`): `setSun` re-aims every shaft from its ground point and tints shafts and
-  dust relative to the golden-hour sun they were authored under. It allocates nothing and returns at once
-  when the sun has not changed (the LookDirector calls it on every write).
+  dust relative to the golden-hour sun they were authored under. Their brightness follows `G.uSunLight`, the
+  key light's intensity relative to the golden-hour sun (written by `Lighting.update`; `intensity`, when
+  passed, is the same ratio), so they fade at dusk and stop drawing at dawn before the sun is up. It allocates
+  nothing and returns at once when the sun has not changed (the LookDirector calls it on every write).
 - **Sky** (`createSky`): uniforms `uNight` (0 = today's look), `uStars`, `uMoonDir`, `uMoonColor`,
   `uMoonSize` (a multiplier of `MOON_RADIUS` = 0.045 rad, about ten times the real moon for readability;
   the LookDirector writes the preset's `moonSize × moon`, so 0 hides the moon). Night gives a three-layer
   star field with a faint band, a moon with maria, limb darkening and halo, and clouds as dark silhouettes
   with moonlit rims. `buildEnvironment` turns the stars off for the PMREM.
 - **Rim light** (`atmosphere.js`): materials named in `RIM_MATERIALS` (or `userData.rim = true`) get a
-  fresnel rim, strongest against the sun; `G.uRimColor` / `G.uRimStrength` can be retinted per preset.
+  fresnel rim, strongest against the sun. `Lighting.update` derives it from the live key light every frame:
+  its colour half way to white, strength 0.55 × √(intensity / 7). Golden hour keeps the warm rim, the night's
+  moon gives a faint cool one, dawn before sunrise none. `world.light.rimAuto = false` hands
+  `G.uRimColor` / `G.uRimStrength` to the caller.
 - **Flare** (`flare.js`, medium+): soft ghosts from a blurred bloom level, a halo ring for the sun only,
   and a short pale-warm streak on small bright sources (lamps, glints). `params.flare`, `flareThreshold`,
-  `flareStreak` (0.5). **Lens dirt** rises with the god rays (the finale) or `params.dirt`.
+  `flareStreak` (0.5). The sun's share (halo, strong ghosts, lower threshold) is `sunVisible` scaled by the key
+  light's strength (`G.uSunLight` 0.2 → 0.6), so the moon, whose direction the night look also reports as
+  `sunVisible`, gets only the faint lamp ghosts (`post.stats.flareSun`). **Lens dirt** rises with the god rays
+  (the finale) or `params.dirt`.
+- **Soft pass and MSAA.** Where three invalidates a multisampled colour buffer after each resolve (the Oculus
+  Browser, the same test as three's `WebGLTextures`), the soft pass is off and the BEAMS layer is drawn in the
+  main pass (hard additive), since drawing onto the resolved buffer would lose the scene there.
 - **Output pass** (`fxaa.js`): FXAA, then contrast-adaptive sharpening on luma only (no coloured fringes),
   at most 0.5 and only when upscaling, then grain at output resolution.
 - **SSAO** (high/ultra): half-res, depth-aware blur; it fades out in direct light and inside the glow
@@ -182,54 +241,87 @@ dark sky, a moon disc of the expected size), pigeons in view far from the boy (`
 soft-layer / particles / shafts / dispose / particle-clearing / particle-warm-up contracts, `?slowgpu=8&dynres=1` (drop within
 2 s, recovery after 5 s, ≤ 1 tier change), sustained overload (one step down, ≥ 30 s apart), the LDR
 fallback, the real boot loop under a 120 Hz `requestAnimationFrame` stub installed before boot
-(`capLoop`; reported as pending on a tree whose loop does not call `beginFrame`) and context loss.
+(`capLoop`; reported as pending on a tree whose loop does not call `beginFrame`) and context loss. Added with
+the frame-clock work: `moonFlare` (no sun halo on the moon, the full one on the golden-hour sun),
+`shadowProxies` (the frame with and without merged casters at the six spots on high and low: pixels and
+shadow draws), `dynSignal` (`trackFrame` fed a minute or more of frames from a device without a GPU timer: a
+250 ms hitch at 60 Hz, a 30 Hz throttle on a phone and on a desktop, a fill-bound GPU, a GPU only a lower tier
+saves, a CPU-bound frame no tier helps) and `throttleLoop` (the real boot loop under a 30 Hz rAF stub whose
+clock `performance.now` follows, GPU timer hidden: the tier and the resolution must hold).
 
 ### Last run
 
-SwiftShader, 640 × 360, `tex=0.1`; "before" is the pre-presentation tree (`0f7b31b`). Shadow calls are per
-frame at a 60 fps cadence; the flock column counts its own draws (main + shadow).
+SwiftShader, 640 × 360, `tex=0.1`; "before" is the pre-presentation tree (`0f7b31b`). The flock column counts
+its own draws (main + shadow).
 
-| tier | shadow calls / frame (6 spots) | flock draws at the spots | flock, all 27 birds in view | calls / frame, souk spot | programs (1st / 2nd pass) |
-|---|---|---|---|---|---|
-| low | 859 → 306 (−64 %) | 164 → 22 | 216 → 5 | 265 → 162 | 49 / 49 → 62 / 62 |
-| medium | 852 → 304 (−64 %) | 159 → 22 | 216 → 5 | 270 → 164 | 50 / 50 → 62 / 62 |
-| high | 856 → 648 (−24 %, culling and spot policy only) | 161 → 22 | 216 → 5 | 267 → 212 | 50 / 50 → 64 / 64 |
+| tier | shadow calls / frame at 60 fps (6 spots) | per shadow update | flock draws at the spots | flock, all 27 birds in view | calls / frame at 60 fps, souk spot | programs (1st / 2nd pass) |
+|---|---|---|---|---|---|---|
+| low | 859 → 161.5 (−81 %) | 859 → 329 (−62 %) | 164 → 12 | 216 → 3 | 265 → 141.5 | 49 / 49 → 57 / 57 |
+| medium | 852 → 172.8 (−80 %) | 852 → 353 (−59 %) | 159 → 12 | 216 → 3 | 270 → 146.5 | 50 / 50 → 61 / 61 |
+| high | 856 → 401 (−53 %, every frame) | 856 → 402 (−53 %) | 161 → 22 | 216 → 5 | 267 → 177 | 50 / 50 → 67 / 67 |
+
+"Per shadow update" sums the calls of the frames that refresh a map (the sun's, a spot's or both): it is the
+cost per frame at low's own 30 fps, where the sun refreshes every frame and the courtyard's searchlight every
+other one. At the two searchlight spots it is 146 → 76 (courtyard) and 150 → 69 (balcony) on low.
 
 **§8.5 budget** (shadow + main calls / triangles per frame at 60 fps; the souk, raised, rooftops,
 courtyard, balcony and chase spots):
 
 | tier | budget | measured | over |
 |---|---|---|---|
-| low | 130 / 400 k | 149 / 351 k, 151 / 433 k, 145 / 451 k, 167 / 570 k, 177 / 631 k, 155 / 505 k | every spot (calls); at its 30 fps target, where the shadow map refreshes every frame, 192–244 calls |
-| medium | 180 / 550 k | 149 / 351 k, 151 / 433 k, 145 / 451 k, 167 / 569 k, 177 / 622 k, 155 / 506 k | courtyard and balcony (triangles) |
-| high | 240 / 700 k | 196 / 497 k, 199 / 589 k, 189 / 600 k, 236 / 830 k, 259 / 895 k, 208 / 662 k | courtyard (triangles), balcony (both) |
+| low | 130 / 400 k | 128.5 / 303 k, 130.5 / 411 k, 124 / 402 k, 136.5 / 449 k, 146.5 / 511 k, 133.5 / 463 k | five spots, by 0.5–16.5 calls and 2–111 k triangles; at its own 30 fps, 146–181 calls |
+| medium | 180 / 550 k | 131.5 / 306 k, 133 / 413 k, 125.5 / 406 k, 136.8 / 450 k, 148.5 / 514 k, 136 / 467 k | none |
+| high | 240 / 700 k | 161 / 406 k, 162 / 549 k, 154 / 511 k, 188 / 677 k, 203 / 681 k, 171.5 / 587 k | none |
 
-What is left over is structural: about 55 per-material level batches in the shadow pass and 70 in the main
-pass, each spanning the play plane to 90 m behind it, and characters made of about 21 rigid parts each.
-requests/P.md #10 asks for near/far batch splits (far set without shadows) and merged character meshes.
+Low's remainder is the main pass, which P does not own: 101–112 draws and 213–354 k triangles before any
+shadow, of which the boy alone is 22 draws (21 rigid parts), and up to 28 swaying lanterns that cast on their
+own. requests/P.md #10 asks for merged character meshes, `staticCaster` lanterns and a cheaper far set on low.
 
-Per shadow update (culling alone) the souk spot goes 133 → 86 calls on low/medium; triangles at the
-souk spot 630 k → 489 k. Every check passes: FXAA (+CAS) on low, the tier round trip (textures 123,
-geometries 296, programs 58, 17 targets before and after; 118 post materials created and 118 disposed),
-programs stable (62), the cap (60.0 fps at 120 / 144 Hz, 30 at cap 30, 120 uncapped), the light state
-(56 lit materials on medium, none re-validated over 6 frames; main pass 1.0–1.1 ms with the soft pass on and
-1.0 ms off, against 36 materials re-validated per frame and 1.4–1.6 ms on the previous tree), settings under
-`?noauto`, paused and hidden frames ignored, night sky (166 stars against 0 by day, mean sky luminance 0.12,
-moon disc 0.93 against 0.33 around it, radius 16 px for an expected 16.9), pigeons in view (12 drawn: 8 near
-the boy, 4 in view 151 m away), the contracts (particles cleared when a chapter root leaves), `?slowgpu=8`
-(scale 1 → 0.85 in 1.7 s, back to 1 after 9.2 s of headroom, no tier change), sustained overload (one step
-medium → low), the LDR fallback (RGBA8 targets, mean luminance within 9 % of the float path), the LUT
-(identity within 0.3/255 of no LUT, one final program) and context loss. `capLoop` is pending on this branch
-(the boot loop predates `beginFrame`); on the foundation's tree with these files it renders 60.0 fps under the
-120 Hz stub.
+The merged casters change nothing on screen: the `shadowProxies` check renders each spot with and without them
+at a fixed time and reads the frame back (high: mean difference ≤ 0.048/255, at most 0.053 % of pixels differ
+by more than 16/255, shadow-edge texels; low, with the reach cut: ≤ 0.067/255), while the shadow pass loses
+36 % (high) and 54 % (low) of the draws it has without them. Built in 50–90 ms when a chapter root arrives
+(the souk: 156 batches, 540 k triangles, 109 proxies, positions at 6 bytes a vertex, about 10 MB of vertex
+buffer and no CPU copy).
 
-**Integration with the foundation** (F's tree `b5fb61d` with P's files): `?noauto&tier=high` keeps the high
-tier at scale 1 for 25 s; the souk's audio block resolves to the souk theme in Hijaz, a level mix with
-`zone: null` runs, and the chase keeps its 0.21 s pulse; the light state is stable with the light rig (census
-dir 1, hemi 1, point 7, spot 2); the night stub's sky shows stars and a moon disc with the director's
-`uMoonSize = moonSize × moon`; brightness +3 and grain 100 give exposure 1.24× and grain 1.67× from the
-director and gamma 0.88 from P, each once (before: 1.80× and 2.78×); F's leak cycle (13 loads: memory flat,
-programs stable, light census constant), the souk bot (85.4 s, no death) and all 12 foundation negatives pass.
+Every check passes on this tree: FXAA (+CAS) on low, the tier round trip, programs stable, the cap (60 fps at
+120 / 144 Hz, 30 at cap 30, 120 uncapped), the light state, settings under `?noauto`, paused and hidden
+frames ignored, night sky (183 stars, mean sky luminance 0.11, the moon disc at 0.94 against 0.32 around it,
+15.7 px for 16.9 expected, measured without bloom), `moonFlare` (sun share 0 with the moon in view at intensity
+0.9, 1 with the golden-hour sun), pigeons in view, the LUT, the contracts, `?slowgpu=8` (scale 1 → 0.85 in 1.0 s on
+SwiftShader's 0.9–1.2 s medium frames, back to 1 after 9.7 s, no tier change), sustained overload (one step
+medium → low), `shadowProxies`, `dynSignal`, `throttleLoop`, the LDR fallback and context loss (the proxies cast
+into the sun's map again after a restore: 13 draws before and after). `capLoop` is pending
+on this branch (the boot loop predates `beginFrame`).
+
+`dynSignal` (synthetic frames through `rs.trackFrame`, no GPU timer, touch device unless noted):
+
+| scenario | before (verifier, F + P) | now |
+|---|---|---|
+| one 250 ms hitch at 60 Hz, 60 s | 0.9 → 0.7 within 2 s, 0.8 after 61 s | scale stays 1 |
+| 30 Hz rAF, idle GPU, 90 s | 0.7 at 8 s, tier medium → low at about 39 s, for good | under 0.95 for 1.3 s, back to 1, `limited` 33.3 ms, tier medium |
+| the same on a desktop (high) | — | under 0.95 for 0.8 s, back to 1, high |
+| fill-bound GPU (4 + 22 ms·scale²) | — | settles at 0.72 (60 fps), probes 0.77 with back-off |
+| GPU only a lower tier saves | — | medium → low at 10 s, 60 fps, kept |
+| CPU-bound, no tier helps | — | medium → low at 10 s, undone at 40 s, not tried again |
+
+`throttleLoop` (the real loop, 30 Hz stub, 25 s): scale 1 → 0.7 → 1 within 1.8 s, then `limited` 33.3 ms,
+tier medium, no change.
+
+**Integration with the foundation** (F's tree `cfaa953` with these files): the souk bot passes (85.4 s, no
+death), the 13 souk negatives pass, and so does the leak cycle (13 loads: memory flat, programs stable, light
+census constant). The foundation's context-loss negative caught a regression here: three replaces
+`renderer.shadowMap` on a restore, so the merged casters lost their shadow-pass hook and the reloaded courtyard
+came back without static shadows (11 % of pixels off); the policy now re-hooks whatever shadow map the renderer
+has, and the scene matches within 1.4 % (budget 3 %). Its boot-budget negative is noisy on this machine: one run in
+three over (19.2 s against 16.6 s, the base tree itself ranging 12.7–21.0 s between runs), two under (18.8 against
+18.9, 15.1 against 20.1); the merged casters add about 70–200 ms to the first chapter load. Every perf check
+passes there: `capLoop` (the real loop under a 120 Hz stub renders 60.0 fps), `nightSky` through the director's
+`night` preset (184 stars, a 15.8 px disc for 16.9 expected, measured without bloom), `moonFlare` (the night
+look's moon: sun share 0), `throttleLoop`, `dynSignal`, `?slowgpu=8` (1.0 s), `shadowProxies` (high 36 % and
+low 54 % fewer shadow draws, mean difference ≤ 0.065/255), `contextLoss` (the proxies cast again once the chapter
+has reloaded) and the rest. The night stub seen on medium: the moon is a disc with its own glow and no sun halo,
+the boy's rim is faint and cool; at golden hour it stays warm.
 
 Golden-hour tour screenshots (seeded, 1280 × 720, high / medium / low) compared with the old tree at the
 six tour spots and the finale: same composition and light; sharper on low (FXAA + luma CAS instead of a plain

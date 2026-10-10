@@ -8,16 +8,22 @@ import { installLdrEncode } from './atmosphere.js';
 import { lut } from './lut.js';
 
 // Quality tiers (FULL_GAME §9.2). scale: internal resolution (× min(DPR, scale)); dyn: dynamic
-// resolution range as a fraction of it; shadowHz < 60 refreshes shadow maps at that rate.
+// resolution range as a fraction of it; shadowHz < 60 refreshes shadow maps at that rate; shadowReach: static
+// casters whose shadow cannot land within that many metres behind the play plane stop casting.
 export const QUALITY = {
-  ultra: { name: 'ultra', scale: 1.5, msaa: 4, shadow: 4096, dof: true, dofTaps: 48, rays: true, tex: 1, fxaa: false, dyn: [0.75, 1], shadowHz: 60, smallCull: false, soft: true, ssao: true, flare: true, particles: 1 },
-  high: { name: 'high', scale: 1.25, msaa: 4, shadow: 2048, dof: true, dofTaps: 36, rays: true, tex: 1, fxaa: false, dyn: [0.8, 1], shadowHz: 60, smallCull: false, soft: true, ssao: true, flare: true, particles: 1 },
-  medium: { name: 'medium', scale: 1.0, msaa: 2, shadow: 2048, dof: true, dofTaps: 16, rays: true, tex: 1, fxaa: true, dyn: [0.7, 1], shadowHz: 30, smallCull: true, soft: true, ssao: false, flare: true, particles: 0.5 },
-  low: { name: 'low', scale: 0.75, msaa: 0, shadow: 1024, dof: false, dofTaps: 16, rays: false, tex: 0.5, fxaa: true, dyn: [0.8, 1], shadowHz: 30, smallCull: true, soft: false, ssao: false, flare: false, particles: 0.25 },
+  ultra: { name: 'ultra', scale: 1.5, msaa: 4, shadow: 4096, dof: true, dofTaps: 48, rays: true, tex: 1, fxaa: false, dyn: [0.75, 1], shadowHz: 60, smallCull: false, shadowReach: Infinity, soft: true, ssao: true, flare: true, particles: 1 },
+  high: { name: 'high', scale: 1.25, msaa: 4, shadow: 2048, dof: true, dofTaps: 36, rays: true, tex: 1, fxaa: false, dyn: [0.8, 1], shadowHz: 60, smallCull: false, shadowReach: Infinity, soft: true, ssao: true, flare: true, particles: 1 },
+  medium: { name: 'medium', scale: 1.0, msaa: 2, shadow: 2048, dof: true, dofTaps: 16, rays: true, tex: 1, fxaa: true, dyn: [0.7, 1], shadowHz: 30, smallCull: true, shadowReach: 14, soft: true, ssao: false, flare: true, particles: 0.5 },
+  low: { name: 'low', scale: 0.75, msaa: 0, shadow: 1024, dof: false, dofTaps: 16, rays: false, tex: 0.5, fxaa: true, dyn: [0.8, 1], shadowHz: 30, smallCull: true, shadowReach: 8, soft: false, ssao: false, flare: false, particles: 0.25 },
 };
 export const TIERS = ['low', 'medium', 'high', 'ultra'];
+// ?slowgpu: relative fill cost of each tier's passes for the synthetic GPU (medium = 1)
+const SLOW_TIER = { low: 0.55, medium: 1, high: 1.35, ultra: 1.8 };
 
 const PARAMS = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
+// where three invalidates a multisampled colour buffer after each resolve (the same test as its WebGLTextures),
+// the soft pass cannot draw onto the resolved scene: it is drawn in the main pass instead (hard additive)
+const MSAA_INVALIDATED = typeof navigator !== 'undefined' && /OculusBrowser/.test(navigator.userAgent);
 
 export class RenderSystem {
   constructor(canvas, tier = 'high') {
@@ -58,19 +64,26 @@ export class RenderSystem {
     this.lost = false; this._lostCbs = []; this._restoredCbs = [];
     // a chapter root leaving the scene takes its live particles with it
     this._fxScene = null;
-    this._onRemoved = (e) => { if (e.child !== this.particles.group && e.child.children.length) this.clearEffects(); };
-    this.frameStart = 0; this.cpuMs = 0; this.gpuMs = 0;
+    this._onRemoved = (e) => { if (e.child !== this.particles.group && e.child.children.length) { this.clearEffects(); this.markDiscontinuity(); } };
+    this._onAdded = (e) => { if (e.child !== this.particles.group && e.child.children.length) this.markDiscontinuity(); };
+    this._camPos = null;
+    this.frameStart = 0; this.cpuMs = 0; this.gpuMs = 0; this.clock = 0; this._skip = 0;
     this._initTimer();
     canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.lost = true; for (const f of this._lostCbs) f(e); }, false);
-    canvas.addEventListener('webglcontextrestored', () => { this.lost = false; this._timerQueries = []; this._initTimer(); this.post.restored(); this.shadows.invalidate(); for (const f of this._restoredCbs) f(); }, false);
+    canvas.addEventListener('webglcontextrestored', () => { this.lost = false; this._timerQueries = []; this._initTimer(); this.post.restored(); this.shadows.reset(); for (const f of this._restoredCbs) f(); }, false);
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
 
-  _q(tier) { return { ...QUALITY[tier], ldr: !this.halfFloat, ...(this.halfFloat ? {} : { msaa: 0 }) }; }
+  _q(tier) {
+    const q = { ...QUALITY[tier], ldr: !this.halfFloat, ...(this.halfFloat ? {} : { msaa: 0 }) };
+    if (MSAA_INVALIDATED && q.msaa > 0) q.soft = false;
+    return q;
+  }
   _configureTier() {
     const q = this.q;
-    this.dyn.setRange(q.dyn[0], 1); this.dyn.reset(1);
+    // a new tier has a new cost: what the resolution trials learnt no longer holds
+    this.dyn.setRange(q.dyn[0], 1); this.dyn.reset(1); this.dyn.clearLimit();
     this.shadows.configure(q);
     this.particles.budget = q.particles;
     this.post.user.dof = this.user.dof && !this.user.batterySaver;
@@ -107,7 +120,7 @@ export class RenderSystem {
     this._configureTier();
     this.resize();
     this._fxWarm = false;
-    this.auto.restart(performance.now());
+    this.auto.restart(this.clock);
     if (!auto) this.autoMax = tier;
     this.onTierChange && this.onTierChange(tier, this.q);
   }
@@ -183,28 +196,41 @@ export class RenderSystem {
     return ok;
   }
 
-  // frame interval in ms of a rendered frame. Paused / hidden frames (and the first two after) are ignored.
+  // a discontinuity (a chapter root added or removed, a teleport, a long stall): the next frames carry compiles
+  // and uploads, not the steady cost, so they are ignored and the windows start again
+  markDiscontinuity(frames = 3) { this._skip = Math.max(this._skip | 0, frames); this.dyn.restart(); }
+
+  // frame interval in ms of a rendered frame. Paused / hidden frames (and the first two after) are ignored, and
+  // so are the frames after a discontinuity. Time is the sum of the tracked intervals (the rAF clock).
   trackFrame(ms, o = {}) {
-    if (o.paused || o.hidden || (typeof document !== 'undefined' && document.hidden) || this.lost) { this._skip = 2; return; }
+    if (o.paused || o.hidden || (typeof document !== 'undefined' && document.hidden) || this.lost) { this.markDiscontinuity(2); return; }
     if (this.cap.skipped) return;
-    if (this._skip > 0) { this._skip--; return; }
     if (!(ms > 0)) return;
-    const now = performance.now();
-    const budget = 1000 / Math.min(60, this.cap.fps || 60);
+    // a stall: over a second and well over the recent frames (a slow clock's frames are not stalls)
+    const avg = this._ivAvg || ms;
+    this._ivAvg = avg + (Math.min(ms, 4000) - avg) * 0.2;
+    if (ms > 1000 && ms > avg * 3) { this.markDiscontinuity(2); return; }
+    if (this._skip > 0) { this._skip--; return; }
+    const now = this.clock += ms, D = this.dyn;
+    const base = 1000 / Math.min(60, this.cap.fps || 60);
     let cost = ms, quantized = true, work;
     if (this.slowGpu) {
-      // synthetic GPU: fixed CPU cost plus a fill cost that scales with the rendered pixels
-      cost = 4 + this.slowGpu * 2.4 * this.dyn.scale * this.dyn.scale; quantized = false; work = cost;
+      // synthetic GPU: fixed CPU cost plus a fill cost that scales with the rendered pixels and the tier's passes
+      cost = 4 + this.slowGpu * 2.4 * D.scale * D.scale * (SLOW_TIER[this.tier] ?? 1); quantized = false; work = cost;
     } else if (this.gpuMs > 0) {
+      // with a GPU timer the interval only counts when our own work fills the frame (CPU-bound, unmeasured);
+      // a long interval with little work is a throttled or display-limited clock, not a cost
       work = Math.max(this.gpuMs, this.cpuMs);
-      cost = Math.max(work, ms > budget * 1.15 ? ms : 0); quantized = false;
+      if (!(ms > base * 1.15 && work > base * 0.6)) { cost = work; quantized = false; }
     }
-    if (this.user.dynres && !this.menuBackground) this.dyn.update(cost, now, budget, quantized);
-    this.post.setScale(this.dyn.scale);
+    if (this.user.dynres && !this.menuBackground) D.update(cost, now, base, quantized, this.cpuMs);
+    this.post.setScale(D.scale);
     if (!this.autoQuality) return;
-    const step = this.auto.update(this.slowGpu ? cost : ms, now, budget, {
-      dynAtMin: this.dyn.atMin, dynAtMax: this.dyn.atMax, work,
-      canUp: !this.coarse && TIERS.indexOf(this.tier) < TIERS.indexOf(this.autoMax),
+    // a delivered period the resolution never changed, with the CPU idle, is the display's (a throttled rAF): it is
+    // the tier's budget too
+    const step = this.auto.update(cost, now, D.displayLimited ? D.budget(base) : base, {
+      dynAtMin: D.atMin || D.limited > 0, dynAtMax: D.atMax, work,
+      canUp: !this.coarse && !D.limited && TIERS.indexOf(this.tier) < TIERS.indexOf(this.autoMax),
     });
     if (step) {
       const idx = TIERS.indexOf(this.tier) + step;
@@ -245,7 +271,19 @@ export class RenderSystem {
     if (this.particles.group.parent !== scene) { this.particles.attach(scene); this._fxWarm = false; }
     // the particles' programs for the pass that draws them (the soft pass sees no lights), before the first emit
     if (!this._fxWarm) { this._fxWarm = true; if (this.q.soft) this.post.compileSoft(this.particles.group, scene, camera); else this.renderer.compile(this.particles.group, camera, scene); }
-    if (this._fxScene !== scene) { this._fxScene?.removeEventListener('childremoved', this._onRemoved); scene.addEventListener('childremoved', this._onRemoved); this._fxScene = scene; }
+    if (this._fxScene !== scene) {
+      this._fxScene?.removeEventListener('childremoved', this._onRemoved); this._fxScene?.removeEventListener('childadded', this._onAdded);
+      scene.addEventListener('childremoved', this._onRemoved); scene.addEventListener('childadded', this._onAdded); this._fxScene = scene;
+    }
+    // a teleport (respawn, checkpoint start, cut to a far shot) brings new geometry and shadow work into view: a
+    // jump of more than 4 m that the camera's recent motion does not explain (a fast crane on slow frames is not one)
+    const cp = camera.position;
+    if (!this._camPos) { this._camPos = cp.clone(); this._camV = 0; }
+    else {
+      const d = cp.distanceTo(this._camPos);
+      if (d > 4 && d > this._camV * 3 + 1) this.markDiscontinuity();
+      this._camV += (Math.min(d, 20) - this._camV) * 0.3; this._camPos.copy(cp);
+    }
     this.particles.update(time);
     VIEW.from(camera);
     this.post.setScale(this.dyn.scale);

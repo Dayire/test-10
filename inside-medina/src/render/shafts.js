@@ -8,7 +8,7 @@ const VS = /* glsl */ `
 varying vec3 vL; varying vec3 vW;
 void main(){ vL = position; vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
 const FS = /* glsl */ `
-uniform vec3 uColor, uTint; uniform float uIntensity, uTime; uniform vec3 uSize;
+uniform vec3 uColor, uTint; uniform float uIntensity, uTime, uSunLight; uniform vec3 uSize;
 varying vec3 vL; varying vec3 vW;
 ${SOFT_GLSL}
 float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719))) * 43758.5453); }
@@ -21,7 +21,7 @@ void main(){
   float ey = smoothstep(-.5, -.3, q.y) * (1. - smoothstep(.25, .5, q.y));
   float streak = .65 + .35 * n3(vec3(vL.x * 2.2, vL.y * .15 + uTime * .05, vL.z * 2.2));
   float dust = .8 + .4 * n3(vW * 2.1 + vec3(uTime * .1, -uTime * .07, 0.));
-  float a = ex * ez * ey * streak * dust * uIntensity * softFade(.9) * softNear(2.);
+  float a = ex * ez * ey * streak * dust * uIntensity * min(uSunLight, 1.2) * softFade(.9) * softNear(2.);
   gl_FragColor = vec4(uColor * uTint * a, 1.);
   #include <fog_fragment>
 }`;
@@ -39,6 +39,8 @@ export class Shafts {
     scene.add(this.group);
     this.dust = null;
     this.tint = { value: new THREE.Color(1, 1, 1) };
+    // the key light's relative strength (G.uSunLight, written by Lighting.update): shafts and dust fade with it
+    this.sunLight = globals?.uSunLight || { value: 1 };
     this.dustColor = { value: new THREE.Color(1, 0.85, 0.6) };
     this.geos = []; this.mats = [];
     this._sunColor = REF.clone();
@@ -48,7 +50,7 @@ export class Shafts {
     const geo = new THREE.BoxGeometry(w, len, d);
     const mat = new THREE.ShaderMaterial({
       vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: { ...SOFT, uColor: { value: new THREE.Color(color) }, uTint: this.tint, uIntensity: { value: intensity }, uTime: this.g.uTime, uSize: { value: new THREE.Vector3(w, len, d) } },
+      uniforms: { ...SOFT, uColor: { value: new THREE.Color(color) }, uTint: this.tint, uIntensity: { value: intensity }, uTime: this.g.uTime, uSunLight: this.sunLight, uSize: { value: new THREE.Vector3(w, len, d) } },
     });
     const m = new THREE.Mesh(geo, mat);
     m.userData.shaft = { p: p.clone(), len };
@@ -66,7 +68,9 @@ export class Shafts {
     m.updateMatrix();
   }
   // follow the look's sun: re-aim every shaft from its ground point and tint shafts and dust.
-  // colour is the sun colour (null keeps the current tint); intensity scales all shafts.
+  // colour is the sun colour (null keeps the current tint). Brightness follows G.uSunLight (the key light's
+  // intensity relative to the golden-hour sun) in the shaders; intensity, when given, is that same relative
+  // strength. Shafts and dust stop drawing once it is about 0 (dawn before the sun is up).
   // The LookDirector calls this on every write, so an unchanged sun costs nothing.
   setSun(dir, color = null, intensity = null) {
     if (dir) {
@@ -87,7 +91,10 @@ export class Shafts {
       this.tint.value.multiplyScalar(1 / Math.max(1, m));
       this.dustColor.value.setRGB(1, 0.85, 0.6).multiply(this.tint.value);
     }
-    if (intensity !== null && intensity !== undefined) this.group.visible = intensity > 0.001;
+    const k = intensity !== null && intensity !== undefined ? +intensity : this.sunLight.value;
+    if (intensity !== null && intensity !== undefined) this.sunLight.value = Math.max(0, k);
+    const on = k > 0.01;
+    if (this.group.visible !== on) { this.group.visible = on; if (this.dust) this.dust.visible = on; }
   }
   // floating dust motes around given regions
   addDust(regions, count = 1500) {
@@ -104,7 +111,7 @@ export class Shafts {
     g.setAttribute('seed', new THREE.BufferAttribute(seed, 1));
     const mat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-      uniforms: { uTime: this.g.uTime, uSun: { value: this.sunDir }, uScale: { value: 1 }, uColor: this.dustColor },
+      uniforms: { uTime: this.g.uTime, uSun: { value: this.sunDir }, uScale: { value: 1 }, uColor: this.dustColor, uSunLight: this.sunLight },
       vertexShader: /* glsl */ `
 attribute float seed; uniform float uTime; uniform float uScale; varying float vA;
 void main(){
@@ -118,8 +125,8 @@ void main(){
   vA = (.4 + .6 * sin(uTime * (1. + seed) + seed * 30.) * .5 + .3) * smoothstep(40., 8., -mv.z);
 }`,
       fragmentShader: /* glsl */ `
-uniform vec3 uColor; varying float vA;
-void main(){ vec2 c = gl_PointCoord - .5; float d = dot(c, c); if (d > .25) discard; gl_FragColor = vec4(uColor * (1. - d * 4.) * vA * .22, 1.);
+uniform vec3 uColor; uniform float uSunLight; varying float vA;
+void main(){ vec2 c = gl_PointCoord - .5; float d = dot(c, c); if (d > .25) discard; gl_FragColor = vec4(uColor * (1. - d * 4.) * vA * .22 * (.25 + .75 * min(uSunLight, 1.2)), 1.);
   #include <fog_fragment>
 }`,
     });

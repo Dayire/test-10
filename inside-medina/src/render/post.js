@@ -5,6 +5,7 @@ import { createOutputMaterial } from './fxaa.js';
 import { FLARE_FS, dirtTexture } from './flare.js';
 import { SSAO_FS, SSAO_BLUR_FS } from './ssao.js';
 import { lut } from './lut.js';
+import { G } from './atmosphere.js';
 
 // HDR post chain. Every target is allocated once at the tier's maximum internal size; dynamic
 // resolution renders into a viewport sub-rect, and every pass maps screen uv → source uv with
@@ -419,16 +420,19 @@ export class PostFX {
       low = this.up[i]; lowMax = ext[i];
     }
 
-    // --- lens flare: ghosts and halo belong to the sun; lamps only ghost faintly and streak
+    // --- lens flare: ghosts and halo belong to the sun; lamps only ghost faintly and streak. sunVisible follows the
+    // key light's direction, which is the moon's at night: the sun's share also needs a strong key light
     const flareAmt = Math.min(P.flare, L.flare);
     const flareOn = !!this.mFlare && flareAmt > 0.01;
     let flareMax = null;
     if (flareOn) {
       const f = this.mFlare.uniforms, g = this.down[2], s1 = this.down[1];
+      const sun = P.sunVisible * THREE.MathUtils.clamp((G.uSunLight.value - 0.2) / 0.4, 0, 1);
+      this.stats.flareSun = +sun.toFixed(3);
       f.tGhost.value = g.texture; f.uGhostMax.value.copy(ext[2]); f.uGhostTexel.value.set(1 / g.width, 1 / g.height);
       f.tStreak.value = s1.texture; f.uStreakMax.value.copy(ext[1]); f.uStreakTexel.value.set(1 / s1.width, 1 / s1.height);
-      f.uThreshold.value = P.flareThreshold * (1 - 0.6 * P.sunVisible) * (q.ldr ? 0.25 : 1); f.uAspect.value = iw / ih;
-      f.uGhost.value = 0.3 + 0.7 * P.sunVisible; f.uHalo.value = P.sunVisible; f.uStreak.value = P.flareStreak;
+      f.uThreshold.value = P.flareThreshold * (1 - 0.6 * sun) * (q.ldr ? 0.25 : 1); f.uAspect.value = iw / ih;
+      f.uGhost.value = 0.3 + 0.7 * sun; f.uHalo.value = sun; f.uStreak.value = P.flareStreak;
       flareMax = this._vp(this.rtFlare, sub(iw, 4), sub(ih, 4));
       this._pass(this.mFlare, this.rtFlare);
     }

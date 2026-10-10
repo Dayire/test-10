@@ -11,9 +11,13 @@ export const G = {
   uWind: { value: new THREE.Vector3(1, 0, 0.2) },
   uWindStrength: { value: 1.0 },
   uSunColorW: { value: new THREE.Color(1, 0.85, 0.6) },
-  // character rim light (the LookDirector may retint it per preset)
+  // character rim light: Lighting.update derives it from the key light every frame (sun or moon colour, scaled
+  // with its strength); set world.light.rimAuto = false to drive these two yourself
   uRimColor: { value: new THREE.Color(1.0, 0.82, 0.6) },
   uRimStrength: { value: 0.55 },
+  // the key light's strength relative to the golden-hour sun (intensity 7), written by Lighting.update: shafts,
+  // their dust and the sun's lens flare follow it (a moon or a sun under the horizon gives them almost nothing)
+  uSunLight: { value: 1 },
 };
 
 // materials that get the rim term: every character material (by name), plus any material

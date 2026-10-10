@@ -82,7 +82,7 @@ export class Flock {
     this.meshes = [this.body, this.head, this.wings];
     this.group = new THREE.Group(); this.group.name = 'flock';
     this.meshes.forEach((im, k) => {
-      im.castShadow = k !== 2; im.receiveShadow = true;
+      im.castShadow = k !== 2; im.receiveShadow = true; im.userData.smallCaster = true; // no pigeon shadows on low / medium
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       im.setColorAt(0, this.birds[0]?.color || new THREE.Color()); // allocate the colour buffer
       im.instanceColor.setUsage(THREE.DynamicDrawUsage);

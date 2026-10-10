@@ -37,6 +37,8 @@ async function open(query, { w = W, h = H } = {}) {
   page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('ERR_')) errors.push(m.text()); });
   await page.goto(`${BASE}?autostart=1&tex=0.1&noauto=1&nosave=1&${query}`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000 });
+  // merged shadow casters are built a few milliseconds per frame: measure once they are in
+  await page.waitForFunction(() => !window.__medina.game.world.rs.shadows?.building, null, { timeout: 300000 });
   await page.evaluate(installHooks);
   return page;
 }
@@ -253,6 +255,8 @@ if (checks || only === 'checks') {
     });
     // night sky: uNight = 1 shows stars (and a moon); uNight = 0 (today's look) shows none
     if (want('nightSky')) result.checks.nightSky = await nightSky(page);
+    // the sun's halo and strong ghosts need a strong key light: none around the moon, full on the golden-hour sun
+    if (want('moonFlare')) result.checks.moonFlare = await moonFlare(page);
     // pigeons in view are drawn even when the boy is far away (menu, intro and cinematic shots)
     if (want('flockView')) result.checks.flockView = await page.evaluate(async () => {
       const M = window.__medina, G = M.game, V = G.camera.position.constructor;
@@ -344,6 +348,12 @@ if (checks || only === 'checks') {
       return { changes, ok: changes.length >= 1 && changes.length <= 2 && gaps.every((g) => g >= 30) && changes.every((c) => ['low', 'medium', 'high', 'ultra'].indexOf(c[2]) < ['low', 'medium', 'high', 'ultra'].indexOf(c[1])) };
     });
     await p2.context().close();
+    // merged static shadow casters: the same frame with and without them (pixels and shadow-pass draws)
+    if (want('shadowProxies')) result.checks.shadowProxies = await shadowProxies();
+    // no GPU timer (Safari / iOS, most Android): the frame interval is the only signal
+    if (want('dynSignal')) result.checks.dynSignal = await dynSignal();
+    // the same through the real boot loop under a 30 Hz requestAnimationFrame stub with an idle GPU
+    if (want('throttleLoop')) result.checks.throttleLoop = await throttleLoop();
     // LDR fallback (no float targets): RGBA8 chain on the low tier renders the same scene
     if (want('ldr')) result.checks.ldr = await ldrCheck();
     // the real game loop under a stubbed 120 Hz requestAnimationFrame renders 60 fps with fpsCap 60
@@ -410,18 +420,164 @@ async function capLoop() {
   return { ...r, ok: Math.abs(r.fps - 60) <= 1.5 };
 }
 
+// the frame rendered with the shadow proxies and again with the batches casting as authored, at fixed time, read
+// back right after rendering: high must match (the view-swept cull changes nothing on screen), low may only lose
+// background shadows (reach); the shadow pass must lose at least 30 % of the draws it has without them
+async function shadowProxies() {
+  const out = {};
+  for (const tier of ['high', 'low']) {
+    const page = await open(`tier=${tier}`);
+    if (!(await page.evaluate(() => typeof window.__medina.game.world.rs.shadows.setProxies === 'function'))) { await page.context().close(); return { skipped: 'no shadow proxies (old build)', ok: true }; }
+    out[tier] = await page.evaluate(async (spots) => {
+      const M = window.__medina, G = M.game, rs = G.world.rs, r = rs.renderer, gl = r.getContext(), S = rs.shadows, sm = r.shadowMap;
+      const frame = () => new Promise((res) => { const n = window.__frames; const t = () => (window.__frames > n + 1 ? res() : requestAnimationFrame(t)); t(); });
+      const grain = rs.post.params.grain;
+      let calls = 0, tris = 0;
+      const smr = sm.render;
+      sm.render = function (...a) { const c = r.info.render.calls, t = r.info.render.triangles; try { return smr.apply(this, a); } finally { calls += r.info.render.calls - c; tris += r.info.render.triangles - t; } };
+      const shot = () => {
+        rs.post.params.grain = 0; calls = 0; tris = 0;
+        S.invalidate(); rs.render(G.scene, G.camera, 12.5);
+        const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        return { px, calls, tris };
+      };
+      const cmp = (A, B) => { let sum = 0, n = 0, diff = 0; for (let i = 0; i < A.length; i += 4) { let d = 0; for (let c = 0; c < 3; c++) { const v = Math.abs(A[i + c] - B[i + c]); sum += v; d = Math.max(d, v); } n += 3; if (d > 16) diff++; } return { mad: +(sum / n).toFixed(3), diffPct: +(diff / (A.length / 4) * 100).toFixed(3) }; };
+      const res = {};
+      for (const s of spots) {
+        M.photo(s.x, s.y, 1, 0.4); await frame(); await frame();
+        const on = shot(), on2 = shot();
+        S.setProxies(false); const off = shot(); S.setProxies(true, { sync: true });
+        res[s.name] = { shadowCalls: [off.calls, on.calls], shadowTris: [off.tris, on.tris], repeat: cmp(on.px, on2.px), ...cmp(off.px, on.px) };
+      }
+      sm.render = smr; rs.post.params.grain = grain;
+      return { stats: { ...S.stats }, spots: res };
+    }, SPOTS);
+    if (shots) {
+      for (const st of [true, false]) {
+        await page.evaluate((st) => { const M = window.__medina; M.game.world.rs.shadows.setProxies(st, { sync: true }); M.photo(97, 0, 1, 0.4); }, st);
+        const n = await page.evaluate(() => window.__frames); await page.waitForFunction((k) => window.__frames >= k, n + 3);
+        fs.writeFileSync(`${shots}/proxies-${st ? 'on' : 'off'}-${tier}-courtyard.png`, await page.screenshot());
+      }
+    }
+    await page.context().close();
+  }
+  const sp = (t) => Object.values(out[t].spots);
+  const fewer = (t) => sp(t).reduce((a, v) => a + v.shadowCalls[1], 0) <= 0.7 * sp(t).reduce((a, v) => a + v.shadowCalls[0], 0);
+  out.ok = fewer('high') && fewer('low') && sp('high').every((v) => v.repeat.mad === 0 && v.mad < 0.4 && v.diffPct < 0.3) && sp('low').every((v) => v.mad < 2);
+  return out;
+}
+
+// rs.trackFrame fed synchronously with the frames of a device without a GPU timer (the clock is the sum of the
+// intervals, so a minute of frames takes milliseconds): a hitch and a throttled 30 Hz clock must cost nothing,
+// while real GPU or CPU overload still lowers the resolution and the tier
+async function dynSignal() {
+  const page = await open('tier=medium&dynres=1');
+  const r = await page.evaluate(() => {
+    const rs = window.__medina.game.world.rs, AQ = rs.auto.constructor;
+    const vs = (c) => Math.ceil(c / (1000 / 60) - 1e-6) * (1000 / 60);
+    const TF = { low: 0.55, medium: 1, high: 1.35, ultra: 1.8 };
+    const keep = { tq: rs._tq, auto: rs.autoQuality, coarse: rs.coarse, dyn: rs.dyn.enabled };
+    const run = (sec, frame, { tier = 'medium', coarse = true } = {}) => {
+      rs.setTier(tier); rs.dyn.enabled = true; rs.user.dynres = true; rs.dyn.reset(1); rs.dyn.clearLimit(); rs.dyn.backoff = 4000;
+      rs.auto = new AQ(); rs.autoQuality = true; rs.coarse = coarse; rs._tq = null; rs._skip = 0; rs.cap.skipped = false;
+      let t = 0, minScale = 1, below = 0, last = 0;
+      const changes = [], from = rs.tier;
+      while (t < sec * 1000) {
+        const f = frame(t, rs.dyn.scale, rs.tier); t += f.ms; last = f.ms;
+        rs.cpuMs = f.cpu; rs.gpuMs = 0;
+        const before = rs.tier;
+        rs.trackFrame(f.ms, {});
+        if (rs.tier !== before) changes.push([+(t / 1000).toFixed(1), before, rs.tier]);
+        minScale = Math.min(minScale, rs.dyn.scale); if (rs.dyn.scale < 0.95) below += f.ms;
+      }
+      const D = rs.dyn;
+      return { from, tier: rs.tier, scale: +D.scale.toFixed(3), minScale: +minScale.toFixed(3), secBelow95: +(below / 1000).toFixed(1), lastMs: +last.toFixed(1), limited: +D.limited.toFixed(1), displayLimited: D.displayLimited, changes, undos: rs.auto.undos };
+    };
+    const out = {
+      // one 250 ms hitch on a vsync-locked 60 Hz phone
+      hitch60: run(60, (t) => ({ ms: t > 5000 && t < 5017 ? 250 : 1000 / 60, cpu: 5 })),
+      // a throttled 30 Hz rAF (iOS Low Power Mode, battery saving) with an idle GPU, on a phone and on a desktop
+      throttle30: run(90, () => ({ ms: 1000 / 30, cpu: 5 })),
+      throttle30Desktop: run(90, () => ({ ms: 1000 / 30, cpu: 5 }), { tier: 'high', coarse: false }),
+      // controls: a fill-bound GPU (lower resolution reaches 60), a GPU only a lower tier saves, and a CPU-bound
+      // frame no tier helps (the step down is undone once, 30 s later)
+      gpuBound: run(40, (t, s) => ({ ms: vs(4 + 22 * s * s), cpu: 5 })),
+      gpuBoundTier: run(60, (t, s, tier) => ({ ms: vs((4 + 30 * s * s) * TF[tier]), cpu: 5 })),
+      cpuBound: run(90, () => ({ ms: vs(22), cpu: 20 })),
+    };
+    rs.setTier('medium'); rs._tq = keep.tq; rs.autoQuality = keep.auto; rs.coarse = keep.coarse; rs.dyn.enabled = keep.dyn; rs.dyn.reset(1); rs.dyn.clearLimit(); rs.auto = new AQ();
+    return out;
+  });
+  await page.context().close();
+  const { hitch60: h, throttle30: t, throttle30Desktop: td, gpuBound: g, gpuBoundTier: gt, cpuBound: c } = r;
+  r.ok = h.minScale >= 0.999 && !h.changes.length &&
+    t.tier === 'medium' && !t.changes.length && t.scale === 1 && t.secBelow95 <= 3 && t.displayLimited && Math.abs(t.limited - 33.3) < 0.5 &&
+    td.tier === 'high' && !td.changes.length && td.scale === 1 &&
+    !g.changes.length && g.scale <= 0.76 && Math.abs(g.lastMs - 16.7) < 0.1 && !g.limited &&
+    gt.changes.length === 1 && gt.tier === 'low' && Math.abs(gt.lastMs - 16.7) < 0.1 &&
+    c.changes.length === 2 && c.changes[0][2] === 'low' && c.changes[1][2] === 'medium' && c.changes[1][0] - c.changes[0][0] >= 30 && c.undos === 1;
+  return r;
+}
+
+// the real boot loop under a 30 Hz requestAnimationFrame stub (fake timestamps, installed before boot) with the GPU
+// timer hidden: the tier and the resolution hold. performance.now follows the stub's clock too, so a frame's own
+// work takes no time on it, as on a throttled phone whose CPU and GPU idle most of each 33 ms
+async function throttleLoop() {
+  const context = await browser.newContext({ viewport: { width: 320, height: 180 } });
+  await context.addInitScript(() => {
+    const raf = window.requestAnimationFrame.bind(window), now = performance.now.bind(performance);
+    const S = window.__rafStub = { on: false, calls: 0, t: 0 };
+    performance.now = () => (S.on ? S.t : now());
+    window.requestAnimationFrame = (cb) => (S.on ? setTimeout(() => { S.t += 1000 / 30; S.calls++; cb(S.t); }, 0) : raf(cb));
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(600000);
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${BASE}?autostart=1&tex=0.1&noauto=1&nosave=1&tier=medium&dynres=1`);
+  await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000 });
+  const r = await page.evaluate(async () => {
+    const rs = window.__medina.game.world.rs, S = window.__rafStub;
+    rs._tq = null; rs.gpuMs = 0; rs.coarse = true; rs.autoQuality = true; rs.applySettings({ fpsCap: 60 });
+    S.t = performance.now(); S.on = true;
+    const t0 = S.t, log = [], cpu = [], wait = (ms) => new Promise((res) => window.setTimeout(res, ms));
+    let minScale = 1, tier = rs.tier; const changes = [];
+    await new Promise((res) => { const f = () => {
+      const st = (S.t - t0) / 1000;
+      if (rs.tier !== tier) { changes.push([+st.toFixed(1), tier, rs.tier]); tier = rs.tier; }
+      minScale = Math.min(minScale, rs.dyn.scale); cpu.push(rs.cpuMs);
+      if (!log.length || log[log.length - 1][1] !== +rs.dyn.scale.toFixed(3)) log.push([+st.toFixed(1), +rs.dyn.scale.toFixed(3), rs.tier]);
+      if (st >= 25) res(); else wait(30).then(f); }; f(); });
+    S.on = false; rs.applySettings({ fpsCap: 'display' }); rs.autoQuality = false;
+    cpu.sort((a, b) => a - b);
+    return { stubSec: +((S.t - t0) / 1000).toFixed(1), frames: S.calls, tier: rs.tier, scale: rs.dyn.scale, minScale: +minScale.toFixed(3), limited: +rs.dyn.limited.toFixed(1), displayLimited: rs.dyn.displayLimited, cpuP50: +cpu[cpu.length >> 1].toFixed(1), changes, log: log.slice(0, 12) };
+  });
+  await context.close();
+  return { ...r, ok: r.tier === 'medium' && !r.changes.length && r.scale === 1 && r.displayLimited };
+}
+
 async function nightSky(page) {
   const take = async (night) => {
-    await page.evaluate((night) => {
-      const M = window.__medina, G = M.game, u = G.world.sky.uniforms;
+    const via = await page.evaluate((night) => {
+      const M = window.__medina, G = M.game, u = G.world.sky.uniforms, D = G.director;
+      // the foundation's LookDirector rewrites every sky uniform each frame: drive it (the night preset, then the
+      // chapter's own look back)
+      if (D && D.apply) {
+        if (night) D.apply('night'); else if (G.restartChapterLook) G.restartChapterLook(); else D.apply('goldenHour');
+        M.photo(60, 0, 1, 0.2);
+        return 'director';
+      }
       if (!window.__skySave) window.__skySave = { z: u.uZenith.value.clone(), h: u.uHorizon.value.clone(), n: u.uNight.value, s: u.uStars.value, m: u.uMoonSize.value, sun: G.world.light.sun.intensity };
       const S = window.__skySave;
       // the values the LookDirector writes for the night preset: uNight = night, uStars = stars, uMoonSize = moonSize (1) × moon (1)
       if (night) { u.uZenith.value.set('#070b1a'); u.uHorizon.value.set('#1c2540'); u.uNight.value = 1; u.uStars.value = 1; u.uMoonSize.value = 1 * 1; G.world.light.sun.intensity = 0.9; }
       else { u.uZenith.value.copy(S.z); u.uHorizon.value.copy(S.h); u.uNight.value = S.n; u.uStars.value = S.s; u.uMoonSize.value = S.m; G.world.light.sun.intensity = S.sun; }
       M.photo(60, 0, 1, 0.2);
+      return 'uniforms';
     }, night);
-    // look up at the sky above the rooftops
+    // look up at the sky above the rooftops; the disc is the sky shader's, so it is measured without bloom and lens
+    // flare (the night look's bloom widens the bright area around the moon)
+    await page.evaluate((night) => { const L = window.__medina.game.world.rs.post.limits; if (!window.__skyLimits) window.__skyLimits = { bloom: L.bloom, flare: L.flare }; if (night) { L.bloom = 0; L.flare = 0; } else Object.assign(L, window.__skyLimits); }, night);
     await page.evaluate(() => { const G = window.__medina.game; G.camRig.setOverride(() => ({ pos: new G.camera.position.constructor(60, 3, 12), look: new G.camera.position.constructor(61, 60, -30), fov: 55 }), 0.001); G.camRig.overrideW = 1; });
     const n = await page.evaluate(() => window.__frames);
     await page.waitForFunction((k) => window.__frames >= k, n + 4);
@@ -452,14 +608,37 @@ async function nightSky(page) {
         // a star: a local peak standing out of a dark sky background
         if (peak && l > 0.2 && m / 4 < 0.3 && l > m / 4 + 0.1) stars++;
       }
-      return { stars, meanSkyLum: +(sum / (w * h)).toFixed(3), moon };
-    }, png.toString('base64'));
+      return { stars, meanSkyLum: +(sum / (w * h)).toFixed(3), moon, flareSun: window.__medina.game.world.rs.post.stats.flareSun ?? null };
+    }, png.toString('base64')).then((r) => ({ ...r, via }));
   };
   const night = await take(true), day = await take(false);
+  await page.evaluate(() => { if (window.__skyLimits) Object.assign(window.__medina.game.world.rs.post.limits, window.__skyLimits); });
   await page.evaluate(() => { const G = window.__medina.game; G.camRig.override = null; G.camRig.overrideW = 0; G.camRig.overrideTarget = 0; });
   // stars, a dark sky, and a moon disc of about the expected size standing out of it
   const m = night.moon, moonOk = m.onScreen && m.disc > m.around + 0.3 && m.brightRadius > m.rPx * 0.5 && m.brightRadius < m.rPx * 1.6;
   return { night, day, moonOk, ok: night.stars >= 30 && night.stars > day.stars * 5 && night.meanSkyLum < day.meanSkyLum && night.meanSkyLum < 0.2 && moonOk };
+}
+
+async function moonFlare(page) {
+  const take = async (night) => {
+    await page.evaluate((night) => {
+      const M = window.__medina, G = M.game, rs = G.world.rs, D = G.director, L = G.world.light;
+      rs.setTier('medium');
+      if (D && D.apply) { if (night) D.apply('night'); else if (G.restartChapterLook) G.restartChapterLook(); else D.apply('goldenHour'); }
+      else { if (window.__sunI === undefined) window.__sunI = L.sun.intensity; L.sun.intensity = night ? 0.9 : window.__sunI; }
+      M.photo(60, 0, 1, 0.2);
+      // look straight at the key light (the moon's direction at night)
+      const V = G.camera.position.constructor, d = (D?.sunDir || G.world.sunDir || L.sunDir).clone().normalize(), p = new V(60, 3, 12);
+      G.camRig.setOverride(() => ({ pos: p, look: p.clone().addScaledVector(d, 50), fov: 50 }), 0.001); G.camRig.overrideW = 1;
+    }, night);
+    const n = await page.evaluate(() => window.__frames);
+    await page.waitForFunction((k) => window.__frames >= k, n + 4);
+    if (shots) fs.writeFileSync(`${shots}/flare-${night ? 'moon' : 'sun'}.png`, await page.screenshot());
+    return page.evaluate(() => { const rs = window.__medina.game.world.rs; return { sunVisible: +rs.post.params.sunVisible.toFixed(2), flareSun: rs.post.stats.flareSun ?? null, keyLight: +window.__medina.game.world.light.sun.intensity.toFixed(2) }; });
+  };
+  const moon = await take(true), sun = await take(false);
+  await page.evaluate(() => { const G = window.__medina.game; G.camRig.override = null; G.camRig.overrideW = 0; G.camRig.overrideTarget = 0; G.world.rs.setTier('low'); });
+  return { moon, sun, ok: moon.sunVisible > 0.5 && moon.flareSun !== null && moon.flareSun < 0.02 && sun.sunVisible > 0.5 && sun.flareSun > 0.5 };
 }
 
 async function lutCheck(page) {
@@ -532,17 +711,31 @@ async function contextLoss() {
     const ev = { lost: 0, restored: 0 };
     rs.onContextLost(() => ev.lost++); const off = rs.onContextRestored(() => ev.restored++);
     const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+    // draws of merged static casters in the sun's map in one forced refresh (through whatever shadowMap the
+    // renderer has then: a restore replaces it, and the proxies must still reach the new one)
+    const shadowDraws = () => {
+      const r = rs.renderer, rbd = r.renderBufferDirect; let n = 0;
+      r.renderBufferDirect = function (cam, sc, geo, mat, obj, grp) { if (cam.isOrthographicCamera && obj.userData.shadowProxy) n++; return rbd.call(this, cam, sc, geo, mat, obj, grp); };
+      try { rs.shadows.invalidate(); rs.render(M.game.scene, M.game.camera, M.game.time); } finally { r.renderBufferDirect = rbd; }
+      return n;
+    };
+    M.photo(97, 0, 1, 0.2); await wait(600);
+    const drawsBefore = shadowDraws();
     const f0 = window.__frames;
     ext.loseContext(); await wait(300);
     const whileLost = { lost: rs.lost, begin: rs.beginFrame(performance.now() + 1000), frames: window.__frames - f0 };
     let renderError = null; try { rs.render(M.game.scene, M.game.camera, 0); } catch (e) { renderError = e.message; }
+    // the foundation reloads the chapter at its checkpoint after a restore: wait for it
+    const reload = M.game.events?.next ? M.game.events.next('chapterStart') : null;
     ext.restoreContext(); await wait(800);
+    if (reload) { await reload; await new Promise((res) => { const f = () => (M.game.mode !== 'loading' ? res() : setTimeout(f, 100)); f(); }); M.photo(97, 0, 1, 0.2); await wait(600); }
     const f1 = window.__frames; await wait(1500);
     off();
-    return { ev, whileLost, renderError, afterRestore: { lost: rs.lost, contextLost: gl.isContextLost(), framesIn1500ms: window.__frames - f1 } };
+    const drawsAfter = shadowDraws();
+    return { ev, whileLost, renderError, afterRestore: { lost: rs.lost, contextLost: gl.isContextLost(), framesIn1500ms: window.__frames - f1 }, shadowDraws: [drawsBefore, drawsAfter], proxies: rs.shadows.stats?.proxies, hasProxies: typeof rs.shadows.setProxies === 'function' };
   });
   await page.context().close();
-  return { ...r, ok: !!r.skipped || (r.ev.lost === 1 && r.ev.restored === 1 && r.whileLost.lost && r.whileLost.begin === false && !r.renderError && !r.afterRestore.lost && !r.afterRestore.contextLost && r.afterRestore.framesIn1500ms > 0) };
+  return { ...r, ok: !!r.skipped || (r.ev.lost === 1 && r.ev.restored === 1 && r.whileLost.lost && r.whileLost.begin === false && !r.renderError && !r.afterRestore.lost && !r.afterRestore.contextLost && r.afterRestore.framesIn1500ms > 0 && (!r.hasProxies || (r.shadowDraws[0] > 0 && r.shadowDraws[1] > 0 && Math.abs(r.shadowDraws[1] - r.shadowDraws[0]) <= 0.2 * r.shadowDraws[0]))) };
 }
 
 if (out) fs.writeFileSync(out, JSON.stringify(result, null, 1));

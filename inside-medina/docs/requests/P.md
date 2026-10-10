@@ -58,7 +58,13 @@ before these land. Each entry: file, change, reason, test. "Landed" marks what t
   each applied once (before this change, P scaled both a second time: 1.80× exposure and 2.78× grain).
   Test: `game.applySettings({brightness: 3, grain: 100})` → `post.params.userExposure === 1`,
   `grainScale === 1`, `userGamma ≈ 0.88`, `exposure` = preset × 1.24.
-- **Rim (optional).** Retint the character rim per preset: `G.uRimColor` (sun colour, the moon's at night).
+- **Rim (no change needed).** P's `Lighting.update` derives the character rim from the key light the director
+  has just written (its colour half way to white, strength 0.55 × √(intensity / 7)), so every preset gets its
+  own rim: the moon's is faint and cool, dawn before sunrise has none. `world.light.rimAuto = false` hands
+  `G.uRimColor` / `G.uRimStrength` back to a caller that wants to drive them.
+- **Shafts and dust (no change needed).** `shafts.setSun(dir, colour)` stays as it is: their brightness follows
+  `G.uSunLight` (the key light's intensity / 7, written by `Lighting.update`), so they fade at dusk and stop
+  drawing at dawn. Passing a third argument (`intensity / 7`) is equivalent and optional.
 
 ## 5. `src/game/game.js` / chapter loader: context loss (landed)
 
@@ -92,23 +98,45 @@ before these land. Each entry: file, change, reason, test. "Landed" marks what t
   so the post chain decodes it too bright (the beam core blows out to white over the carpets with `?ldr=1`).
 - **Test.** `?ldr=1&tier=low`, courtyard: the cone matches the float path within the LDR check's tolerance.
 
-## 10. The low tier's draw-call budget (FULL_GAME §8.5): batches and characters
+## 10. The low tier's budget (FULL_GAME §8.5): characters and the main pass
 
-`tools/perf.mjs` now prints the §8.5 budget per tier and spot (calls of the shadow and main passes, triangles)
-and warns when a spot is over. On low (budget 130 calls, 400 k triangles) every Chapter I spot is over:
-144–177 calls at a 60 fps cadence, and at low's own 30 fps target, where the 30 Hz shadow map refreshes every
-frame, 192 (souk) to 244 (balcony). P's passes are already lean there (shadow refresh, small-caster cull, no
-soft pass, sky, three shaft slabs, one dust draw, the instanced flock). What remains is structural:
+P now merges the level's static batches into shadow-only proxies (12 m tiles × depth bands, 16-bit positions,
+`src/render/shadowpolicy.js`), culls them against the view along the sun, and on low / medium drops the ones
+whose shadow cannot reach the play area. The first part of the earlier request (a near/far batch split with far
+casters off) is no longer needed. Measured with `node tools/perf.mjs --tiers low,medium,high` (P's tree, 640 × 360,
+shadow + main calls / triangles per frame at a 60 fps cadence): medium and high are within budget at all six
+Chapter I spots; low is within at the souk only:
 
-- **Level batches** (`src/game/levelkit.js` / the chapter Batcher, F). A frame at the souk spot draws about
-  55 merged batches in the shadow pass and 70 in the main pass. Each batch is one material over a 40 m chunk,
-  from the play plane to 90 m behind it, so neither frustum culling nor a depth cut can thin it. Change: split
-  each chunk's batches into a near set (z ≥ −12) and a far set, and give the far set `castShadow = false`.
-  Optionally, for the shadow pass, merge each chunk's opaque, non-alpha-tested statics into one positions-only
-  caster. Reason: about 40 of the 86 shadow draws at the souk are far facades whose shadows land only on other
-  far geometry. Test: `node tools/perf.mjs --tiers low`, souk shadow calls per update ≤ 50.
+| low (130 / 400 k) | souk | raised | rooftops | courtyard | balcony | chase |
+|---|---|---|---|---|---|---|
+| calls at 60 fps (shadow + main) / triangles | 128.5 / 303 k | 130.5 / 411 k | 124 / 402 k | 136.5 / 449 k | 146.5 / 511 k | 133.5 / 463 k |
+| calls per frame at 30 fps (shadow + main) | 45 + 106 | 47 + 107 | 44 + 102 | 76 + 101 | 69 + 112 | 47 + 110 |
+
+What remains is the main pass, which P does not own (101–112 draws and 213–354 k triangles before any shadow),
+and casters P cannot prove static.
+
 - **Characters** (`src/assets/character.js`, frozen; the integrator or L). The boy is 21 rigid parts: 21
-  shadow draws and 22 main draws. A guard adds about 13 of each. Change: merge each character's parts by material
-  into skinned meshes (skin, clothRed, clothTrousers, leather, hair, scarf: 6 draws). Reason: it saves about 30
-  draws per pass in the courtyard and the chase. Test: the `__medina.game.rig` mesh count; low, courtyard, ≤ 140
-  calls at 30 fps.
+  shadow draws and 22 main draws; a guard adds about 13 of each. Change: merge each character's parts by
+  material into skinned meshes (skin, clothRed, clothTrousers, leather, hair, scarf: 6 draws). Reason: −15 shadow
+  and −16 main draws per boy, which brings every low spot under 130 calls at 60 fps. Test: the
+  `__medina.game.rig` mesh count; `node tools/perf.mjs --tiers low` shows ≤ 130 calls at every spot.
+- **Lanterns** (`src/chapters/souk/level.js` and the levelkit `lantern`, F / C2). Each hanging lantern is a
+  3 k-triangle mesh that sways (±0.03 rad), so it is a moving caster: 24 shadow draws and 72 k shadow triangles at
+  the courtyard, 28 at the balcony. Change: set `userData.staticCaster = true` on the lantern body (and on any
+  other prop that only sways): the shadow policy then merges it into the static proxies, whose shadow keeps the
+  pose the lantern had when it was merged (within 2 cm of any other). Reason: with the characters merged, this brings the courtyard and the balcony under
+  130 calls at low's own 30 fps. Test: `rs.shadows.stats.proxied` grows by the lantern count; shadow calls at
+  the courtyard −24.
+- **The main pass on low** (`src/game/levelkit.js` / the chapter Batcher, F). About 70 per-material batches per
+  frame (40 m chunks, each from the play plane to 90 m back) carry 213–354 k triangles. Change, low tier only: a
+  cheaper far set (beyond z −20: facades without window, arch and moulding detail, or a baked skyline card per
+  chunk), or a coarser chunk for far geometry. Reason: the triangle budget (400 k with shadows) at the raised,
+  rooftops, courtyard, balcony and chase spots. Test: `node tools/perf.mjs --tiers low`, triangles ≤ 400 k.
+
+## 11. `src/game/game.js` / chapter loader (F): discontinuities (optional)
+
+- **Change.** Call `world.rs.markDiscontinuity?.()` after a respawn or a cut that does not move the camera.
+- **Reason.** Dynamic resolution and auto quality ignore the frames right after a discontinuity (compiles,
+  uploads). P already detects a chapter root added to or removed from the scene and a camera jump of more than
+  4 m, which covers loads, checkpoints and most respawns; this covers the rest.
+- **Test.** `node tools/perf.mjs --only checks --check dynSignal,throttleLoop`.
