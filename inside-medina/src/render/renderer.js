@@ -4,6 +4,7 @@ import { FrameCap, DynRes, AutoQuality } from './dynres.js';
 import { ShadowPolicy } from './shadowpolicy.js';
 import { Particles, setActiveParticles } from './particles.js';
 import { installLdrEncode } from './atmosphere.js';
+import { lut } from './lut.js';
 
 // Quality tiers (FULL_GAME §9.2). scale: internal resolution (× min(DPR, scale)); dyn: dynamic
 // resolution range as a fraction of it; shadowHz < 60 refreshes shadow maps at that rate.
@@ -146,6 +147,12 @@ export class RenderSystem {
     if (on) this.dyn.setRange(0.5, 0.5); else this.dyn.setRange(this.q.dyn[0], 1);
     this.dyn.reset(on ? 0.5 : 1);
     this.post.setScale(this.dyn.scale);
+  }
+
+  // colour look-up crossfade (lut.js): a, b are look names or LUT textures; amount 0 turns it off
+  setLut(a, b = null, mix = 0, amount = 1) {
+    const P = this.post.params, L = (x) => (typeof x === 'string' ? lut(x) : x || null);
+    P.lutA = L(a); P.lutB = L(b); P.lutMix = mix; P.lut = amount;
   }
 
   onContextLost(fn) { this._lostCbs.push(fn); return () => { this._lostCbs = this._lostCbs.filter((f) => f !== fn); }; }

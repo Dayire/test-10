@@ -4,12 +4,13 @@ import { LAYERS, SOFT } from './layers.js';
 import { createOutputMaterial } from './fxaa.js';
 import { FLARE_FS, dirtTexture } from './flare.js';
 import { SSAO_FS, SSAO_BLUR_FS } from './ssao.js';
+import { lut } from './lut.js';
 
 // HDR post chain. Every target is allocated once at the tier's maximum internal size; dynamic
 // resolution renders into a viewport sub-rect, and every pass maps screen uv → source uv with
 // that source's extent (uMax) and clamps its taps inside it, so nothing is ever reallocated.
 //   scene (MSAA) → soft layer (beams, shafts, particles; depth-faded) → SSAO → bloom chain → flare
-//   → DOF → god rays → final grade → [output: FXAA + CAS upscale + grain] → canvas
+//   → DOF → god rays → final grade (+ LUT crossfade) → [output: FXAA + CAS upscale + grain] → canvas
 const VS = /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }`;
 
 function sm(frag, uniforms, defines = {}) {
@@ -129,6 +130,7 @@ void main(){
 
 const FINAL = /* glsl */ `
 uniform sampler2D tColor, tBloom, tDof, tRays, tFlare, tAO, tDirt;
+uniform sampler3D tLutA, tLutB; uniform float uLut, uLutMix; uniform vec2 uLutST;
 uniform vec2 uSceneMax, uSceneTexel, uBloomMax, uDofMax, uRaysMax, uFlareMax, uAOMax;
 uniform float uBloom, uRays, uExposure, uVignette, uGrain, uTime, uSaturation, uContrast, uFade, uCA, uLetterbox, uDofOn, uRaysOn;
 uniform float uFlare, uDirt, uAO, uAOOn, uFlareOn, uGamma;
@@ -181,6 +183,10 @@ void main(){
   p = mix(p, p * p * (3. - 2. * p), uContrast);
   p = p + uLift * (1. - p);
   p = pow(p, vec3(uGamma));
+  if (uLut > 0.) {
+    vec3 q = clamp(p, 0., 1.) * uLutST.x + uLutST.y;
+    p = mix(p, mix(texture(tLutA, q).rgb, texture(tLutB, q).rgb, uLutMix), uLut);
+  }
   float vig = smoothstep(.95, .25, length(cc * vec2(uRes.x / uRes.y, 1.) * .9));
   p *= mix(1., vig, uVignette);
   p = mix(p, uFadeColor, uFade);
@@ -213,6 +219,8 @@ export class PostFX {
       // new: lens flare and dirt, ambient occlusion, user brightness / grain
       flare: 0.3, flareThreshold: 1.2, flareStreak: 1, dirt: 0, ao: 0.55, aoRadius: 0.55,
       userExposure: 1, userGamma: 1, grainScale: 1,
+      // colour look-up: lutA → lutB by lutMix, blended in by lut (0 = off); see lut.js
+      lut: 0, lutA: null, lutB: null, lutMix: 0,
     };
     this.limits = { bloom: Infinity, flare: Infinity, rays: Infinity, dirt: Infinity };
     this.user = { dof: true };
@@ -281,6 +289,7 @@ export class PostFX {
       uFlare: { value: 0 }, uDirt: { value: 0 }, uAO: { value: 0 }, uAOOn: { value: 0 }, uFlareOn: { value: 0 }, uGamma: { value: 1 },
       uShadowTint: { value: new THREE.Color() }, uHighlightTint: { value: new THREE.Color() }, uFadeColor: { value: new THREE.Color() }, uRayColor: { value: new THREE.Color() },
       uLift: { value: new THREE.Color() }, uRes: { value: new THREE.Vector2(1, 1) },
+      tLutA: { value: null }, tLutB: { value: null }, uLut: { value: 0 }, uLutMix: { value: 0 }, uLutST: { value: new THREE.Vector2(1, 0) },
     }, D);
     this.mOut = createOutputMaterial();
   }
@@ -452,6 +461,14 @@ export class PostFX {
     f.uGrain.value = output ? 0 : P.grain * P.grainScale;
     f.uSaturation.value = P.saturation; f.uContrast.value = P.contrast; f.uFade.value = P.fade; f.uCA.value = P.ca;
     f.uLetterbox.value = P.letterbox;
+    // LUT crossfade: a missing side is the identity
+    const lutOn = P.lut > 0.001 && (P.lutA || P.lutB);
+    f.uLut.value = lutOn ? Math.min(1, P.lut) : 0;
+    if (lutOn) {
+      const a = P.lutA || lut('identity'), b = P.lutB || a, n = a.image.width;
+      f.tLutA.value = a; f.tLutB.value = b; f.uLutMix.value = P.lutB ? THREE.MathUtils.clamp(P.lutMix, 0, 1) : 0;
+      f.uLutST.value.set((n - 1) / n, 0.5 / n);
+    }
     f.uShadowTint.value.copy(P.shadowTint); f.uHighlightTint.value.copy(P.highlightTint);
     f.uFadeColor.value.copy(P.fadeColor); f.uRayColor.value.copy(P.rayColor); f.uLift.value.copy(P.lift);
     if (output) {

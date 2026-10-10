@@ -241,6 +241,8 @@ if (checks || only === 'checks') {
     });
     // night sky: uNight = 1 shows stars (and a moon); uNight = 0 (today's look) shows none
     if (want('nightSky')) result.checks.nightSky = await nightSky(page);
+    // LUT crossfade: identity changes nothing, a look changes the frame, toggling compiles nothing
+    if (want('lut')) result.checks.lut = await lutCheck(page);
     // the shared soft layer, particles, shafts.setSun and the dispose() contracts
     if (want('contracts')) result.checks.contracts = await page.evaluate(async () => {
       const M = window.__medina, G = M.game, rs = G.world.rs, r = rs.renderer;
@@ -351,6 +353,41 @@ async function nightSky(page) {
   const night = await take(true), day = await take(false);
   await page.evaluate(() => { const G = window.__medina.game; G.camRig.override = null; G.camRig.overrideW = 0; G.camRig.overrideTarget = 0; });
   return { night, day, ok: night.stars >= 30 && night.stars > day.stars * 5 && night.meanSkyLum < day.meanSkyLum };
+}
+
+async function lutCheck(page) {
+  await page.evaluate(() => { window.__medina.photo(9, 0, 1, 0.4); });
+  const n = await page.evaluate(() => window.__frames);
+  await page.waitForFunction((k) => window.__frames >= k, n + 3);
+  // identical frames (same state, same time) read back right after rendering, so only the LUT differs
+  const r = await page.evaluate(() => {
+    const M = window.__medina, G = M.game, rs = G.world.rs, gl = rs.renderer.getContext(), P = rs.post.params;
+    const grain = P.grain; P.grain = 0;
+    // the final pass's own program must not change when a LUT is switched on, crossfaded or off
+    const progs = new Set(), finalProgram = () => rs.renderer.properties.get(rs.post.mFinal).currentProgram?.id;
+    const shot = () => {
+      rs.render(G.scene, G.camera, 12.5); progs.add(finalProgram());
+      const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      return px;
+    };
+    const mad = (X, Y) => { let s = 0, k = 0; for (let i = 0; i < X.length; i += 4) { s += Math.abs(X[i] - Y[i]) + Math.abs(X[i + 1] - Y[i + 1]) + Math.abs(X[i + 2] - Y[i + 2]); k += 3; } return +(s / k).toFixed(3); };
+    rs.setLut(null, null, 0, 0); const A = shot(), A2 = shot();
+    rs.setLut('identity', null, 0, 1); const B = shot();
+    rs.setLut('night', null, 0, 1); const C = shot();
+    rs.setLut('identity', 'night', 0.5, 1); const H = shot();
+    rs.setLut('night', null, 0, 0.5); const Q = shot();
+    rs.setLut(null, null, 0, 0); P.grain = grain;
+    return { mad: { repeat: mad(A, A2), identity: mad(A, B), night: mad(A, C), crossfadeHalf: mad(A, H), amountHalf: mad(A, Q) }, finalPrograms: [...progs] };
+  });
+  // a look to view
+  await page.evaluate(() => window.__medina.game.world.rs.setLut('night', null, 0, 1));
+  const n2 = await page.evaluate(() => window.__frames);
+  await page.waitForFunction((k) => window.__frames >= k, n2 + 3);
+  if (shots) fs.writeFileSync(`${shots}/lut-night.png`, await page.screenshot());
+  await page.evaluate(() => window.__medina.game.world.rs.setLut(null, null, 0, 0));
+  const m = r.mad;
+  return { ...r, ok: m.repeat === 0 && m.identity < 1 && m.night > 2 && m.crossfadeHalf > m.identity && m.crossfadeHalf < m.night && m.amountHalf < m.night && r.finalPrograms.length === 1 && r.finalPrograms[0] !== undefined };
 }
 
 async function ldrCheck() {
