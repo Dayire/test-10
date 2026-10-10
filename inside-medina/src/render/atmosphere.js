@@ -11,7 +11,29 @@ export const G = {
   uWind: { value: new THREE.Vector3(1, 0, 0.2) },
   uWindStrength: { value: 1.0 },
   uSunColorW: { value: new THREE.Color(1, 0.85, 0.6) },
+  // character rim light: Lighting.update derives it from the key light every frame (sun or moon colour, scaled
+  // with its strength); set world.light.rimAuto = false to drive these two yourself
+  uRimColor: { value: new THREE.Color(1.0, 0.82, 0.6) },
+  uRimStrength: { value: 0.55 },
+  // the key light's strength relative to the golden-hour sun (intensity 7), written by Lighting.update: shafts,
+  // their dust and the sun's lens flare follow it (a moon or a sun under the horizon gives them almost nothing)
+  uSunLight: { value: 1 },
 };
+
+// materials that get the rim term: every character material (by name), plus any material
+// whose userData.rim is true
+export const RIM_MATERIALS = new Set(['skin', 'hair', 'clothRed', 'clothTrousers', 'clothScarf', 'leather', 'robeGuard', 'robeDark', 'wrapGuard', 'tunicRed']);
+const hasRim = (mat) => mat.userData.rim === true || (mat.userData.rim !== false && RIM_MATERIALS.has(mat.name));
+
+// LDR fallback (no float render targets): every material stores its colour Reinhard-encoded
+// so values above 1 survive an RGBA8 target; the post chain decodes it. fog_fragment is the last
+// colour chunk of every built-in material; custom shaders end with #include <fog_fragment> too.
+let ldrInstalled = false;
+export function installLdrEncode() {
+  if (ldrInstalled) return; ldrInstalled = true;
+  installAtmosphereChunks();
+  THREE.ShaderChunk.fog_fragment += '\ngl_FragColor.rgb = max(gl_FragColor.rgb, 0.) / (1. + max(gl_FragColor.rgb, 0.));\n';
+}
 
 let installed = false;
 export function installAtmosphereChunks() {
@@ -69,14 +91,15 @@ export function patchMaterial(mat, opts = {}) {
   if (opts.translucency) defines.USE_TRANSLUCENCY = '';
   if (opts.uvScale !== undefined && opts.uvScale !== 1) defines.USE_UVSCALE = '';
   const key = `${opts.sway ? 'w' : ''}${opts.translucency ? 't' : ''}${defines.USE_UVSCALE !== undefined ? 'u' : ''}`;
-  mat.customProgramCacheKey = () => `medina-${key}`;
+  mat.customProgramCacheKey = () => `medina-${key}${hasRim(mat) ? 'r' : ''}`;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, {
       uSunDirV: G.uSunDirV, uUpV: G.uUpV, uFogSunColor: G.uFogSunColor, uFogParams: G.uFogParams,
       uFogStart: G.uFogStart, uTime: G.uTime, uWind: G.uWind, uWindStrength: G.uWindStrength,
       uUvScale: mat.userData.uvScale, uTransl: mat.userData.transl, uTranslColor: mat.userData.translColor,
-      uSway: mat.userData.sway,
+      uSway: mat.userData.sway, uRimColor: G.uRimColor, uRimStrength: G.uRimStrength,
     });
+    if (hasRim(mat)) shader.defines = { ...(shader.defines || {}), USE_RIM: '' };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
 uniform vec2 uUvScale; uniform float uTime; uniform vec3 uWind; uniform float uWindStrength; uniform float uSway;
@@ -121,7 +144,10 @@ attribute float sway;
 #endif`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
-uniform float uTransl; uniform vec3 uTranslColor;`)
+uniform float uTransl; uniform vec3 uTranslColor; uniform vec3 uRimColor; uniform float uRimStrength;
+#ifndef USE_FOG
+uniform vec3 uSunDirV;
+#endif`)
       .replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>
 #if defined(USE_TRANSLUCENCY) && NUM_DIR_LIGHTS > 0
   {
@@ -130,6 +156,15 @@ uniform float uTransl; uniform vec3 uTranslColor;`)
     float back = max(dot(-normal, L), 0.) + max(dot(normal, L), 0.) * .0;
     float vd = pow(max(dot(normalize(vViewPosition), -L), 0.), 2.) * .8 + .2;
     reflectedLight.directDiffuse += diffuseColor.rgb * uTranslColor * directLight.color * back * vd * uTransl;
+  }
+#endif
+#ifdef USE_RIM
+  {
+    // silhouette rim: fresnel edge, strongest when the sun is behind the character
+    float ndv = clamp(dot(normal, geometryViewDir), 0., 1.);
+    float rim = pow(1. - ndv, 3.);
+    float back = .3 + .7 * pow(clamp(dot(-geometryViewDir, uSunDirV), 0., 1.), 1.5);
+    reflectedLight.indirectDiffuse += uRimColor * mix(diffuseColor.rgb, vec3(1.), .35) * rim * back * uRimStrength;
   }
 #endif`);
   };

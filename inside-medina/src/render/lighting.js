@@ -1,4 +1,10 @@
 import * as THREE from 'three';
+import { G } from './atmosphere.js';
+
+const O = new THREE.Vector3(), X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0);
+const WHITE = new THREE.Color(1, 1, 1);
+// the golden-hour sun's intensity: the reference of G.uSunLight (and of the rim's 0.55)
+export const SUN_REF = 7;
 
 // Sun + sky fill. The shadow frustum follows the camera focus and is snapped
 // to shadow-map texels so shadows never shimmer while scrolling.
@@ -19,9 +25,20 @@ export class Lighting {
     scene.add(this.sun, this.sun.target);
     this.hemi = new THREE.HemisphereLight(p.skyColor, p.groundColor, p.hemiIntensity);
     scene.add(this.hemi);
-    this._tmp = new THREE.Vector3();
+    this._tmp = new THREE.Vector3(); this._lp = new THREE.Vector3();
     this._m = new THREE.Matrix4();
     this._mi = new THREE.Matrix4();
+    this.rimAuto = true;
+  }
+
+  // half-width of the sun's shadow frustum in metres (a chapter's L.shadowExtent; the loader passes 22 otherwise)
+  setExtent(e) {
+    e = +e;
+    if (!(e > 0) || e === this.extent) return;
+    this.extent = e;
+    const s = this.sun.shadow.camera;
+    s.left = -e; s.right = e; s.top = e * 0.8; s.bottom = -e * 0.8;
+    s.updateProjectionMatrix();
   }
 
   setShadowSize(n) {
@@ -31,14 +48,19 @@ export class Lighting {
   }
 
   update(focus) {
-    // light-space basis
+    // what follows the key light (written by the LookDirector before this runs): its relative strength, and the
+    // characters' rim in its colour (half way to white), weaker as it dims (the moon gives a faint cool rim)
+    const k = Math.max(0, this.sun.intensity) / SUN_REF;
+    G.uSunLight.value = k;
+    if (this.rimAuto) { G.uRimColor.value.copy(this.sun.color).lerp(WHITE, 0.5); G.uRimStrength.value = 0.55 * Math.sqrt(Math.min(1, k)); }
+    // light-space basis (scratch vectors: this runs every frame)
     const d = this.sunDir;
-    const up = Math.abs(d.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-    this._m.lookAt(new THREE.Vector3(0, 0, 0), d.clone().negate(), up);
+    const up = Math.abs(d.y) > 0.99 ? X : Y;
+    this._m.lookAt(O, this._tmp.copy(d).negate(), up);
     this._mi.copy(this._m).invert();
     // snap focus in light space
     const texel = (2 * this.extent) / this.sun.shadow.mapSize.x;
-    const lp = focus.clone().applyMatrix4(this._mi);
+    const lp = this._lp.copy(focus).applyMatrix4(this._mi);
     lp.x = Math.round(lp.x / texel) * texel;
     lp.y = Math.round(lp.y / texel) * texel;
     const snapped = lp.applyMatrix4(this._m);
