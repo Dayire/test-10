@@ -59,8 +59,14 @@ async function scenario(name, fn) {
 async function journey(page, press, { pad = false } = {}) {
   const out = {};
   // the menu answers before the chapter is built (§8.6: interactive ≤ 3 s on SwiftShader)
-  await waitFor(page, () => window.__ui && __ui.focus.top?.el.id === 'main' && __ui.focus.current, null, 60000);
+  await waitFor(page, () => window.__ui && __ui.focus.top?.el.id === 'title' && __ui.focus.current, null, 60000);
   out.menuMs = await page.evaluate(() => window.__boot.menu);
+  // …and is on top: the point under the focused entry is that entry (not the splash), while the chapter builds
+  out.menuOnTop = await page.evaluate(async () => {
+    await new Promise((r) => setTimeout(r, 900));
+    const e = __ui.focus.current, b = e.getBoundingClientRect();
+    return { building: !window.__ready, hit: document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)?.closest('.entry') === e };
+  });
   await ready(page);
   out.readyMs = await page.evaluate(() => window.__boot.chapter);
   await frames(page, 3);
@@ -99,7 +105,7 @@ async function journey(page, press, { pad = false } = {}) {
   out.touchHidden = await page.evaluate(() => !document.querySelector('#touch') || document.querySelector('#touch').classList.contains('hide'));
   for (let i = 0; i < 8 && (await focused(page)) !== 'title'; i++) await press('down');
   await press('confirm');
-  await waitFor(page, () => __medina.game.held && __ui.focus.top?.el.id === 'main' && !__medina.game.suspended);
+  await waitFor(page, () => __medina.game.held && __ui.focus.top?.el.id === 'title' && !__medina.game.suspended);
   await frames(page, 3);
   out.titleFocus = await focused(page);
   out.saved = await page.evaluate(() => ({ chapter: __ui.save.data.chapter, cp: __ui.save.data.cp }));
@@ -107,8 +113,8 @@ async function journey(page, press, { pad = false } = {}) {
   await press('confirm');
   await waitFor(page, () => __medina.game.mode === 'play');
   out.resumed = await page.evaluate(() => ({ chapter: __medina.chapter(), cp: __medina.state().cp, menu: __ui.focus.top?.el.id || null }));
-  const ok = out.menuMs <= 3000 && out.toSettings === 'settings' && out.settingsTop === 'settings' && out.tab === 'audio' && out.row === 'volumes.music'
-    && out.music.ui === 4 && out.music.game === 4 && out.backTo === 'main' && out.walked > 0.5 && out.pauseTop === 'pause' && out.titleFocus === 'continue'
+  const ok = out.menuMs <= 3000 && out.menuOnTop.hit && out.toSettings === 'settings' && out.settingsTop === 'settings' && out.tab === 'audio' && out.row === 'volumes.music'
+    && out.music.ui === 4 && out.music.game === 4 && out.backTo === 'title' && out.walked > 0.5 && out.pauseTop === 'pause' && out.titleFocus === 'continue'
     && out.saved.chapter === out.place.chapter && out.saved.cp === out.place.cp && out.resumed.chapter === out.place.chapter && out.resumed.cp === out.place.cp && !out.resumed.menu;
   return [ok || `journey ${JSON.stringify(out)}`, out];
 }
@@ -157,7 +163,7 @@ await scenario('storage', async () => {
   await ready(page); await frames(page, 3);
   const out = await page.evaluate(async () => {
     const r = { available: __ui.storage.available };
-    r.glyph = !document.querySelector('#main .store').classList.contains('hidden');
+    r.glyph = !document.querySelector('#title .store').classList.contains('hidden');
     // settings live in memory and apply
     __ui.setSetting('grain', 30); __ui.setSetting('invertTilt', true);
     r.settings = { grain: __medina.game.settings.grain, invertTilt: __medina.game.settings.invertTilt, saved: __ui.save.data.settings.grain };
@@ -218,7 +224,7 @@ await scenario('persist', async () => {
 await scenario('autostart', async () => {
   const { page, ctx, errors } = await open({ url: `${BASE}?${Q}&autostart=1` });
   await ready(page); await frames(page, 3);
-  const out = await page.evaluate(() => ({ mode: __medina.game.mode, top: __ui.focus.top?.el.id || null, main: document.getElementById('main').hidden, menuOpen: __medina.game.menuOpen, title: __medina.game.titleShown }));
+  const out = await page.evaluate(() => ({ mode: __medina.game.mode, top: __ui.focus.top?.el.id || null, main: document.getElementById('title').hidden, menuOpen: __medina.game.menuOpen, title: __medina.game.titleShown }));
   await ctx.close();
   return [out.mode === 'play' && !out.top && out.main && !out.menuOpen && !out.title && !errors.length ? true : `autostart ${JSON.stringify(out)}`, out];
 });
@@ -298,7 +304,7 @@ await scenario('artifact', async () => {
     await f.waitForFunction(() => __medina.game.mode === 'play', null, { timeout: 120000 });
     await page.waitForTimeout(1500);
     const out = { mb: +mb.toFixed(2), ...st, errors: messages.slice(0, 4) };
-    const ok = mb <= 3 && st.chapter === 'souk' && st.menu === 'main' && st.origin === 'null' && st.storage === false && (st.sw === 'none' || st.sw === 'refused' || st.sw === 0) && !st.controller && !st.external.length && !messages.length;
+    const ok = mb <= 3 && st.chapter === 'souk' && st.menu === 'title' && st.origin === 'null' && st.storage === false && (st.sw === 'none' || st.sw === 'refused' || st.sw === 0) && !st.controller && !st.external.length && !messages.length;
     return [ok || `artifact ${JSON.stringify(out)}`, out];
   } finally { await ctx.close(); await srv.close(); }
 });

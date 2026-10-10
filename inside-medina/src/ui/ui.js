@@ -23,7 +23,6 @@ export class UI {
     this.root = root; this.params = params; this.save = save; this.storage = storage; this.dev = dev; this.artifact = artifact;
     this.game = null; this.input = null; this.audio = null; this.world = null;
     this.handlers = {};
-    this.autostart = !!params.autostart;
     this.ready = false; this.queued = null; this.frameNo = 0;
     this.local = (storage?.getJSON?.(UI_KEY)) || {};
     this.bootCompleted = !!save?.data?.completed; // the credits are skippable once the journey has been finished
@@ -69,6 +68,9 @@ export class UI {
     for (const ev of ['contextmenu', 'dblclick', 'gesturestart', 'selectstart']) document.addEventListener(ev, (e) => { if (!editable(e.target)) e.preventDefault(); }, { passive: false });
     this.el('lost').addEventListener('click', () => this.handlers.reload?.());
   }
+
+  // ?autostart=1 skips every menu (read live: tests turn it off to see the title)
+  get autostart() { return !!this.params.autostart; }
 
   // ------------------------------------------------------------------ compatibility surface (game.js, boot.js)
   on(a, fn) { this.handlers[a] = fn; }
@@ -171,14 +173,11 @@ export class UI {
     const g = this.game, rs = this.world?.rs;
     const on = !!(g && this.ready && g.held && this.focus.top && !g.suspended);
     if (rs && on !== this._menuBg) { this._menuBg = on; rs.setMenuBackground?.(on); }
-    // a deeper vignette behind the menus, through the look director (no backdrop filter)
-    const D = g?.director;
-    if (D && on !== this._dim) {
-      this._dim = on;
-      if (on) D.override({ vignette: Math.max(0.62, (D.base?.vignette ?? 0.45) + 0.2) });
-      else if (D.ov && 'vignette' in D.ov) { delete D.ov.vignette; D.write?.(); }
-    }
+    this._dim = on;
   }
+  // a deeper post vignette behind the menus over the title (never a backdrop filter): applied to the post
+  // parameters after the look director has written them, so the look itself carries no override
+  beforeRender(P) { if (this._dim && P) P.vignette = Math.max(0.62, P.vignette + 0.2); }
 
   deviceChanged(d) {
     this.root.dataset.device = d;
@@ -291,7 +290,7 @@ export class UI {
   // ------------------------------------------------------------------ main menu
   buildMain() {
     const el = this.mainEl = document.createElement('section');
-    el.id = 'main'; el.className = 'menu pending'; el.setAttribute('role', 'menu'); el.setAttribute('aria-label', 'main menu');
+    el.id = 'title'; el.className = 'menu pending'; el.setAttribute('role', 'menu'); el.setAttribute('aria-label', 'main menu');
     el.innerHTML = `
       <header class="brand">
         <h1 class="wordmark" aria-label="Medina">MEDINA</h1>
@@ -503,7 +502,7 @@ export class UI {
   // ------------------------------------------------------------------ credits
   buildCredits() {
     const el = document.createElement('section');
-    el.id = 'credits'; el.setAttribute('aria-label', 'credits');
+    el.id = 'end'; el.setAttribute('aria-label', 'credits');
     el.innerHTML = `<div class="scrim"></div><div class="roll"><div class="track"></div></div><button class="skip" aria-label="skip">${icon('back')}</button>`;
     this.menus.appendChild(el);
     const skip = el.querySelector('.skip');

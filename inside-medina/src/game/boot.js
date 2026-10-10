@@ -59,6 +59,10 @@ export async function boot(canvas, params) {
   try { world = createWorld(canvas, { tier, texScale: +(P.tex || dev.tex), bake: false }); }
   catch (e) { console.warn(e); pre = false; ui.fatal('webgl'); window.__fatal = 'webgl'; return null; }
   if (P.noauto || (S.quality && S.quality !== 'auto')) world.rs.autoQuality = false;
+  if (world.software) ui.root.classList.add('soft-gl'); // decorative endless motion holds still (style.css)
+  // the menus deepen the post vignette after the look has written its own (ui.beforeRender)
+  const render = world.rs.render.bind(world.rs);
+  world.rs.render = (scene, camera, time) => { ui.beforeRender(world.rs.post?.params); return render(scene, camera, time); };
   mark('world');
   ui.progress(0.06, 'sweeping the alleys…');
   await nextFrame();

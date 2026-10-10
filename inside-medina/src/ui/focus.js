@@ -11,7 +11,7 @@ export class Screen {
     Object.assign(this, { modal: false, grid: false }, opts);
     this.ui = ui; this.last = null; this.isOpen = false;
     const el = this.el;
-    el.classList.add('screen'); el.hidden = true; el.inert = true;
+    el.classList.add('screen', 'hidden'); el.hidden = true; el.inert = true;
     // pointer: hover focuses, click acts (touch: tap acts)
     el.addEventListener('pointerover', (e) => {
       if (e.pointerType !== 'mouse' || !this.isOpen || this.ui.focus.top !== this) return;
@@ -32,7 +32,7 @@ export class Screen {
     clearTimeout(this._t);
     const el = this.el;
     el.hidden = false; el.inert = false;
-    el.classList.remove('out');
+    el.classList.remove('out', 'hidden');
     void el.offsetWidth; // start the transition from the closed pose
     el.classList.add('in');
     this.isOpen = true;
@@ -42,10 +42,11 @@ export class Screen {
     this.isOpen = false;
     el.classList.remove('in');
     el.inert = true;
-    if (instant) { el.hidden = true; el.classList.remove('out'); return; }
+    // fully hidden: the `hidden` attribute, and the class the engine's tests read (#title, #card)
+    if (instant) { el.hidden = true; el.classList.remove('out'); el.classList.add('hidden'); return; }
     el.classList.add('out');
     clearTimeout(this._t);
-    this._t = setTimeout(() => { if (!this.isOpen) { el.hidden = true; el.classList.remove('out'); } }, OUT_MS);
+    this._t = setTimeout(() => { if (!this.isOpen) { el.hidden = true; el.classList.remove('out'); el.classList.add('hidden'); } }, OUT_MS);
   }
 }
 

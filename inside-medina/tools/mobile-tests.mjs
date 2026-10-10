@@ -72,7 +72,7 @@ async function device(dev) {
   if (want('menus') || want('controls')) {
     await page.goto(`${BASE}?${Q}`); await ready(page); await frames(page, 4);
     const hidden = await page.evaluate(() => { const t = document.getElementById('touch'); return { exists: !!t, hide: t?.classList.contains('hide'), vis: t && getComputedStyle(t).visibility }; });
-    const menuBad = judge(await targets('#main .entry'));
+    const menuBad = judge(await targets('#title .entry'));
     await page.evaluate(() => __ui.settings.open()); await frames(page, 3); await page.waitForTimeout(600);
     const setBad = [];
     for (let t = 0; t < 5; t++) { await page.evaluate((t) => __ui.settings.setTab(t), t); await frames(page, 2); setBad.push(...judge(await targets('#settings .tab, #settings .rows .item'))); }
@@ -84,7 +84,7 @@ async function device(dev) {
     const cfBad = judge(await targets('#confirm .item'));
     await page.evaluate(() => __ui.focus.close(__ui.confirmS)); await frames(page, 2); await page.waitForTimeout(500);
     // a tap on "new journey" acts
-    const nj = await page.evaluate(() => { const b = document.querySelector('#main .entry[data-k="new"]').getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
+    const nj = await page.evaluate(() => { const b = document.querySelector('#title .entry[data-k="new"]').getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
     await tap(...centre(nj));
     await page.waitForFunction(() => __medina.game.mode === 'play', null, { timeout: 60000 });
     await frames(page, 4); await page.waitForTimeout(400);
