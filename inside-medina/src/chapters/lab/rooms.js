@@ -85,7 +85,7 @@ export function* buildLab(game, kit) {
   const G1 = gate('G1', 13.0, 2.6, 2.5, () => (L1.done ? 1 : 0));
   wall(12.6, 13.4, [[2.6, 5.0], [5.8, 9]], { windows: [[5.0, 5.8]] });
   sun('sun1', 13.45, 5.4);
-  cam(-6, { dist: 17.5, distPortrait: 24, height: 2.6, lookY: 3.6, fov: 39, ahead: 0.6 });
+  cam(-6, { dist: 17.5, height: 2.6, lookY: 3.6, fov: 39, ahead: 0.6 });
   room('sunlock', () => { L1.setState({ level: 1, done: true }); cloth.setState({ x0: 7.0, y0: 4.4, x1: 8.2, y1: 5.0 }); G1.setState({ open: 1 }); });
   L.hints.push({ x0: 3, x1: 12, after: 6, glyph: 'up', unless: () => L1.done });
 
@@ -98,7 +98,7 @@ export function* buildLab(game, kit) {
   const G2 = gate('G2', 30.2, 2.6, 2.5, () => (L2.done ? 1 : 0));
   wall(29.8, 30.6, [[2.6, 5.6], [6.4, 12]], { windows: [[5.6, 6.4]] });
   sun('sun2', 30.65, 6.05);
-  cam(16, { dist: 17.5, distPortrait: 24, height: 2.8, lookY: 3.8, fov: 39, ahead: 0.6 });
+  cam(16, { dist: 17.5, height: 2.8, lookY: 3.8, fov: 39, ahead: 0.6 });
   room('shadow', () => { CR1.setState({ x: 21.8, y: 0 }); L2.setState({ level: 1, done: true }); G2.setState({ open: 1 }); });
   yield 0.2;
 
@@ -110,7 +110,7 @@ export function* buildLab(game, kit) {
   const G3 = gate('G3', 46.0, 2.2, 2.0, () => (L3.done ? 1 : 0));
   wall(45.6, 46.4, [[2.2, 2.4], [3.2, 12]], { windows: [[2.4, 3.2]] });
   sun('sun3', 46.45, 2.93);
-  cam(32, { dist: 17.5, distPortrait: 24, height: 2.4, lookY: 2.9, fov: 39, ahead: 1.0, focusBias: 1.5 });
+  cam(32, { dist: 17.5, height: 2.4, lookY: 2.9, fov: 39, ahead: 1.0, focusBias: 1.5 });
   room('kerb', () => { M1.setState({ x: 40.0, y: 0, alpha: -15 }); L3.setState({ level: 1, done: true }); G3.setState({ open: 1 }); });
 
   // ================================================================ 4 TILT: an anchored mirror, tilted (II-B2)
@@ -120,7 +120,7 @@ export function* buildLab(game, kit) {
   const G4 = gate('G4', 62.0, 2.4, 2.2, () => (L4.done ? 1 : 0));
   wall(61.6, 62.4, [[2.4, 2.6], [3.4, 12]], { windows: [[2.6, 3.4]] });
   sun('sun4', 62.45, 3.20);
-  cam(48, { dist: 17.5, distPortrait: 24, height: 2.8, lookY: 3.6, fov: 39, ahead: 0.8, focusBias: 1.2 });
+  cam(48, { dist: 17.5, height: 2.8, lookY: 3.6, fov: 39, ahead: 0.8, focusBias: 1.2 });
   room('tilt', () => { M2.setState({ x: 55.0, y: 0, alpha: -45 }); L4.setState({ level: 1, done: true }); G4.setState({ open: 1 }); });
   L.hints.push({ x0: 53.5, x1: 55, after: 3, glyph: 'tilt', unless: (g) => L4.done || g.player.grip?.mirror !== M2 || M2.target !== 30 });
   yield 0.3;
@@ -135,7 +135,7 @@ export function* buildLab(game, kit) {
   wall(79.6, 80.4, [[2.6, 3.2], [4.0, 12]], { windows: [[3.2, 4.0]] });
   sun('sun5', 80.45, 3.732);
   vbox(68.4, 1.7, FZ, 70.0, 1.9, -0.6, 'woodDark', { base: 1.7 }); // a balcony ledge above, out of reach unless he jumped
-  cam(64, { dist: 17.5, distPortrait: 24, height: 2.4, lookY: 3.0, fov: 39, ahead: 0.8, focusBias: 2 });
+  cam(64, { dist: 17.5, height: 2.4, lookY: 3.0, fov: 39, ahead: 0.8, focusBias: 2 });
   room('jumpfix', () => { MJ.setState({ x: 71.0, y: 0, alpha: 0 }); LJ.setState({ level: 1, done: true }); G5.setState({ open: 1 }); });
   L.hints.push({ x0: 69.5, x1: 71, after: 3, glyph: 'up', unless: (g) => LJ.done || g.player.grip?.mirror !== MJ });
 
@@ -148,7 +148,7 @@ export function* buildLab(game, kit) {
   const G6 = gate('G6', 104.0, 2.4, 2.2, () => 1 - B1.level);
   wall(103.6, 104.4, [[2.4, 2.8], [3.6, 12]], { windows: [[2.8, 3.6]] });
   sun('sun6', 104.45, 3.21);
-  cam(82, { dist: 17.5, distPortrait: 24, height: 2.2, lookY: 2.6, fov: 39, ahead: 0.8, focusBias: 3 });
+  cam(82, { dist: 17.5, height: 2.2, lookY: 2.6, fov: 39, ahead: 0.8, focusBias: 3 });
   room('bolt', () => { CR3.setState({ x: 95.4, y: 0 }); B1.setState({ level: 0, done: false }); G6.setState({ open: 1 }); });
   yield 0.4;
 
@@ -168,7 +168,7 @@ export function* buildLab(game, kit) {
   const G7 = gate('G7', 126.0, 2.4, 2.2, () => (L7.done ? 1 : 0));
   wall(125.6, 126.4, [[2.4, 2.6], [3.4, 12]], { windows: [[2.6, 3.4]] });
   sun('sun7', 126.45, 2.96);
-  cam(106, { dist: 18, distPortrait: 25, height: 3.2, lookY: 4.6, fov: 40, ahead: 0.6, focusBias: 2 });
+  cam(106, { dist: 18, height: 3.2, lookY: 4.6, fov: 40, ahead: 0.6, focusBias: 2 });
   room('crank', () => { M7.setState({ x: 119.9, y: 0, alpha: -30 }); F2.setState({ alpha: 45 }); L7.setState({ level: 1, done: true }); G7.setState({ open: 1 }); });
   yield 0.5;
 
@@ -194,7 +194,7 @@ export function* buildLab(game, kit) {
   kerb(132.1, 132.25); kerb(133.69, 133.84); star(133.34);
   wall(146.1, 146.9, [[2.8, 4.2], [5.0, 9.95], [10.75, 14]], { windows: [[4.2, 5.0], [9.95, 10.75]] });
   sun('W7', 146.0, 10.35); sun('W8', 146.0, 4.59);
-  cam(128, { dist: 18.5, distPortrait: 26, height: 3.4, lookY: 4.8, fov: 40, ahead: 0.6, focusBias: 3 });
+  cam(128, { dist: 18.5, height: 3.4, lookY: 4.8, fov: 40, ahead: 0.6, focusBias: 3 });
   room('burn', () => { M5.setState({ x: 133.34, y: 0, alpha: -45 }); rope.setState({ heat: 1, burnt: true }); cwState.t = 2; bridge.setState({ angle: 0 }); });
   yield 0.6;
 
@@ -226,8 +226,8 @@ export function* buildLab(game, kit) {
   const G9 = gate('G9', 201.5, 5.0, 4.6, () => (L8.done ? 1 : 0), { w: 3.4, thick: 0.6 });
   add(new SunRay({ id: 'lastRay', x: 214, y: 12.0, angle: 180, clipByTerminator: term }));
   L.triggers.push(new Trigger({ id: 'dusk', x0: 205.5, x1: 212, fn: () => restoreLook() }));
-  cam(176, { dist: 19, distPortrait: 27, height: 4.8, lookY: 6.4, fov: 40, ahead: 1.0, focusBias: 4 });
-  cam(196, { dist: 19, distPortrait: 27, height: 4.8, lookY: 5.6, fov: 40, ahead: 0.6, focusBias: 1 });
+  cam(176, { dist: 19, height: 4.8, lookY: 6.4, fov: 40, ahead: 1.0, focusBias: 4 });
+  cam(196, { dist: 19, height: 4.8, lookY: 5.6, fov: 40, ahead: 0.6, focusBias: 1 });
   room('clock', () => { L8.setState({ level: 1, done: true }); ladder9.setState({ t: 1, target: 1 }); G9.setState({ open: 1 }); clock.setState({ t: 0, running: false, expired: false }); });
   yield 0.7;
 
@@ -250,8 +250,8 @@ export function* buildLab(game, kit) {
   vbox(208, 0, -9.6, 258, 17, -8.4, 'plasterCream', { base: 0, grime: 3 });
   // lamp posts on the open square (no facade to hang a bracket on)
   for (const x of [210.5, 238.5, 256.5]) { pole(K, x, 0, 3.55, FZ + 0.25, 0.07); lantern(x, 3.3, FZ + 0.25, { bracketDir: 1, light: true, intensity: 2.0 }); }
-  cam(208, { dist: 18, distPortrait: 26, height: 3.0, lookY: 3.6, fov: 39, ahead: 1.0, focusBias: 2 });
-  cam(256, { dist: 18, distPortrait: 26, height: 3.0, lookY: 3.6, fov: 39, ahead: 1.0, focusBias: 1 });
+  cam(208, { dist: 18, height: 3.0, lookY: 3.6, fov: 39, ahead: 1.0, focusBias: 2 });
+  cam(256, { dist: 18, height: 3.0, lookY: 3.6, fov: 39, ahead: 1.0, focusBias: 1 });
   room('lamp', () => { LM1.setState({ x: 229.45, y: 0, alpha: 0 }); LL1.setState({ level: 1, done: true }); G10.setState({ open: 1 }); LM2.setState({ x: 235.25, y: 0, alpha: -45 }); });
   yield 0.8;
 
@@ -294,10 +294,10 @@ export function* buildLab(game, kit) {
   const G11 = gate('G11', 340.0, 2.6, 2.4, () => (ML.done ? 1 : 0));
   block(339.6, 340.4, 2.6, 14, { mat: 'sandstone', coping: null });
   for (const x of [262.5, 288.5, 308.5]) lantern(x, 3.2, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.0 });
-  cam(259, { dist: 16.5, distPortrait: 24, height: 2.2, lookY: 2.4, fov: 38, ahead: 1.6 });
-  cam(296, { dist: 16.5, distPortrait: 24, height: 2.2, lookY: 2.6, fov: 38, ahead: 2.0 });
-  cam(311, { dist: 19, distPortrait: 27, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 6 });
-  cam(342, { dist: 19, distPortrait: 27, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 1 });
+  cam(259, { dist: 16.5, height: 2.2, lookY: 2.4, fov: 38, ahead: 1.6 });
+  cam(296, { dist: 16.5, height: 2.2, lookY: 2.6, fov: 38, ahead: 2.0 });
+  cam(311, { dist: 19, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 6 });
+  cam(342, { dist: 19, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 1 });
   room('wire', () => { bkS.t = 6; bk.enabled = true; bk.x = 270.1; guard.setState({ state: 'asleep', x: 303.6, y: 0, vx: 0, vy: 0, t: 5, facing: 1 }); MM.setState({ x: 330.0, y: 0, alpha: -45 }); ML.setState({ level: 1, done: true }); G11.setState({ open: 1 }); });
   yield 0.85;
 
@@ -345,10 +345,10 @@ export function* buildLab(game, kit) {
     for (const sx of [-1, 1]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 2.6, 8), game.mats.get('brassAged')); leg.position.set(478 + sx * 1.1, 13.2, -0.6); leg.rotation.z = sx * 0.45; leg.castShadow = true; game.add(leg); } }
   add(new Capstan(game, { id: 'capstan', x: 475.5, y: 12, mirror: H, dir: -1, rate: 6, magnet: { alpha: 3.2, window: 2 }, range: [-10, 40] }));
   add(new SunRay({ id: 'sunrise', x: 500, y: 14.5, angle: 180, clipByTerminator: termD }));
-  cam(346, { dist: 18, distPortrait: 26, height: 3.6, lookY: 5.0, fov: 40, ahead: 0.6, focusBias: 1 });
-  cam(360, { dist: 15, distPortrait: 24, height: 2.4, lookY: 2.8, fov: 38, ahead: 2.2 });
-  cam(456, { dist: 15, distPortrait: 24, height: 2.4, lookY: 2.8, fov: 38, ahead: 1.6 });
-  cam(466, { dist: 20, distPortrait: 28, height: 6.0, lookY: 8.2, fov: 40, ahead: 0.6, focusBias: 1 });
+  cam(346, { dist: 18, height: 3.6, lookY: 5.0, fov: 40, ahead: 0.6, focusBias: 1 });
+  cam(360, { dist: 15, height: 2.4, lookY: 2.8, fov: 38, ahead: 2.2 });
+  cam(456, { dist: 15, height: 2.4, lookY: 2.8, fov: 38, ahead: 1.6 });
+  cam(466, { dist: 20, height: 6.0, lookY: 8.2, fov: 40, ahead: 0.6, focusBias: 1 });
   yield 0.95;
 
   // ================================================================ chapter hooks

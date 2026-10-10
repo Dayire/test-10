@@ -33,7 +33,7 @@ the normal (−sin α, cos α)) block instead.
 | `light/time.js` | `Terminator`, `SunClock`, `Hatch` |
 | `light/beams.js` | `BeamRenderer`: ribbons, sunspots and glints on `LAYERS.BEAMS`, the priority pool light |
 | `light/index.js` | everything above, one import |
-| `assets/lightprops.js` | `trayMesh`, `mirrorStand`, `crankBracket`, `crankHandle`, `rosetteLock`, `beamLampMesh`, `sensorMesh`, `ropeMesh`, `starInlay`, `starCookie`, `lightTextures`, `lightMaterials` (registers `mirrorBrass`, `brassAged`, `silverPlate`, `ironDark`, `hemp`) |
+| `assets/lightprops.js` | `trayMesh`, `mirrorStand`, `crankBracket`, `crankHandle`, `capstanMesh`, `rosetteLock`, `beamLampMesh`, `sensorMesh`, `ropeMesh`, `starInlay`, `starCookie`, `lightTextures`, `lightMaterials` (registers `mirrorBrass`, `brassAged`, `silverPlate`, `ironDark`, `hemp`) |
 
 ## Using it in a chapter
 
@@ -54,7 +54,9 @@ const S2 = new Searchlight(game, { id: 'S2', origin, x0, x1, aimY: 0.4, covers }
 
 The system owns its children: it steps, snapshots (`getState` aggregates them by id) and renders them; do not add
 them to `L.entities`. `prepare(cp)` sets solved states with each child's `setState`. Gates, hatches and bridges stay
-ordinary entities driven by `source()` closures (`lock.done`, `1 - bolt.level`, `rope.burnt`).
+ordinary entities driven by `source()` closures (`lock.done`, `1 - bolt.level`, `rope.burnt`). A `Gate` is a lattice
+portcullis and lets light through by default (`light: 'block'` for a solid door): lifted, it slides up past the window
+above it, which would otherwise shut the ray that holds a sun-bolt.
 
 | Entity | Main options | State |
 |---|---|---|
@@ -64,7 +66,7 @@ ordinary entities driven by `source()` closures (`lock.done`, `1 - bolt.level`, 
 | `Capstan` | `x, y, mirror (continuous), dir, rate 6, magnet {alpha, window 2}, range` | via the mirror |
 | `SunLock` | `x, y, r 0.35, need (0.8 gold, 0.4 silver), mode latch / hold / bolt, chargeT 0.6, decayT 0.5, metal gold / silver / iron, degree, mount (stem length to the wall), rod [[x, y, z], …], onOpen, rides {body, ox, oy}` | `{level, done}`; `value` = gate source |
 | `Photocell` | a hold-mode lock, r 0.15, chargeT 0.08, may `ride` a body | `{level, done}` |
-| `LampEye` | `x, y, z, r 0.8, lamp, onHit, hold 0.1, dazzle 7` (reflected light only; assist +50 %) | `{fired}` |
+| `LampEye` | `x, y, z, r 0.8, lamp, onHit, hold 0.1, dazzle 7, face` (reflected light only; assist +50 %; with `face` (deg) only light travelling toward that face counts: the fortress lamp looks east, so a beam sent straight back from the west never ends the chapter) | `{fired}` |
 | `Sensor` | `from [x, y], to [x, y], darkT 0.2, lamp (a Searchlight to slave)` — creates its own `BeamLamp` | `{state}` |
 | `BurnRope` | `x0, y0, x1, y1, need 1.6, burnT 1.5, cool 0.5, onBurnt` | `{heat, burnt}` |
 | `Occluder` | `x0, y0, x1, y1, mesh`; `to({y0, y1}, sec)` | `{x0, y0, x1, y1}` |
@@ -92,6 +94,8 @@ ordinary entities driven by `source()` closures (`lock.done`, `1 - bolt.level`, 
   With `settings.aimSnap` (default on), if that notch lights no target but a neighbour does (a probe trace), the
   neighbour wins.
 - A grip survives a step down of up to 0.26 m (a kerb), so pushing a stand off a rail kerb keeps the hands on it.
+- `player.reachable()` → `'mirror' | 'crank' | 'capstan' | 'crate' | 'lever' | null`: what grab holds or would take
+  now (the touch grab button's icon, requests/L.md #5).
 - `player.animContext()` adds `tilt {age, dir, rim}`, `crankA`, `capstanV`; animator states `crank`, `capstan`,
   `reach`, `sit` (DepthWalk poses `reach` / `insert` / `sit`), the tilt overlay on push / pull, the guard's
   `shieldEyes` and `asleep`, and the `sunset` death (a slow kneel).
@@ -119,7 +123,8 @@ two spots near the view.
   still read on a phone. A segment that ends in a lamp's eye is drawn to the lamp's real z. A searchlight's own
   first segment is its cone, not a ribbon.
 - Where a beam ends: a sunspot glow (a lock's glow sits on its lens); where it reflects: a star glint above the bloom
-  threshold (one instanced draw for both). `settings.reduceFlashing` dims them.
+  threshold (one instanced draw for both; the glint texture keeps its strength in alpha). `settings.reduceFlashing`
+  dims them.
 - The brightest end spot is a priority dynamic source of the light pool (priority 3), so a real point light warms
   the wall around it; the census never changes.
 - Beam colours: the sun's beams take the live key light's hue (lifted toward warm white), the moon's are silver-blue,
@@ -157,7 +162,8 @@ dawn Chapter IV's +330 / +310): **1 sunlock** (II-A1 laundry gust), **2 shadow**
 **11 wire** (III-A basket and tripwires, C2 walk-under, D the darted guard, E the moon well), **12 dawn** (IV-A1 under
 the descending terminator, IV-C sun shafts on a captain, IV-E the heliostat and the fortress lamp). The look follows
 the day (sunset → dusk → night → dawn → sunrise); `?look=<preset>` holds one preset for every room. Checkpoints
-start each room with the earlier ones solved.
+start each room with the earlier ones solved. The lamp room is an open square (no facades in front of the
+lamp-keepers' wall), so the cones fall whole from the lamps to the street. Tripwires hum (`tripHum`) within 3 m.
 
 ## Tests
 
@@ -166,3 +172,13 @@ node tools/light-unit.mjs                       # pure Node: maths, primitives, 
 node tools/playtest.mjs --chapter lab --port N  # the lab bot, all twelve rooms
 node tools/negative.mjs --chapter lab --port N  # the lab negatives
 ```
+
+Measured on the dev server (headless Chromium, SwiftShader):
+
+| Check | Result |
+|---|---|
+| `light-unit.mjs` | 29 / 29: maths, primitives, 100 random traces against brute force (worst error 2.8e-14 m), every traced hit of §3–5 |
+| lab bot | all twelve rooms, 0 deaths, 287.4 s of game time, 0 jumps while gripping, trace p95 0.20 ms |
+| lab negatives | 16 / 16 (wrong notch ×12 in six rooms, one beam never burns, bolt dash, tripwires, darted guard, dazzle, sunset clock, lost mirror, death restores, finger aim, lit = seen, sun shafts, p95, census) |
+| trace cost | p95 0.20 ms, median 0.10 ms over 600 passes with 22 sources (budget 0.35 ms) |
+| Chapter I | souk bot hash unchanged (`7bd4df65`), souk negatives green under the one searchlight rule |
