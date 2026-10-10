@@ -50,13 +50,14 @@ before these land. Each entry: file, change, reason, test. "Landed" marks what t
   - with x-keys: `w.rs?.setLut?.(K[i].name, K[i + 1].name, t)` (keep the preset names next to the resolved keys).
   Reason: the LUT stays off in the integrated game otherwise. Test: `?chapter=night` →
   `world.rs.post.params.lutA === lut('night')` and `lut === 1`; `node tools/perf.mjs --only checks --check lut`.
-- **Brightness and grain have one owner: P (new).** P applies the user's settings in the final pass
-  (`post.params.userExposure = 2^(0.18·b)`, `userGamma = 1 − 0.035·b`, `grainScale = grain / 60`), which the
-  director never writes. Change: `setUser()` becomes a no-op and `write()` uses `P.exposure = c.exposure;
-  P.grain = c.grain` (or `game.applySettings` stops calling `director.setUser`). Reason: today both apply,
-  so grain 100 gives 2.78× grain and brightness +3 about 1.8× exposure plus the gamma lift.
-  Test: `applySettings({brightness: 3, grain: 100})` → `rs.post.params.exposure` equals the preset's
-  exposure and `grain` the preset's grain; `userExposure ≈ 1.45`, `grainScale ≈ 1.67`.
+- **Brightness and grain: one owner per component (no change needed).** The director already scales the
+  look's exposure by `1 + 0.08·brightness` and its grain by `grain / 60` as it writes them every frame; P's
+  `rs.applySettings` no longer touches either and adds only the gamma lift the director lacks
+  (`post.params.userGamma = 1 − 0.04·brightness`, which lifts dark scenes for the Chapter III calibration).
+  Measured on F's tree with P's files at brightness +3 and grain 100: exposure 1.24×, grain 1.67×, gamma 0.88,
+  each applied once (before this change, P scaled both a second time: 1.80× exposure and 2.78× grain).
+  Test: `game.applySettings({brightness: 3, grain: 100})` → `post.params.userExposure === 1`,
+  `grainScale === 1`, `userGamma ≈ 0.88`, `exposure` = preset × 1.24.
 - **Rim (optional).** Retint the character rim per preset: `G.uRimColor` (sun colour, the moon's at night).
 
 ## 5. `src/game/game.js` / chapter loader: context loss (landed)
@@ -90,3 +91,24 @@ before these land. Each entry: file, change, reason, test. "Landed" marks what t
 - **Reason.** In the LDR fallback every colour is stored Reinhard-encoded by that chunk; the cone skips it,
   so the post chain decodes it too bright (the beam core blows out to white over the carpets with `?ldr=1`).
 - **Test.** `?ldr=1&tier=low`, courtyard: the cone matches the float path within the LDR check's tolerance.
+
+## 10. The low tier's draw-call budget (FULL_GAME §8.5): batches and characters
+
+`tools/perf.mjs` now prints the §8.5 budget per tier and spot (calls of the shadow and main passes, triangles)
+and warns when a spot is over. On low (budget 130 calls, 400 k triangles) every Chapter I spot is over:
+144–177 calls at a 60 fps cadence, and at low's own 30 fps target, where the 30 Hz shadow map refreshes every
+frame, 192 (souk) to 244 (balcony). P's passes are already lean there (shadow refresh, small-caster cull, no
+soft pass, sky, three shaft slabs, one dust draw, the instanced flock). What remains is structural:
+
+- **Level batches** (`src/game/levelkit.js` / the chapter Batcher, F). A frame at the souk spot draws about
+  55 merged batches in the shadow pass and 70 in the main pass. Each batch is one material over a 40 m chunk,
+  from the play plane to 90 m behind it, so neither frustum culling nor a depth cut can thin it. Change: split
+  each chunk's batches into a near set (z ≥ −12) and a far set, and give the far set `castShadow = false`.
+  Optionally, for the shadow pass, merge each chunk's opaque, non-alpha-tested statics into one positions-only
+  caster. Reason: about 40 of the 86 shadow draws at the souk are far facades whose shadows land only on other
+  far geometry. Test: `node tools/perf.mjs --tiers low`, souk shadow calls per update ≤ 50.
+- **Characters** (`src/assets/character.js`, frozen; the integrator or L). The boy is 21 rigid parts: 21
+  shadow draws and 22 main draws. A guard adds about 13 of each. Change: merge each character's parts by material
+  into skinned meshes (skin, clothRed, clothTrousers, leather, hair, scarf: 6 draws). Reason: it saves about 30
+  draws per pass in the courtyard and the chase. Test: the `__medina.game.rig` mesh count; low, courtyard, ≤ 140
+  calls at 30 fps.

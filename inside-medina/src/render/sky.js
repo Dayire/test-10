@@ -88,7 +88,7 @@ void main(){
       vec3 t = d - md * dot(d, md);
       float maria = .78 + .22 * smoothstep(.35, .7, fbm3(t * (9. / mr) + 4.));
       float limb = .82 + .18 * sqrt(max(0., 1. - pow(ang / mr, 2.)));
-      col = mix(col, uMoonColor * 2.2 * maria * limb, disc * uNight);
+      col = mix(col, uMoonColor * 3. * maria * limb, disc * uNight);
       col += uMoonColor * (exp(-ang / (mr * 2.5)) * .35 + exp(-ang * 3.) * .06) * uNight * (1. - disc);
     }
   }

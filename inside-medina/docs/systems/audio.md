@@ -118,16 +118,24 @@ the sunset clock, a lock opening, the answered light, the dawn finale, and the d
 every 0.3 s: no steal, no drop, and the same peak as with a 512-voice pool), `stealFade` (a stolen sustained
 note leaves no step in the waveform and is silent 50 ms later), `schema` (the foundation's chapter blocks:
 maqam-named themes, place and bed names, unknown music names, null zones, frozen mix objects; Chapter I's
-chase keeps its 0.21 s pulse), `ksCache`.
+chase keeps its 0.21 s pulse), `resumeGuard` (a real context: the gesture resume leaves a paused game and a
+context the game suspended alone; unpausing resumes one the platform suspended), `ksCache`.
 
-Last run (SwiftShader container, 4 CPUs): every test passes.
+Last run (SwiftShader container, 4 CPUs): every test passes. `voiceBudget`, `stealFade`, `schema` and
+`resumeGuard` fail on the previous engine (`7a0f8e4`): the answered light lost 23 voices and peaked at
+−12.4 dBFS instead of −4.2, a steal stepped the waveform by 0.26, the foundation's souk block threw a
+non-finite `setTargetAtTime` on every update, and a key press resumed a context the paused game had suspended.
 
 | Test | Result |
 |---|---|
-| themes (20 s each) | no NaN; peak / RMS dBFS: menu −7.6 / −27.8, souk −2.0 / −20.7, sundown −1.9 / −23.8, night −1.7 / −21.9, dawn −1.9 / −21.1, credits −3.7 / −26.0 |
+| themes (20 s each) | no NaN; peak / RMS dBFS: menu −7.6 / −27.8, souk −2.0 / −20.7, sundown −1.9 / −23.8, night −1.7 / −21.8, dawn −1.9 / −21.1, credits −3.7 / −26.0 |
 | jitter (4× throttle) | 57 of 57 onsets found, none late, onset spread 0.14 ms (constant output latency 12 ms) |
 | muteFadeIn | −104 dBFS RMS after `fadeIn` while muted |
 | uiWhilePaused | ui confirm −40 dBFS over a −87 dBFS floor; the game mix drops from −26 to −41 dBFS when paused |
-| voiceCap | 200 steps: at most 32 voices (368 steals) |
+| voiceCap | 200 steps at once: at most 32 sounding voices (8 fading steals, the rest of the burst dropped) |
 | allNames | 81 names, no failures, peak −1.6 dBFS |
+| voiceBudget | catch over the 96 bpm clock, lock opening, answered light, dawn finale, dawn finale + 104 footstep voices: 0 steals, 0 drops, peaks equal to a 512-voice pool (−3.27, −7.81, −4.21, −1.85, −1.78 dBFS) |
+| stealFade | largest sample step at the steal 0.011 (the sine's own: 0.011; a hard cut: 0.26); −64 dBFS 60 ms later |
+| schema | souk / sundown / night / dawn / lab blocks: themes resolve to the chapter, maqams hijaz / bayati / saba / rast / hijaz, no error, chase state reached; the souk chase keeps its 0.21 s pulse |
+| resumeGuard | stays suspended after the game suspends it and while paused; resumes on unpause and on a gesture |
 | ksCache | 40 notes of one pitch → 1 buffer |

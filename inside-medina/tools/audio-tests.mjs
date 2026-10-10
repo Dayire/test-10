@@ -310,6 +310,21 @@ await run('schema', async () => page.evaluate(async () => {
   return { ok, ...out };
 }));
 
+// 11. the gesture resume (iOS "interrupted", platform suspensions) leaves a paused game and a context the
+// game suspended itself alone; unpausing resumes a context the platform suspended meanwhile
+await run('resumeGuard', async () => page.evaluate(async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const A = new window.AudioMod.Audio(); A.start(); await A.ctx.resume();
+  const platformSuspend = () => AudioContext.prototype.suspend.call(A.ctx); // bypasses the engine's own bookkeeping
+  const key = async () => { window.dispatchEvent(new KeyboardEvent('keydown')); await wait(250); return A.ctx.state; };
+  await A.ctx.suspend(); const appSuspended = await key();
+  await A.ctx.resume(); A.setPaused(true); await platformSuspend(); const paused = await key();
+  A.setPaused(false); await wait(250); const unpaused = A.ctx.state;
+  await platformSuspend(); const gesture = await key();
+  A.music.stop(); await A.ctx.close();
+  return { appSuspended, paused, unpaused, gesture, ok: appSuspended === 'suspended' && paused === 'suspended' && unpaused === 'running' && gesture === 'running' };
+}));
+
 // 7. Karplus–Strong buffers are cached per pitch
 await run('ksCache', async () => page.evaluate(async () => {
   const ctx = new OfflineAudioContext(2, 4800, 48000);

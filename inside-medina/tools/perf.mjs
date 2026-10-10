@@ -281,9 +281,11 @@ if (checks || only === 'checks') {
       const sm0 = G.shafts.list[0]?.material.uniforms;
       out.softOn = { medium: L.SOFT.uSoftOn.value === 1 && L.SOFT.uDepth.value === rs.post.depthTex, shared: !!sm0 && sm0.uDepth === L.SOFT.uDepth, beamsLayer: L.LAYERS.BEAMS, shaftOnBeams: !!G.shafts.list[0]?.layers.isEnabled(L.LAYERS.BEAMS) };
       // particles: every kind emits through the module-level handle and draws on the soft layer
-      const kinds = PT.particles.kinds, emitted = {};
+      const kinds = PT.particles.kinds, emitted = {}, progs0 = r.info.programs.length;
       for (const k of kinds) emitted[k] = PT.particles.emit(k, { x: 97, y: 1.5, z: 0.5 }, { count: 20 });
       await frame();
+      // their programs were compiled for the soft pass before the first emit: nothing compiles mid-play
+      out.particlesWarm = { before: progs0, after: r.info.programs.length, ok: r.info.programs.length === progs0 };
       const pv = rs.particles.add.mesh.visible && rs.particles.alpha.mesh.visible && rs.particles.add.mesh.layers.isEnabled(L.LAYERS.BEAMS);
       out.particles = { kinds, emitted, visible: pv, budget: rs.particles.budget };
       // shafts follow a new sun
@@ -305,7 +307,7 @@ if (checks || only === 'checks') {
       const aliveBefore = rs.particles.alive, Group = G.flock.group.constructor, g = new Group();
       g.add(new Group()); G.scene.add(g); G.scene.remove(g);
       out.particlesClear = { aliveBefore, aliveAfter: rs.particles.alive, ok: aliveBefore && !rs.particles.alive };
-      out.ok = out.softOn.medium && out.softOn.shared && out.softOn.shaftOnBeams && Object.values(emitted).every((n) => n > 0) && pv && out.shafts.moved && out.shafts.restored && out.dispose.ok && out.particlesClear.ok;
+      out.ok = out.softOn.medium && out.softOn.shared && out.softOn.shaftOnBeams && Object.values(emitted).every((n) => n > 0) && pv && out.shafts.moved && out.shafts.restored && out.dispose.ok && out.particlesClear.ok && out.particlesWarm.ok;
       return out;
     });
     await page.context().close();

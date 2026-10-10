@@ -106,6 +106,7 @@ export class RenderSystem {
     Object.assign(this.post.params, keepParams); Object.assign(this.post.limits, keepLimits); Object.assign(this.post.user, keepUser);
     this._configureTier();
     this.resize();
+    this._fxWarm = false;
     this.auto.restart(performance.now());
     if (!auto) this.autoMax = tier;
     this.onTierChange && this.onTierChange(tier, this.q);
@@ -127,11 +128,12 @@ export class RenderSystem {
     if (s.fpsCap !== undefined || s.batterySaver !== undefined) this.cap.set(this._capFps());
     if (s.dof !== undefined) U.dof = !!s.dof;
     this.post.user.dof = U.dof && !U.batterySaver;
-    if (s.grain !== undefined) { U.grain = Math.max(0, Math.min(100, +s.grain)); this.post.params.grainScale = U.grain / 60; }
+    // brightness and grain: the LookDirector scales the look's exposure (1 + 0.08·b) and grain (grain / 60) as it
+    // writes them every frame; P adds only the gamma lift it lacks, so nothing is applied twice
+    if (s.grain !== undefined) U.grain = Math.max(0, Math.min(100, +s.grain) || 0);
     if (s.brightness !== undefined) {
-      U.brightness = Math.max(-3, Math.min(3, +s.brightness));
-      this.post.params.userExposure = Math.pow(2, U.brightness * 0.18);
-      this.post.params.userGamma = 1 - U.brightness * 0.035;
+      U.brightness = Math.max(-3, Math.min(3, +s.brightness || 0));
+      this.post.params.userGamma = 1 - U.brightness * 0.04;
     }
     if (s.motionBlur !== undefined) U.motionBlur = !!s.motionBlur;
     if (s.reduceFlashing !== undefined) {
@@ -240,7 +242,9 @@ export class RenderSystem {
     if (this.lost) return;
     const t0 = performance.now();
     this.renderer.info.reset();
-    if (this.particles.group.parent !== scene) { this.particles.attach(scene); this.renderer.compile(this.particles.group, camera, scene); }
+    if (this.particles.group.parent !== scene) { this.particles.attach(scene); this._fxWarm = false; }
+    // the particles' programs for the pass that draws them (the soft pass sees no lights), before the first emit
+    if (!this._fxWarm) { this._fxWarm = true; if (this.q.soft) this.post.compileSoft(this.particles.group, scene, camera); else this.renderer.compile(this.particles.group, camera, scene); }
     if (this._fxScene !== scene) { this._fxScene?.removeEventListener('childremoved', this._onRemoved); scene.addEventListener('childremoved', this._onRemoved); this._fxScene = scene; }
     this.particles.update(time);
     VIEW.from(camera);

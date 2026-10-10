@@ -303,6 +303,14 @@ export class PostFX {
     this.mOut = createOutputMaterial();
   }
 
+  // compile an object's materials for the pass that draws it on BEAMS: the soft scene's light state (none)
+  compileSoft(obj, scene, camera) {
+    const ss = this.softScene, mask = camera.layers.mask;
+    ss.children = scene.children; ss.fog = scene.fog; ss.environment = scene.environment;
+    camera.layers.set(LAYERS.BEAMS);
+    try { this.r.compile(obj, camera, ss); } finally { camera.layers.mask = mask; ss.children = NO_CHILDREN; ss.fog = null; ss.environment = null; }
+  }
+
   _explicitResolve() { if (this.q.msaa > 0 && this.q.soft) this.r.properties.get(this.rtScene).__useRenderToTexture = false; }
   // after a context restore three's object properties are fresh: re-apply ours, recompile on demand
   restored() { this._explicitResolve(); this.warmed = false; }
