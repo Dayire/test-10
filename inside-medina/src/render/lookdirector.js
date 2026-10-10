@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { G } from './atmosphere.js';
 import { PRESETS, SKY_FIELDS } from './look.js';
+import { LUT_LOOKS } from './lut.js';
 
 // The LookDirector owns the time of day. It resolves presets (look.js) into
 // live values, blends them over time or along x, layers temporary overrides
@@ -47,6 +48,8 @@ function lerpLook(dst, a, b, t) {
   }
   return dst;
 }
+// the colour look-up of a preset (lut.js): its own look, or none (goldenHour and custom presets grade analytically)
+const lutName = (n) => (typeof n === 'string' && LUT_LOOKS[n] && Object.keys(LUT_LOOKS[n]).length ? n : null);
 const cache = new Map();
 function resolved(name) {
   if (typeof name !== 'string') return resolveLook(name);
@@ -81,6 +84,7 @@ export class LookDirector {
     this.cur = copyLook({}, this.base);
     this.ov = {};
     this.blend = null; this.xKeys = null;
+    this.lut = { a: null, b: null, t: 0 }; // the LUT crossfade the next write() hands to the renderer
     this.user = { exposure: 1, grain: 1 };
     this.pool = null; this.shafts = null; this.glowMul = 1; this.glowColor = new THREE.Color(PRESETS.goldenHour.glowColor);
     this.envKey = skyKey(this.base); this.envScale = -1;
@@ -94,6 +98,7 @@ export class LookDirector {
     this.blend = null; this.xKeys = null;
     this.name = typeof preset === 'string' ? preset : 'custom';
     this.base = copyLook({}, resolved(preset)); // fresh: no field of the previous preset survives
+    this.setLut(this.name);
     this.write();
     this.useEnv(this.cur, skyKey(this.cur));
     return this;
@@ -119,7 +124,7 @@ export class LookDirector {
   blendTo(preset, sec = 1) {
     this.xKeys = null;
     const to = resolved(preset);
-    this.blend = { from: copyLook({}, this.base), to, t: 0, dur: Math.max(1e-3, sec), name: typeof preset === 'string' ? preset : 'custom' };
+    this.blend = { from: copyLook({}, this.base), to, t: 0, dur: Math.max(1e-3, sec), name: typeof preset === 'string' ? preset : 'custom', fromName: this.name };
     this.blend.fromEnv = this.envSnapshot();
     this.envFor(to);
     if (sec <= 0) { this.blend.t = 1; this.update(); }
@@ -132,6 +137,8 @@ export class LookDirector {
     const a = resolved(from), b = resolved(to); t = Math.max(0, Math.min(1, t));
     lerpLook(this.base, a, b, t);
     this.followEnv(a, b, t);
+    this.setLut(from, to, t);
+    if (typeof from === 'string' && typeof to === 'string') this.name = t < 0.5 ? from : to;
     return this;
   }
   // bake a preset's environment map now (under a card) so a later blend to it swaps instead of baking mid-play
@@ -183,6 +190,9 @@ export class LookDirector {
     if (this.world.env) this.envs.set(this.envKey, this.world.env);
     return this;
   }
+  // the LUT crossfade for the next write(): a → b by t (preset names; a preset without a look of its own, such as the
+  // golden hour, is the identity); b omitted: a alone
+  setLut(a, b, t = 0) { const L = this.lut; L.a = lutName(a); L.b = b === undefined || b === null ? L.a : lutName(b); L.t = L.a === L.b ? 0 : t; return this; }
   setUser({ brightness, grain } = {}) {
     if (brightness !== undefined) this.user.exposure = 1 + 0.08 * brightness;
     if (grain !== undefined) this.user.grain = grain / 60;
@@ -194,18 +204,20 @@ export class LookDirector {
     if (b) {
       lerpLook(this.base, b.from, b.to, smooth(b.t));
       this.followEnv(b.fromEnv, b.to, smooth(b.t));
-      if (b.t >= 1) { this.blend = null; this.name = b.name; }
+      this.setLut(b.fromName, b.name, smooth(b.t));
+      if (b.t >= 1) { this.blend = null; this.name = b.name; this.setLut(b.name); }
     } else if (this.xKeys) {
       const K = this.xKeys;
       // name: the key the blend is nearer
-      if (x <= K[0].x) { copyLook(this.base, K[0].L); this.useEnv(K[0].L, keyOf(K[0].L)); this.name = K[0].name; }
-      else if (x >= K[K.length - 1].x) { const k = K[K.length - 1]; copyLook(this.base, k.L); this.useEnv(k.L, keyOf(k.L)); this.name = k.name; }
+      if (x <= K[0].x) { copyLook(this.base, K[0].L); this.useEnv(K[0].L, keyOf(K[0].L)); this.name = K[0].name; this.setLut(this.name); }
+      else if (x >= K[K.length - 1].x) { const k = K[K.length - 1]; copyLook(this.base, k.L); this.useEnv(k.L, keyOf(k.L)); this.name = k.name; this.setLut(this.name); }
       else {
         let i = 0; while (K[i + 1].x < x) i++;
         const t = smooth((x - K[i].x) / (K[i + 1].x - K[i].x));
         lerpLook(this.base, K[i].L, K[i + 1].L, t);
         this.followEnv(K[i].L, K[i + 1].L, t);
         this.name = K[t < 0.5 ? i : i + 1].name;
+        this.setLut(K[i].name, K[i + 1].name, t);
       }
     }
     this.write();
@@ -240,6 +252,13 @@ export class LookDirector {
       P.rays = c.rays; P.rayColor.setRGB(...c.rayColor);
       P.letterbox = c.letterbox ?? 0;
       if (c.fade !== undefined) P.fade = c.fade;
+    }
+    // the preset's colour look (a crossfade between two during a blend); none at all when neither side has one, so
+    // the golden hour renders exactly as its analytic grade. Switching LUTs is uniform-only (no recompile)
+    if (w.rs?.setLut) {
+      const { a, b, t } = this.lut;
+      if (!a && !b) { if (P && P.lut !== 0) w.rs.setLut(null, null, 0, 0); }
+      else w.rs.setLut(a || 'identity', a === b ? null : b || 'identity', t, 1);
     }
     if (this.pool) { this.pool.setColor(c.poolColor); this.pool.setMul(c.lanternPool); }
     this.glowMul = c.lanternGlow;

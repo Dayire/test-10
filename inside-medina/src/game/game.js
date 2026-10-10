@@ -147,6 +147,7 @@ export class Game {
     if (this.rig.scarf) this.rig.scarf.reset();
     this.camRig.reset(); this.camRig.groundY = s.y; this.camRig.snapNext = true;
     this._vy = undefined;
+    this.world.rs.markDiscontinuity?.();
   }
 
   // the chapter is built and warm: intro shot or straight to play, then reveal. The save moves only when the player
@@ -405,6 +406,9 @@ export class Game {
     this.camRig.groundY = cp.spawn.y; this.camRig.snapNext = true;
     this._vy = undefined;
     this.deathKind = null; this.dieT = 0;
+    // a cut that may not move the camera far (a respawn near the checkpoint): dynamic resolution and auto quality
+    // ignore the next frames (restored state, uploads), as they do for a chapter root or a camera jump
+    this.world.rs.markDiscontinuity?.();
   }
 
   // back to the last checkpoint without counting a death (fade out and in, under 0.6 s). The chapter holds through

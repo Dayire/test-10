@@ -483,6 +483,45 @@ export const scenarios = [
     },
   },
   {
+    // FULL_GAME §9.3 (requests P.md #4): a preset's colour look rides the final grade's LUT; a timed blend and x keys
+    // crossfade two looks; the golden hour has none, so the souk renders exactly as its analytic grade; switching
+    // looks compiles nothing. A respawn marks a render discontinuity (P.md #11): dynamic resolution and auto quality
+    // skip the frames after it
+    name: 'LUT looks follow the time of day', chapter: 'night', cp: 0,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game, D = G.director, rs = G.world.rs, P = () => rs.post.params;
+      const frames = (n) => new Promise((r) => { const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+      const url = (f) => performance.getEntriesByType('resource').map((e) => e.name).find((n) => n.includes(`/src/render/${f}`));
+      const { lut } = await import(url('lut.js'));
+      const names = ['identity', 'sunset', 'dusk', 'night', 'dawn', 'sunrise'];
+      const name = (t) => (t ? names.find((n) => lut(n) === t) ?? 'other' : null);
+      const snap = () => ({ a: name(P().lutA), b: name(P().lutB), mix: +P().lutMix.toFixed(2), on: P().lut, look: D.name });
+      const progs = () => rs.renderer.info.programs.length;
+      await frames(2);
+      const out = { night: snap() }, p0 = progs();
+      D.apply('goldenHour'); await frames(2); out.golden = snap();
+      D.keys([{ x: 0, preset: 'dawn' }, { x: 30, preset: 'sunrise' }]); M.photo(15, 0, 1, 0.05); await frames(2); out.xkeys = snap();
+      D.apply('sunset'); D.blendTo('dusk', 1); M.sim(0.5, { x: 0 }); await frames(2); out.blend = snap();
+      M.sim(0.6, { x: 0 }); await frames(2); out.blended = snap();
+      D.apply('sunset'); D.blendTo('goldenHour', 1); M.sim(0.5, { x: 0 }); await frames(2); out.toGolden = snap();
+      out.programs = [p0, progs()];
+      G.restartChapterLook(); await frames(2); out.back = snap();
+      rs._skip = 0; M.checkpoint(0); out.skip = rs._skip;
+      return out;
+    }),
+    check: (r) => {
+      const is = (s, a, b, on) => s.a === a && s.b === b && s.on === on;
+      if (!is(r.night, 'night', null, 1) || !is(r.back, 'night', null, 1)) return `night look: ${JSON.stringify([r.night, r.back])}`;
+      if (r.golden.on !== 0) return `the golden hour has no LUT: ${JSON.stringify(r.golden)}`;
+      if (!is(r.xkeys, 'dawn', 'sunrise', 1) || Math.abs(r.xkeys.mix - 0.5) > 0.05) return `x keys crossfade: ${JSON.stringify(r.xkeys)}`;
+      if (!is(r.blend, 'sunset', 'dusk', 1) || Math.abs(r.blend.mix - 0.5) > 0.05 || !is(r.blended, 'dusk', null, 1)) return `timed blend: ${JSON.stringify([r.blend, r.blended])}`;
+      if (!is(r.toGolden, 'sunset', 'identity', 1) || Math.abs(r.toGolden.mix - 0.5) > 0.05) return `blend to the golden hour: ${JSON.stringify(r.toGolden)}`;
+      if (r.programs[0] !== r.programs[1]) return `LUT switches compiled programs: ${r.programs}`;
+      if (!(r.skip >= 3)) return `a respawn marks no discontinuity: ${r.skip}`;
+      return true;
+    },
+  },
+  {
     // the old chapter waits while the screen fades out for a load (it used to keep running in play)
     name: 'sim waits while a load fades out', cp: 0, query: { hold: null },
     run: ({ page }) => page.evaluate(async () => {
