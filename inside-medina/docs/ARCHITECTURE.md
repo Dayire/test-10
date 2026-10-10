@@ -278,6 +278,7 @@ screenshots).
 | `impact` | `{x, speed, kind}` |
 | `save` | `{chapter, cp}` |
 | `contextLost`, `contextRestored` | `{}`, `{id, cp}` |
+| `loadError` | `{id, cp, message}` (the load promise rejects too) |
 
 Chapters and entities may emit their own through `game.emit(name, data)`.
 

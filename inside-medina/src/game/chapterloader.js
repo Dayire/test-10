@@ -66,7 +66,9 @@ export class ChapterLoader {
   // loadChapter(id, cp, {reason, onProgress}) -> promise of L. reason: boot | start | chain | continue | select | restart | title
   load(id, cp = 0, opts = {}) {
     const run = async () => {
-      try { return await this._load(id, cp, opts); } finally { this.busy = null; }
+      try { return await this._load(id, cp, opts); }
+      catch (e) { console.error(e); this.game.emit('loadError', { id, cp, message: String(e?.message || e) }); throw e; }
+      finally { this.busy = null; }
     };
     this.busy = (this.busy || Promise.resolve()).then(run, run);
     return this.busy;
