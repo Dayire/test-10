@@ -5,8 +5,8 @@
 // the flow negatives: a cinematic's look and mix leave with it, the title holds
 // the chapter and never writes over the save (it opens on the save's place),
 // a dev chapter's end keeps the save, the loader serialises,
-// recovers and drops chapter-lived subscriptions, a chain whose import fails
-// retries and then titles, restart chapter equals a fresh start, the title's
+// recovers and drops chapter-lived subscriptions, a failed build keeps (or rolls back) the surfaces it prepared,
+// a chain whose import fails retries and then titles, restart chapter equals a fresh start, the title's
 // lamp sweeps harmlessly, x-keyed looks swap baked env maps.
 import fs from 'fs';
 import os from 'os';
@@ -296,6 +296,65 @@ export const scenarios = [
       if (!i.e1 || i.chapter !== 'lab' || i.mode !== 'play' || !i.level || i.card || i.fadeTarget !== 0 || i.suspended) return `failed import: ${JSON.stringify(i)}`;
       const b = r.buildFail;
       if (!b.e2 || b.chapter !== 'souk' || b.mode !== 'intro' || !b.title || b.card || b.errs.join() !== 'brokenImport,brokenBuild') return `failed build: ${JSON.stringify(b)}`;
+      return true;
+    },
+  },
+  {
+    // the split bake (surfaces prepared before the build, drawn after it): a build that throws leaves the surfaces it
+    // prepared drawn, so the same chapter loaded again renders them (world.tex names them, so that load skips them);
+    // when even drawing them fails they are rolled back (no target, program or cached material left), and the next
+    // load prepares and draws them again
+    name: 'failed build keeps its surfaces', cp: 0, allowConsole: /build failed|bake failed/,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game, W = G.world, B = W.baker;
+      const glsl = 'void surf(vec2 uv, out vec3 alb, out float h, out float r, out float ao, out float m, out float a){ alb = vec3(1., .5, .25); h = uv.x; r = .5; ao = 1.; m = 0.; a = 1.; }';
+      const base = { n: 9, numeral: 'S', glyph: 'rosette', label: 'probe', next: null, dev: true, exit: '#000000', tone: '#000000' };
+      let fail = 0;
+      const chapter = (id, surf) => ({ ...base, id, load: async () => ({ default: { ...base, id, look: 'goldenHour', surfaces: { [surf]: { glsl, size: 64 } }, needs: [surf],
+        materials: { [`${surf}Mat`]: { surf, tile: 1 } },
+        build: (g, kit) => {
+          kit.ground(-20, 40); kit.vbox(-2, 0, -1, 2, 1, 0, `${surf}Mat`); kit.cp(-100, 1.5, 0, 1);
+          kit.L.dustRegions.push({ x0: -3, x1: 20, y0: 0.2, y1: 4, z0: -1, z1: 1 });
+          if (fail) { fail--; throw new Error('build failed'); }
+          return kit.L;
+        } } }) });
+      M.registry.push(chapter('bakeProbe', 'i0probe'), chapter('bakeProbe2', 'i0probe2'));
+      const px = (n) => {
+        const t = W.tex[n]?.map; if (!t) return 'absent';
+        const rt = B.targets.find((x) => x.texture === t); if (!rt) return 'no target';
+        const b = new Uint8Array(4); W.rs.renderer.readRenderTargetPixels(rt, 8, 8, 1, 1, b); return [...b];
+      };
+      const souk = () => new Promise((r) => { const t0 = performance.now(); const f = () => ((M.chapter() === 'souk' && G.mode !== 'loading' && !G.loader.busy) || performance.now() - t0 > 120000 ? r() : setTimeout(f, 100)); f(); });
+      const out = {};
+      // 1. the build throws: the fallback leaves the probe's surface drawn; loading it again draws the same
+      fail = 1;
+      try { await G.loadChapter('bakeProbe', 0, { reason: 'select' }); } catch { /* expected */ }
+      await souk();
+      out.afterFail = { chapter: M.chapter(), px: px('i0probe') };
+      await G.loadChapter('bakeProbe', 0, { reason: 'select' });
+      const mat = G.mats.cache.get('i0probeMat');
+      out.retry = { chapter: M.chapter(), px: px('i0probe'), matHasMap: mat?.map === W.tex.i0probe?.map };
+      // 2. the build throws and drawing the surfaces fails too: rolled back, then prepared again on the next load
+      const finish = W.finishBake, targets0 = B.targets.length;
+      let finishes = 0;
+      W.finishBake = async (...a) => { if (++finishes === 1) throw new Error('bake failed'); return finish(...a); };
+      fail = 1;
+      try { await G.loadChapter('bakeProbe2', 0, { reason: 'select' }); } catch { /* expected */ }
+      await souk();
+      out.rollback = { chapter: M.chapter(), finishes, px: px('i0probe2'), targets: B.targets.length - targets0, cached: G.mats.cache.has('i0probe2Mat') };
+      W.finishBake = finish;
+      await G.loadChapter('bakeProbe2', 0, { reason: 'select' });
+      const mat2 = G.mats.cache.get('i0probe2Mat');
+      out.again = { chapter: M.chapter(), px: px('i0probe2'), targets: B.targets.length - targets0, matHasMap: mat2?.map === W.tex.i0probe2?.map };
+      await G.loadChapter('souk', 0, { reason: 'select' });
+      return out;
+    }),
+    check: (r) => {
+      const warm = (p) => Array.isArray(p) && Math.abs(p[0] - 255) <= 3 && Math.abs(p[1] - 188) <= 3 && Math.abs(p[2] - 137) <= 3 && p[3] === 255;
+      if (r.afterFail.chapter !== 'souk' || !warm(r.afterFail.px)) return `a failed build left its surface undrawn: ${JSON.stringify(r.afterFail)}`;
+      if (r.retry.chapter !== 'bakeProbe' || !warm(r.retry.px) || !r.retry.matHasMap) return `loading it again: ${JSON.stringify(r.retry)}`;
+      if (r.rollback.chapter !== 'souk' || r.rollback.px !== 'absent' || r.rollback.targets !== 0 || r.rollback.cached) return `no rollback when drawing failed: ${JSON.stringify(r.rollback)}`;
+      if (r.again.chapter !== 'bakeProbe2' || !warm(r.again.px) || !r.again.matHasMap || r.again.targets !== 3) return `the next load after a rollback: ${JSON.stringify(r.again)}`;
       return true;
     },
   },

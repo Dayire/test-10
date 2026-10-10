@@ -183,8 +183,16 @@ export class TextureBaker {
     }
     r.setRenderTarget(prev);
     mat.dispose();
+    job.ran = true;
     if (job.fresh) (this.jobs ||= []).push({ def, size, rts });
     return job.out;
+  }
+  // a prepared surface that will not be drawn: its program and targets go (the caller drops its textures' users)
+  cancel(job) {
+    if (job.ran) return;
+    job.mat.dispose();
+    for (const rt of Object.values(job.rts)) { const i = this.targets.indexOf(rt); if (i >= 0) this.targets.splice(i, 1); rt.dispose(); }
+    job.ran = true; job.cancelled = true;
   }
 
   // bake a surface into new render targets (kept, so a lost GL context can be re-baked in place)
@@ -735,6 +743,15 @@ export function prepareBake(baker, names, out = {}) {
   const jobs = [];
   for (const n of names) if (!out[n] && SURFACES[n]) { const j = baker.prepare({ name: n, ...SURFACES[n] }); out[n] = j.out; jobs.push(j); }
   return jobs;
+}
+// prepared surfaces that will not be drawn (a load that failed and could not draw them either): out loses their
+// names, so the next load prepares them again
+export function cancelBake(baker, jobs, out = {}) {
+  for (const j of jobs) {
+    if (j.ran) continue;
+    if (out[j.def.name] === j.out) delete out[j.def.name];
+    baker.cancel(j);
+  }
 }
 export async function finishBake(baker, jobs, onProgress, slice = 40) {
   let t0 = performance.now();

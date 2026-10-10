@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { installAtmosphereChunks, G } from './atmosphere.js';
 import { RenderSystem } from './renderer.js';
 import { createSky, buildEnvironment } from './sky.js';
-import { TextureBaker, bakeAll, bakeAsync, prepareBake, finishBake } from './textures.js';
+import { TextureBaker, bakeAll, bakeAsync, prepareBake, finishBake, cancelBake } from './textures.js';
 import { Materials } from './materials.js';
 import { Lighting } from './lighting.js';
 import { LOOK } from './look.js';
@@ -65,6 +65,13 @@ export function createWorld(canvas, { tier = 'high', texScale = 1, onProgress, b
   // between, so the shaders compile while it runs
   world.prebake = (names) => prepareBake(baker, names.filter((n) => !tex[n]), tex);
   world.finishBake = (jobs, onProgress, slice = world.bakeSlice) => finishBake(baker, jobs, onProgress, slice);
+  // jobs that will never be drawn: their names leave world.tex and the cached materials holding their textures leave
+  // the cache (a chapter's tree that still uses them disposes them), so the next load prepares and builds them anew
+  world.cancelBake = (jobs) => {
+    const gone = new Set(jobs.filter((j) => !j.ran).flatMap((j) => Object.values(j.out)));
+    cancelBake(baker, jobs, tex);
+    for (const [k, m] of mats.cache) if (['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'].some((t) => gone.has(m[t]))) mats.cache.delete(k);
+  };
   return world;
 }
 

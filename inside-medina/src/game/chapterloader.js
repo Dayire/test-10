@@ -162,67 +162,69 @@ export class ChapterLoader {
     g.director.look(def.look, id);
     // 7. surfaces and materials this chapter needs: every surface's targets and program are issued now and drawn
     // after the build, so the driver compiles the shaders while the level is built (on a software rasteriser the
-    // compiles are most of a load)
+    // compiles are most of a load). A failure before they are drawn draws them anyway (settleBake)
     if (def.surfaces) registerSurfaces(def.surfaces);
     if (def.materials) g.mats.register(def.materials);
     let bakeJobs = null;
-    if (def.needs?.length) {
-      if (g.world.prebake) bakeJobs = g.world.prebake(def.needs);
-      else if (g.world.bake) await g.world.bake(def.needs, (p, n) => prog(0.05 + p * 0.4, n));
-    }
-    this.flushGL();
-    mark('prebake');
-    // 8. build
-    const root = new THREE.Group(); root.name = `chapter:${id}`;
-    g.scene.add(root); g.root = root;
-    const L = Object.assign(emptyLevel(), {});
-    g.level = L;
-    const batch = new Batcher(g.mats, { chunk: def.chunk ?? 40 });
-    const K = batch.kit();
-    const r = rng(def.seed ?? 42);
-    const helpers = createLevelKit(g, { K, root, L, r });
-    const kit = { ...helpers, K, root, L, r, batch, mats: g.mats, phys: g.phys, game: g, add: (o) => g.add(o), track: (o) => g.track(o), ...this.scopedKit() };
-    prog(0.06, 'raising walls…');
-    // the low tier builds lighter geometry (its triangle budget); set around every slice of a generator's build
-    const lite = !!g.world.rs.q?.lite, step = (f) => { setDetail(lite); try { return f(); } finally { setDetail(false); } };
-    let out = step(() => def.build(g, kit));
-    if (out && typeof out.next === 'function') {
-      const it = out;
-      let s = step(() => it.next()), ty = performance.now();
-      while (!s.done) {
-        if (typeof s.value === 'number') prog(0.06 + 0.4 * Math.min(1, s.value), 'raising walls…');
-        if (performance.now() - ty > 8) { await yieldFrame(); ty = performance.now(); }
-        s = step(() => it.next());
+    try {
+      if (def.needs?.length) {
+        if (g.world.prebake) bakeJobs = g.world.prebake(def.needs);
+        else if (g.world.bake) await g.world.bake(def.needs, (p, n) => prog(0.05 + p * 0.4, n));
       }
-      out = s.value;
-    } else if (out && typeof out.then === 'function') { setDetail(lite); try { out = await out; } finally { setDetail(false); } }
-    if (out && out !== L) Object.assign(L, out);
-    mark('build');
-    batch.build(root);
-    mark('merge');
-    prog(0.48, 'hanging the lanterns…');
-    await yieldFrame();
-    // 9. FX on the chapter root, glow sprites and pool sources
-    g.wireChapter(L);
-    mark('fx');
-    // 10-11. camera, checkpoints, snapshot, prepare, spawn
-    const startCp = Math.max(0, Math.min(cp | 0, g.checkpoints.length - 1));
-    g.placeAt(startCp);
-    // 12. every program the scene still lacks is issued (the driver queues them behind the surfaces), then the
-    // surfaces are drawn (each waits for its own program only), then everything is compiled for real (hidden
-    // objects too) and one warm-up frame renders
-    this.withHidden(() => { try { g.world.rs.renderer.compile(g.scene, g.camera); } catch (e) { console.warn('compile', e); } });
-    this.flushGL();
-    if (bakeJobs) await g.world.finishBake(bakeJobs, (p, n) => prog(0.5 + p * 0.36, n));
-    mark('bake');
-    prog(0.88, 'lighting the lanterns…');
-    await this.warm(phases);
-    prog(1, 'ready');
-    this.stats = { id, ms: Math.round(performance.now() - t0), reason, phases };
-    // 13. reveal
-    this.card = null;
-    g.enterChapter({ reason, card });
-    return L;
+      this.flushGL();
+      mark('prebake');
+      // 8. build
+      const root = new THREE.Group(); root.name = `chapter:${id}`;
+      g.scene.add(root); g.root = root;
+      const L = Object.assign(emptyLevel(), {});
+      g.level = L;
+      const batch = new Batcher(g.mats, { chunk: def.chunk ?? 40 });
+      const K = batch.kit();
+      const r = rng(def.seed ?? 42);
+      const helpers = createLevelKit(g, { K, root, L, r });
+      const kit = { ...helpers, K, root, L, r, batch, mats: g.mats, phys: g.phys, game: g, add: (o) => g.add(o), track: (o) => g.track(o), ...this.scopedKit() };
+      prog(0.06, 'raising walls…');
+      // the low tier builds lighter geometry (its triangle budget); set around every slice of a generator's build
+      const lite = !!g.world.rs.q?.lite, step = (f) => { setDetail(lite); try { return f(); } finally { setDetail(false); } };
+      let out = step(() => def.build(g, kit));
+      if (out && typeof out.next === 'function') {
+        const it = out;
+        let s = step(() => it.next()), ty = performance.now();
+        while (!s.done) {
+          if (typeof s.value === 'number') prog(0.06 + 0.4 * Math.min(1, s.value), 'raising walls…');
+          if (performance.now() - ty > 8) { await yieldFrame(); ty = performance.now(); }
+          s = step(() => it.next());
+        }
+        out = s.value;
+      } else if (out && typeof out.then === 'function') { setDetail(lite); try { out = await out; } finally { setDetail(false); } }
+      if (out && out !== L) Object.assign(L, out);
+      mark('build');
+      batch.build(root);
+      mark('merge');
+      prog(0.48, 'hanging the lanterns…');
+      await yieldFrame();
+      // 9. FX on the chapter root, glow sprites and pool sources
+      g.wireChapter(L);
+      mark('fx');
+      // 10-11. camera, checkpoints, snapshot, prepare, spawn
+      const startCp = Math.max(0, Math.min(cp | 0, g.checkpoints.length - 1));
+      g.placeAt(startCp);
+      // 12. every program the scene still lacks is issued (the driver queues them behind the surfaces), then the
+      // surfaces are drawn (each waits for its own program only), then everything is compiled for real (hidden
+      // objects too) and one warm-up frame renders
+      this.withHidden(() => { try { g.world.rs.renderer.compile(g.scene, g.camera); } catch (e) { console.warn('compile', e); } });
+      this.flushGL();
+      if (bakeJobs) await g.world.finishBake(bakeJobs, (p, n) => prog(0.5 + p * 0.36, n));
+      mark('bake');
+      prog(0.88, 'lighting the lanterns…');
+      await this.warm(phases);
+      prog(1, 'ready');
+      this.stats = { id, ms: Math.round(performance.now() - t0), reason, phases };
+      // 13. reveal
+      this.card = null;
+      g.enterChapter({ reason, card });
+      return L;
+    } catch (e) { if (bakeJobs) await this.settleBake(bakeJobs); throw e; }
   }
 
   // subscriptions that live as long as the chapter: unload() undoes them
@@ -233,6 +235,15 @@ export class ChapterLoader {
       onFrame: (fn) => { g.hooks.frame.push(fn); const off = () => { const i = g.hooks.frame.indexOf(fn); if (i >= 0) g.hooks.frame.splice(i, 1); }; S.push(off); return off; },
       registerExt: (name, fn) => { g.registerExt(name, fn); S.push(() => { if (g.ext[name] === fn) delete g.ext[name]; }); return fn; },
     };
+  }
+
+  // the surfaces a failed load prepared and never drew: world.tex already names them (so a later load would skip
+  // them) and materials may hold them, so they are drawn now; if even that fails they are rolled back (targets and
+  // programs disposed, names and the materials holding them dropped) and the next load prepares them again
+  async settleBake(jobs) {
+    const W = this.game.world, left = () => jobs.filter((j) => !j.ran);
+    if (!left().length) return;
+    try { await W.finishBake(left()); } catch (e) { console.error(e); W.cancelBake?.(left()); }
   }
 
   flushGL() { try { this.game.world.rs.renderer.getContext().flush(); } catch { /* lost */ } }
