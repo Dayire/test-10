@@ -21,7 +21,7 @@ export function deviceClass() {
   return { name: 'desktop', tier: 'high', tex: 1, pool: 6 };
 }
 
-// URL: ?chapter=id&cp=n start there; ?continue=1 the save's place; ?autostart=1 skips menus;
+// URL: ?chapter=id&cp=n start there; ?continue=1 the save's place (also the default with a save); ?autostart=1 skips menus;
 // ?hold=1 only __medina.sim advances the simulation; ?nosave=1 keeps saves in memory;
 // ?tier= ?tex= ?pool= ?noauto=1 rendering overrides
 export async function boot(canvas, params) {
@@ -57,12 +57,12 @@ export async function boot(canvas, params) {
   game.hooks.credits = (lines) => ui.credits(lines);
   game.applySettings(S, { persist: false });
   mark('init');
-  // where to start
+  // where to start: ?chapter= / ?cp= (alone: the souk), else the save's place (the title shows it, §7.1; Continue
+  // starts there), else the souk. Booting never writes the save: only starting somewhere does.
   let id = 'souk', cp = 0;
-  if (flag('continue') && save.exists) { id = save.data.chapter; cp = save.data.cp; }
-  if (P.chapter && meta(P.chapter)) id = P.chapter;
-  if (P.cp !== undefined) cp = +P.cp || 0;
-  if (!meta(id)) { id = 'souk'; cp = 0; }
+  if (P.chapter !== undefined || P.cp !== undefined) { if (P.chapter && meta(P.chapter)) id = P.chapter; cp = +P.cp || 0; }
+  else if (save.exists) { id = save.data.chapter; cp = save.data.cp; }
+  if (!meta(id) || (meta(id).dev && !P.chapter)) { id = 'souk'; cp = 0; }
   await game.loadChapter(id, cp, { reason: 'boot', onProgress: (p, msg) => ui.progress(0.08 + p * 0.9, msg) });
   mark('chapter');
   ui.progress(1, 'lighting the lanterns…');

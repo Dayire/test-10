@@ -106,7 +106,7 @@ export class Game {
     this.vines.length = 0;
     this.cpIndex = 0; this.cpSnap = null; this.initialSnap = null;
     this.cinema = null; this.dieT = 0; this.deathKind = null;
-    this.titleShown = false; this.introT = 0;
+    this.titleShown = false; this.introT = 0; this.beginOnPlay = false;
     this._crateMoving = 0; this._vy = undefined; this._zone = undefined;
     this.shafts = null; this.dust = null; this.flock = null;
     if (this.camRig) this.camRig.reset();
@@ -148,11 +148,15 @@ export class Game {
     this._vy = undefined;
   }
 
-  // the chapter is built and warm: intro shot or straight to play, then reveal
+  // the chapter is built and warm: intro shot or straight to play, then reveal. The save moves only when the player
+  // starts somewhere (start, continue, select, chain, restart). The title shows a place without choosing it: the
+  // boot's place (the save's own, or a ?chapter= link) becomes the save's when play begins from it; the title of
+  // toTitle or a failed chain never moves it.
   enterChapter({ reason = 'start', card = null } = {}) {
     const def = this.def;
     this.suspended = false;
-    if (this.saving) this.save.begin?.(def.id, this.cpIndex, reason);
+    this.beginOnPlay = this.saving && reason === 'boot';
+    if (this.saving && reason !== 'boot' && reason !== 'title') this.save.begin?.(def.id, this.cpIndex, reason);
     this.audio.setChapter?.(def.audio, def);
     this.emit('chapterStart', { id: def.id, cp: this.cpIndex, reason });
     this.setMode('intro');
@@ -331,6 +335,7 @@ export class Game {
   beginPlay() {
     if (this.mode !== 'intro' && this.mode !== 'menu') return;
     this.setMode('play');
+    if (this.beginOnPlay) { this.beginOnPlay = false; this.save.begin?.(this.def.id, this.cpIndex, 'boot'); }
     this.audio.start();
     if (!this._hinted) {
       this._hinted = true;
@@ -421,6 +426,7 @@ export class Game {
     this.restore(this.initialSnap);
     this.placeAt(0);
     if (this.saving) this.save.begin?.(this.def.id, 0, 'restart'); // Continue returns here, as after a fresh load
+    this.beginOnPlay = false;
     this.deathKind = null;
     // chosen from the pause menu over the title: the title gives way to play
     if (this.titleShown) { this.titleShown = false; this.titleFade = undefined; this.ui.showTitle(false); }
@@ -450,7 +456,7 @@ export class Game {
     if (this.paused) this.setPaused(false);
     this.resetToCheckpoint();
     this.restartChapterLook(); this.director.restore();
-    this.setMode('intro'); this.introT = 0; this.titleShown = true; this.titleFade = undefined;
+    this.setMode('intro'); this.introT = 0; this.titleShown = true; this.titleFade = undefined; this.beginOnPlay = false;
     this.ui.showEnd(false); this.ui.hideHint?.(); this.ui.showTitle(true); this.ui.titleOpacity?.(1);
     const shot = this.openingShot();
     if (shot) { this.camRig.setOverride(introShot(this, shot), 0.001); this.camRig.overrideW = 1; }
@@ -510,7 +516,8 @@ export class Game {
     this.director.resetEnvs();
     for (const s of this.lightRig.spots) s.shadow.needsUpdate = true;
     this.emit('contextRestored', { id: this.chapterId, cp: this.cpIndex });
-    if (this.chapterId && this.mode !== 'loading') return this.loadChapter(this.chapterId, this.cpIndex, { reason: 'restart' });
+    // under the title the chapter comes back under the title (and the save stays where it was)
+    if (this.chapterId && this.mode !== 'loading') return this.loadChapter(this.chapterId, this.cpIndex, { reason: this.held ? 'title' : 'restart' });
     return this.level;
   }
 

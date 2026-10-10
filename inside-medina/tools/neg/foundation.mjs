@@ -3,7 +3,8 @@
 // The chain into the next chapter and Continue, a throwing localStorage, the
 // title shot's shadow focus, the LookDirector round trip, the boot budget, and
 // the flow negatives: a cinematic's look and mix leave with it, the title holds
-// the chapter, a dev chapter's end keeps the save, the loader serialises,
+// the chapter and never writes over the save (it opens on the save's place),
+// a dev chapter's end keeps the save, the loader serialises,
 // recovers and drops chapter-lived subscriptions, a chain whose import fails
 // retries and then titles, restart chapter equals a fresh start, the title's
 // lamp sweeps harmlessly, x-keyed looks swap baked env maps.
@@ -500,6 +501,53 @@ export const scenarios = [
     check: (r) => (r.x0 > r.xa && r.susp && r.fadeFrames >= 1 && r.xLoading === r.x1 && r.chapter === 'lab' && !r.suspended && ['play', 'intro'].includes(r.after) ? true : `fade before a load: ${JSON.stringify(r)}`),
   },
 
+  {
+    // §7.1 / §7.3: a returning player's game opens on the title over the save's place, and nothing on the title
+    // (pausing, hiding the page, the title again) writes over it; Continue still lands there. Booting used to load
+    // the souk at checkpoint 0 and mark it as the save, which the first pause wrote over the real progress.
+    name: 'title keeps the save', url: false,
+    init: () => {
+      if (sessionStorage.getItem('seeded')) return;
+      sessionStorage.setItem('seeded', '1');
+      localStorage.setItem('medina.save.v1', JSON.stringify({ v: 1, chapter: 'sundown', cp: 0, unlocked: ['souk', 'sundown'], cps: { souk: 6, sundown: 0 }, completed: false, settings: {}, stats: { playSec: 40, deaths: 2, perChapter: {} }, seenHints: {} }));
+    },
+    run: async ({ page, o }) => {
+      const url = (q = {}) => gameUrl({ ...o, chapter: null, cp: undefined }, { nosave: null, autostart: null, hold: null, ...q });
+      const stored = () => page.evaluate(() => { const d = JSON.parse(localStorage.getItem('medina.save.v1') || 'null'); return d && `${d.chapter}/${d.cp}/${d.cps?.souk}`; });
+      // two frames before each key: a tap on the poll right after another one (the last Escape) is no new edge
+      const pause = async () => { await frames(page, 2); await page.keyboard.press('Escape'); await page.waitForFunction(() => __medina.game.paused, null, { timeout: 60000, polling: 50 }); };
+      const resume = () => page.evaluate(() => __medina.game.setPaused(false));
+      await page.goto(url()); await waitReady(page);
+      const out = {};
+      out.boot = await page.evaluate(() => ({ chapter: __medina.chapter(), cp: __medina.state().cp, mode: __medina.game.mode, title: __medina.game.titleShown, mem: `${__medina.save().chapter}/${__medina.save().cp}` }));
+      await pause(); out.paused = await stored(); await resume();
+      await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('pagehide')); delete document.hidden; });
+      out.hidden = await stored(); out.hiddenPaused = await page.evaluate(() => __medina.game.paused); await resume();
+      await page.evaluate(() => __medina.game.toTitle());
+      await pause(); out.retitled = await stored(); await resume();
+      // the player starts from the title: still the save's place
+      await frames(page, 2);
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => __medina.game.mode === 'play', null, { timeout: 60000, polling: 50 });
+      await pause(); out.played = await stored(); await resume();
+      await page.goto(url({ continue: 1 })); await waitReady(page);
+      out.continued = await page.evaluate(() => `${__medina.chapter()}/${__medina.state().cp}`);
+      // a new player: the title over the souk, and pausing on it saves nothing new
+      await page.evaluate(() => localStorage.clear());
+      await page.goto(url()); await waitReady(page);
+      out.fresh = await page.evaluate(() => `${__medina.chapter()}/${__medina.state().cp}/${__medina.game.titleShown}`);
+      await pause(); out.freshStored = await stored();
+      return out;
+    },
+    check: (r) => {
+      if (r.boot.chapter !== 'sundown' || r.boot.cp !== 0 || !r.boot.title || r.boot.mode !== 'intro' || r.boot.mem !== 'sundown/0') return `the title does not show the save's place: ${JSON.stringify(r.boot)}`;
+      for (const k of ['paused', 'hidden', 'retitled', 'played']) if (r[k] !== 'sundown/0/6') return `${k}: localStorage holds ${r[k]}`;
+      if (!r.hiddenPaused) return 'hiding the page did not pause';
+      if (r.continued !== 'sundown/0') return `continue landed in ${r.continued}`;
+      if (r.fresh !== 'souk/0/true' || (r.freshStored !== null && r.freshStored !== 'souk/0/0')) return `new player: ${r.fresh}, stored ${r.freshStored}`;
+      return true;
+    },
+  },
   {
     // §11.2 acceptance 6: localStorage throwing: boots, plays to a checkpoint, saves in memory, no errors
     name: 'storage throwing: plays, saves in memory', cp: 0, query: { nosave: null },
