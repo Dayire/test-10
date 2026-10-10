@@ -2,7 +2,8 @@
 
 Everything below already works through optional chaining or default arguments, so nothing breaks
 before these land. Each entry: file, change, reason, test. "Landed" marks what the foundation
-(b5fb61d) already does; it stays here because P's tests depend on it.
+(b5fb61d) already does; it stays here because P's tests depend on it. "Done (I0)" marks what the first
+integration pass applied; #8 belongs to U and #9 to L.
 
 ## 1. `src/game/boot.js` (F12, then U): frame cap and paused frames (landed)
 
@@ -37,7 +38,14 @@ before these land. Each entry: file, change, reason, test. "Landed" marks what t
   Non-finite numbers are ignored, so `update` never throws (a throw would end the boot loop).
 - **Test.** `node tools/audio-tests.mjs --only schema`.
 
-## 4. `src/render/lookdirector.js` (F7): night sky, LUT looks, user brightness and grain
+## 4. `src/render/lookdirector.js` (F7): night sky, LUT looks, user brightness and grain (done, I0)
+
+**Done (I0).** `write()` hands the LUT to `rs.setLut` as asked, with one difference: when neither side of a
+blend has a look of its own (the golden hour is the identity) the LUT is switched off (`lut = 0`) instead of
+sampling an identity table, so Chapter I renders exactly as before. A blend towards or away from the golden hour
+crossfades with `identity`. `blendAt(from, to, t)` crossfades too (the sunset clock), and sets `name` to the nearer
+side. Tested by the foundation scenario `LUT looks follow the time of day` (`?chapter=night`: `lutA === lut('night')`,
+`lut === 1`; the golden hour off; x keys and a timed blend at half way; no new program) and `perf.mjs --check lut`.
 
 - **Night sky (landed, no change).** The director writes `uMoonSize = moonSize × moon`. P's sky reads
   `uMoonSize` as a multiplier of `MOON_RADIUS` (0.045 rad, `sky.js`), so the presets' `moonSize: 1` gives the
@@ -98,7 +106,21 @@ before these land. Each entry: file, change, reason, test. "Landed" marks what t
   so the post chain decodes it too bright (the beam core blows out to white over the carpets with `?ldr=1`).
 - **Test.** `?ldr=1&tier=low`, courtyard: the cone matches the float path within the LDR check's tolerance.
 
-## 10. The low tier's budget (FULL_GAME §8.5): characters and the main pass
+## 10. The low tier's budget (FULL_GAME §8.5): characters and the main pass (done, I0)
+
+**Done (I0).** All three, plus four levers of the integrator's own; every Chapter I spot is now within the low and
+medium budgets, measured as the heaviest frame (a shadow refresh plus the main pass). The before/after table is in
+`docs/systems/graphics.md` ("Last run").
+- Characters: one `SkinnedMesh` per material bound to the joints (the boy: 6 draws per pass, plus the scarf's tail).
+- Lanterns: `levelkit.staticCaster(obj)` flags the levelkit lantern and the hero alley's.
+- The main pass: instead of a far set, batches chunk by depth (0.6 × chunk wide near the play plane, 2 × in the
+  far city) and are culled by their box, not a bounding sphere that reached far outside the view: 30-40 % fewer
+  triangles on every tier for a few more draws. On low, chapters build lighter geometry (`DETAIL.lite`: half the
+  curve segments, no bevels under 3 cm) and alpha-tested static batches stop casting.
+- The sun pass draws a proxy tile only when its box swept along the light down to the chapter's lowest geometry
+  meets the view (tiles high on the rooftops fell inside the sun's frustum without their shadow reaching it).
+- The rubble pile over the crawl tunnel turned its stones about the world origin (up to 50 m into the sky); fixed,
+  which also shrank the shadow tiles it inflated.
 
 P now merges the level's static batches into shadow-only proxies (12 m tiles × depth bands, 16-bit positions,
 `src/render/shadowpolicy.js`), culls them against the view along the sun, and on low / medium drops the ones
@@ -133,7 +155,10 @@ and casters P cannot prove static.
   chunk), or a coarser chunk for far geometry. Reason: the triangle budget (400 k with shadows) at the raised,
   rooftops, courtyard, balcony and chase spots. Test: `node tools/perf.mjs --tiers low`, triangles ≤ 400 k.
 
-## 11. `src/game/game.js` / chapter loader (F): discontinuities (optional)
+## 11. `src/game/game.js` / chapter loader (F): discontinuities (optional) (done, I0)
+
+**Done (I0).** `placeAt` and `resetToCheckpoint` (respawn, restart, the title) call it; tested by the foundation
+scenario `LUT looks follow the time of day` (`rs._skip ≥ 3` after a checkpoint start).
 
 - **Change.** Call `world.rs.markDiscontinuity?.()` after a respawn or a cut that does not move the camera.
 - **Reason.** Dynamic resolution and auto quality ignore the frames right after a discontinuity (compiles,

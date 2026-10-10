@@ -27,7 +27,8 @@ Handed over: `src/game/{player,animator,entities,bridge,physics}.js` to L; `boot
 rooms land); chapter packages replace their own `index.js` and never edit it, and whoever replaces the last stub
 user deletes it.
 P owns `src/render/{post,renderer,sky,lighting,atmosphere,glsl,fx,shafts}.js` and `src/core/audio.js`;
-the engine calls their newer APIs only through optional chaining.
+the engine calls their newer APIs only through optional chaining. Since the first integration pass (FULL_GAME §12)
+the integrator owns the frozen files and P's finished ones, and applies `docs/requests/*.md` to them.
 
 ## 3. Boot
 
@@ -58,7 +59,7 @@ targets, rebuilds the env map, reloads the chapter at its checkpoint).
 | `?debug=1` | state overlay |
 
 `window.__boot` holds boot timestamps; `game.loader.stats` the last load's phase timings
-(`cover, import, unload, bake, build, merge, fx, compile, render`).
+(`cover, import, unload, prebake, build, merge, fx, bake, compile, render`).
 
 ## 4. Chapters
 
@@ -125,11 +126,17 @@ Loads are queued: each runs after the previous one settles, in call order.
 3. unload: entity and system `dispose()`, the kit's chapter-lived subscriptions, the cinematic (without fading the mix back: the reveal does), rig spots released, pool sources cleared, then one sweep of the root disposing geometries, non-cached materials and their textures (cached materials, baked surfaces, the env map, the glow texture, the rig cookies and GLB-override templates are kept), tracked objects, `phys.clear([player.body])`, overrides dropped;
 4. `resetChapterState()`;
 5. the look (`director.apply` or `.keys`; the env map is rebuilt when the sky changes);
-6. `registerSurfaces(def.surfaces)`, `mats.register(def.materials)`, progressive bake of `def.needs`;
-7. `def.build(game, kit)` (generators yield to the browser every 8 ms), then the batch merges into the root;
+6. `registerSurfaces(def.surfaces)`, `mats.register(def.materials)`, then `world.prebake(def.needs)`: every missing
+   surface's targets exist at once (its textures are in `world.tex`, so materials can take them) and its program is
+   issued without waiting for the driver;
+7. `def.build(game, kit)` (generators yield to the browser every 8 ms; on a tier with `lite` the geometry helpers
+   build lighter, see §7), then the batch merges into the root. Meanwhile the driver compiles the surfaces;
 8. FX on the root (`Shafts(root, director.sunDir, G)`, its dust, `Dust(root)`, `Flock(root, mats, L.flockSpots)`), glow sprites, pool sources;
 9. camera keys, sorted checkpoints, the initial snapshot, `L.prepare(cp)`, the checkpoint snapshot, spawn;
-10. `renderer.compileAsync` with hidden objects made visible, one warm-up render;
+10. the scene's programs are issued (hidden objects too), `world.finishBake(jobs)` draws the surfaces (each waits
+    for its own program only), then `renderer.compileAsync` with hidden objects made visible and one warm-up render.
+    On a software rasteriser shader compiles are most of a load, and this order keeps the driver busy while the
+    level is built (FULL_GAME §8.6);
 11. `enterChapter`: `save.begin` (not for `boot` and `title`: the title shows a place without choosing it; the boot's
     place becomes the save's when play begins from it, `beginOnPlay`), `audio.setChapter?.()`, `chapterStart`, the opening shot (title on boot), fade in, the mix faded back in (`audioIn`), card hidden, `suspended` cleared. `openingShot()`: under the title a `menuShot` whose `cp` is this checkpoint; otherwise `intro` at checkpoint 0 only. A start at a later checkpoint has no establishing shot (it would frame the wrong place): the title shows the rail camera on the boy at his checkpoint, and without the title play begins at once.
 
@@ -257,7 +264,10 @@ the dip of a restart or the title), and `prebake(preset)` does the same for a la
 (call it in `build`); a blend then shows the map of the side it is nearer, swapped as it passes half-way (with a
 little hysteresis), which keeps every program and costs no bake mid-play. `name` follows the nearer x key.
 `look()` with a new chapter id drops the maps that chapter does not need; `resetEnvs()` (context restored) bakes
-the current sky again.
+the current sky again. **Colour looks**: every write hands the preset's LUT (`LUT_LOOKS` in `lut.js`) to
+`rs.setLut`: a plain preset its own, a `blendTo`, a `blendAt` or x keys a crossfade of the two sides (`setLut(a, b,
+t)`), and none at all when neither side has a look of its own (the golden hour), so Chapter I renders exactly as its
+analytic grade. Switching looks is uniform-only (no program changes).
 `apply()` starts from a fresh copy of the preset, and a field that only an override set (a cinematic's `fade`, or
 `letterbox` in a custom preset) leaves the live values as soon as the override is restored.
 
@@ -277,10 +287,29 @@ source takes its light at full intensity in the first frame.
 
 **Materials and surfaces**: `mats.register(defs)`, `mats.setEnv(tex, scale)`, `registerSurfaces(defs)`,
 `SURFACES`, `bakeAsync(baker, names, onProgress, out, slice)`, `world.bake(names, onProgress)`,
+`world.prebake(names)` → jobs and `world.finishBake(jobs, onProgress)` (the loader's split bake; a surface's program
+evaluates `surf()` once into the map and a float scratch target, and one shared program derives the normal and ORM
+maps, matching the old five-evaluation shader within 1/255),
 `world.useEnvironment(tex)` (the map goes to the material cache, to GLB-override templates and to every scene
 material that sampled the old one; returns the old one), `world.bakeEnvironment()` (a PMREM of the sky as its
 uniforms stand), `world.rebuildEnvironment()` (both, then disposes the old map), `baker.rebakeAll()`. A surface not listed in
 `needs` is baked on first use with a warning.
+
+**Static batches** (`Batcher` in `src/assets/geom.js`): geometry merges by material, shadow flags and x chunk; the
+chunk width follows depth (centre z > −4: 0.6 × `chunk`; to −15: `chunk`; beyond: 2 × `chunk`), and the main pass
+culls a batch by its world box. **Lite geometry**: the loader sets `DETAIL.lite` (`setDetail`) around the build on a
+tier whose `QUALITY` entry has `lite` (low): arch outlines, extrusion curves, lathes and tubes take about half their
+segments and bevels under 3 cm become plain edges; colliders are separate, so play is unchanged, and a tier change
+mid-chapter keeps the geometry the chapter was built with. **Shadow casters**: the shadow policy merges static
+batches into proxies (and any mesh with `userData.staticCaster`, such as the hanging lanterns that only sway:
+`levelkit.staticCaster(obj)`); in the sun's pass a proxy is drawn only when its box swept along the light down to the
+chapter's lowest geometry meets the view; on low (`alphaCasters: false`) alpha-tested static batches (ivy, lattice)
+stop casting. **Characters** (`src/assets/character.js`): the rigid parts merge into one `SkinnedMesh` per material
+bound to the joints (weight 1 per vertex), so a pose is exactly the jointed one in 5-7 draws, and every casting part
+merges once more into `rig.shadowMeshes` (one per material side), the only ones drawn in the shadow passes; the joints stay
+plain groups (`rig.j`), `rig.meshes` lists the per-material meshes, and the loader disposes a chapter's bone textures.
+`rs.markDiscontinuity()` is called on every respawn and checkpoint placement (dynamic resolution and auto quality skip
+the frames after it).
 
 ## 8. Camera rig (`src/game/camera.js`)
 
@@ -318,10 +347,11 @@ counts), ext{}`. `window.__info()` adds the state to `info()`.
 
 | Command | What |
 |---|---|
-| `node tools/playtest.mjs --chapter souk [--cp N] [--from step] [--to step] [--runs 2]` | the chapter bot (`tools/bots/<chapter>.js` on `tools/bots/lib.js`); exit 0 on pass; several runs must agree on the end-state hash |
-| `node tools/negative.mjs --chapter souk` | `tools/neg/<chapter>.mjs` as assertions (the souk's include restart from checkpoint: not a death, not during the last quarter second of a lamp's alarm, not a second death while one plays); `--selftest-fail` must exit 1 |
-| `node tools/negative.mjs --suite foundation [--artifact] [--base-port N \| --absolute] [--rounds 5]` | chain and Continue (with the finale's look and mix left behind), the title over the save's place never writing over it (pause, hidden page, title, play), throwing storage, restart and title mid-finale, title during the chase, lab end, loader queue / failures / scoped subscriptions, a chain whose import fails (retries, then the title), restart chapter equal to a fresh start, the live and harmless title over the courtyard, x-keyed env maps swapped without a bake, the sim waiting through a load's fade, title shadow focus, look round trip, context loss, boot budget; `--artifact` also rebuilds and boots the single-file build. The boot budget is timed against the pre-foundation tree under the same load: by default the suite extracts that commit (`git archive`, cached in the OS temp dir) and serves it on a free port with a config and dependency cache of its own run (removed afterwards, so concurrent suites never share them), `--base-port` names a running server of it instead, `--absolute` uses the recorded baseline (idle machine only); one warm-up boot each, then `--rounds` (default 5) alternating boots, compared by median |
-| `node tools/cycle.mjs [--cycles 3] [--path souk,lab,souk,sundown,souk]` | memory flat, programs stable, light census constant, no page errors |
+| `node tools/playtest.mjs --chapter souk [--cp N] [--from step] [--to step] [--runs 2]` | the chapter bot (`tools/bots/<chapter>.js` on `tools/bots/lib.js`); exit 0 on pass with no page or console error; several runs must agree on the end-state hash |
+| `node tools/negative.mjs --chapter souk` | `tools/neg/<chapter>.mjs` as assertions (the souk's include restart from checkpoint: not a death, not during the last quarter second of a lamp's alarm, not a second death while one plays); a page or console error fails a scenario (`allowConsole: /re/` for errors it provokes); `--selftest-fail` must exit 1, and so must a filter that matches no scenario |
+| `node tools/negative.mjs --suite foundation [--artifact] [--base-port N \| --absolute] [--rounds 5]` | chain and Continue (with the finale's look and mix left behind), the title over the save's place never writing over it (pause, hidden page, title, play), throwing storage, restart and title mid-finale, title during the chase, lab end, loader queue / failures / scoped subscriptions, a chain whose import fails (retries, then the title), restart chapter equal to a fresh start, the live and harmless title over the courtyard, x-keyed env maps swapped without a bake, the sim waiting through a load's fade, title shadow focus, look round trip, context loss, LUT looks and discontinuities, boot budget; `--artifact` also rebuilds and boots the single-file build. The boot budget is timed against the pre-foundation tree under the same load: by default the suite extracts that commit (`git archive`, cached in the OS temp dir) and serves it on a free port with a config and dependency cache of its own run (removed afterwards, so concurrent suites never share them), `--base-port` names a running server of it instead, `--absolute` uses the recorded baseline (idle machine only); one warm-up boot each, then `--rounds` (default 5) interleaved pairs in ABBA order, each boot from a blank page (tearing the previous game down takes seconds on SwiftShader), judged by the median of the per-pair ratios (≤ 1.1), with four more pairs when that median is within 4 % of the budget |
+| `node tools/cycle.mjs [--cycles 3] [--path souk,lab,souk,sundown,souk]` | memory flat, programs stable, light census constant, no page or console errors |
+| `node tools/perf.mjs [--tiers low,medium,high] [--checks \| --only checks]` | the §8.5 budget at the six Chapter I spots per tier (the heaviest frame: shadow refresh + main pass) and the presentation checks; exits 1 when a spot is over its tier's budget, a check fails or is pending, or the page reports an error |
 | `node tools/probe.mjs "<query>" "<js>"`, `tools/tour.mjs`, `tools/shot.mjs` | ad hoc evaluation and screenshots; all take `--port`, `BASE=` and `--chapter` |
 | `npm test`, `npm run test:souk`, `npm run test:foundation`, `npm run cycle` | the suites above |
 
