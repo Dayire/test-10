@@ -9,8 +9,11 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "assets": "node tools/export-assets.mjs",
     "astra": "node tools/astra-assets.mjs",
-    "test": "node tools/playtest.mjs && node tools/negative.mjs",
-    "build:artifact": "vite build --config tools/vite.artifact.config.js && node tools/make-artifact.mjs dist-artifact"
+    "test": "node tools/playtest.mjs --chapter souk && node tools/negative.mjs --chapter souk && node tools/negative.mjs --suite foundation",
+    "build:artifact": "vite build --config tools/vite.artifact.config.js && node tools/make-artifact.mjs dist-artifact",
+    "test:souk": "node tools/playtest.mjs --chapter souk && node tools/negative.mjs --chapter souk",
+    "test:foundation": "node tools/negative.mjs --suite foundation",
+    "cycle": "node tools/cycle.mjs"
   },
   "dependencies": {
     "three": "^0.186.0"

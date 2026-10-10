@@ -1,29 +1,38 @@
-// Failure-path tests: the game must kill and respawn correctly.
-import { chromium } from 'playwright';
-const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader'] });
-const page = await (await browser.newContext({ viewport: { width: 320, height: 180 }, ignoreHTTPSErrors: true })).newPage();
-page.on('pageerror', (e) => console.log('[pageerror]', e.message));
-async function fresh(cp) {
-  await page.goto(`http://127.0.0.1:5173/?autostart=1&tex=0.1&tier=low&noauto=1&cp=${cp}`);
-  await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000 });
+// Failure-path suites: node tools/negative.mjs [--chapter souk | --suite foundation] [--only name] [--selftest-fail] [--port 5173]
+// Runs tools/neg/<chapter>.mjs. Each scenario { name, cp?, query?, fresh?, run(ctx) -> result, check(result) -> true | 'why' }
+// opens a fresh page when it names a checkpoint, a query or fresh: true; otherwise it continues on the previous page.
+// Every scenario is asserted; the exit code is 1 if any fails. --selftest-fail adds a deliberately broken assertion.
+import { parseArgs, launch, openPage, gameUrl, exists } from './lib/harness.mjs';
+
+const o = parseArgs(process.argv.slice(2), { w: 320, h: 180 });
+const suite = o.suite || o.chapter;
+if (!exists(`tools/neg/${suite}.mjs`)) { console.log(`no negative suite for ${suite}`); process.exit(1); }
+const mod = await import(new URL(`./neg/${suite}.mjs`, import.meta.url));
+let scenarios = mod.scenarios.slice();
+if (o.only) scenarios = scenarios.filter((s) => s.name.includes(o.only));
+if (o.selftestFail) scenarios.push({ name: 'selftest: broken assertion', cp: 0, run: async ({ page }) => page.evaluate(() => __medina.state().x), check: (x) => (x === -12345 ? true : `x is ${x}, the selftest expects -12345`) });
+
+const browser = await launch();
+let P = null, failed = 0;
+const t0 = Date.now();
+for (const sc of scenarios) {
+  let res, verdict;
+  try {
+    if (!P || sc.cp !== undefined || sc.query || sc.fresh) {
+      if (P) await P.close();
+      const opts = { ...o, chapter: sc.chapter ?? (o.suite ? 'souk' : o.chapter), cp: sc.cp };
+      P = await openPage(browser, { url: sc.url === false ? null : gameUrl(opts, sc.query || {}), w: sc.w || o.w, h: sc.h || o.h, init: sc.init || null, quiet: true });
+    }
+    res = await sc.run({ page: P.page, P, o, gameUrl, openPage, browser });
+    verdict = sc.check(res);
+    if (verdict === true && P.errors.length && !sc.allowErrors) verdict = `page errors: ${P.errors.slice(0, 3).join(' | ')}`;
+  } catch (e) { verdict = `threw: ${e.message.split('\n')[0]}`; }
+  const ok = verdict === true;
+  if (!ok) failed++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${sc.name.padEnd(36)} ${JSON.stringify(res)?.slice(0, 220)}${ok ? '' : `\n      -> ${verdict}`}`);
+  if (P && P.errors.length) P.errors.length = 0;
 }
-const results = [];
-// 1. searchlight: run straight across the courtyard
-await fresh(3);
-results.push(['spotted by lamp', await page.evaluate(() => { const M = __medina; for (let i = 0; i < 1400; i++) { const s = M.sim(1 / 120, { x: 1 }); if (s.dead) return { died: true, kind: M.game.player.deathKind, x: s.x }; } return { died: false, s: M.state() }; })]);
-// respawn restores the checkpoint
-results.push(['respawn after lamp', await page.evaluate(() => { const M = __medina; M.sim(3, { x: 0 }); return M.state(); })]);
-// 2. chase: stop after triggering
-await fresh(5);
-results.push(['caught by guard', await page.evaluate(() => { const M = __medina; M.sim(1.0, { x: 1 }); for (let i = 0; i < 1200; i++) { const s = M.sim(1 / 120, { x: 0 }); if (s.dead) return { died: true, kind: M.game.player.deathKind, gx: s.gx, x: s.x }; } return { died: false, s: M.state() }; })]);
-results.push(['guard reset on respawn', await page.evaluate(() => { const M = __medina; M.sim(3, { x: 0 }); return { guard: M.state().guard, x: M.state().x }; })]);
-// 3. ravine: walk into it without the bridge
-await fresh(4);
-results.push(['fall into ravine', await page.evaluate(() => { const M = __medina; M.teleport(135.5, 0); for (let i = 0; i < 1000; i++) { const s = M.sim(1 / 120, { x: 1 }); if (s.dead) return { died: true, kind: M.game.player.deathKind, y: s.y }; } return { died: false, s: M.state() }; })]);
-// 4. plate alone lifts nothing; plate with crate lowers the bridge
-results.push(['plate with boy only', await page.evaluate(() => { const M = __medina; M.sim(3, { x: 0 }); M.teleport(128.1, 0); M.sim(2, { x: 0 }); const s = M.state(); return { plate: s.plate, bridge: s.bridge }; })]);
-// 5. crate falling on the boy kills
-await fresh(4);
-results.push(['crate crush', await page.evaluate(() => { const M = __medina, G = M.game; M.teleport(131.0, 0); G.level.crateB.setState({ x: 131.0, y: 4.3 }); G.level.crateB.body.vx = 0; G.level.crateB.body.y = 3.0; for (let i = 0; i < 300; i++) { const s = M.sim(1 / 120, { x: 0 }); if (s.dead) return { died: true, kind: G.player.deathKind }; } return { died: false }; })]);
-for (const [n, r] of results) console.log(n.padEnd(24), JSON.stringify(r));
+if (P) await P.close();
 await browser.close();
+console.log(`${scenarios.length - failed}/${scenarios.length} passed in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+process.exit(failed ? 1 : 0);

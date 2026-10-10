@@ -49,7 +49,8 @@ export function rebuildEnvironment(world) {
   const old = world.env;
   world.env = buildEnvironment(world.rs.renderer, world.sky.mesh);
   world.mats.setEnv(world.env);
-  if (old && old !== world.env) old.dispose();
+  // the PMREM texture belongs to a render target: disposing the texture alone leaks the target
+  if (old && old !== world.env) { if (old.renderTarget) old.renderTarget.dispose(); else old.dispose(); }
   return world.env;
 }
 
