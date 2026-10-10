@@ -246,6 +246,6 @@ With L's Sunwork files laid over this branch in a scratch tree (not committed he
 grips `M2` with a touch tap (latched, the layer switches to its aiming layout), touches the lock `L4` and the mirror
 settles on −45° on all three devices.
 
-The foundation suite (the engine's own, frozen) passes with the shell, including the boot budget against the
-pre-foundation tree (median 16.0 s against 15.6 s, budget 17.2 s, 24 painted loading values) and the souk bot and
-negatives.
+The foundation suite (the engine's own, frozen; `--artifact`) passes 18 / 18 with the shell, including the boot
+budget against the pre-foundation tree (median 18.1 s against 19.1 s under the same load, 24 painted loading values)
+and the artifact boot; the souk bot (85.37 s, no death, hash `7bd4df65`) and the 13 souk negatives pass.
