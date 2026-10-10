@@ -3,7 +3,7 @@ import { Crate, Trigger } from '../game/entities.js';
 // A 30 m placeholder chapter: a street with a floor, a start wall, lanterns,
 // a crate, one checkpoint and an end trigger that completes the chapter.
 // Chapter packages replace their stub's index.js; nothing else imports this.
-export const STUB_NEEDS = ['cobbles', 'sandstone', 'limestone', 'plasterBlue', 'plasterPeach', 'plasterCream', 'plasterOchre', 'plasterWhite', 'iron', 'brass', 'wood', 'woodDark'];
+export const STUB_NEEDS = ['cobbles', 'sandstone', 'limestone', 'plasterBlue', 'plasterPeach', 'plasterCream', 'plasterOchre', 'plasterWhite', 'iron', 'brass', 'wood', 'woodDark', 'woodPlank'];
 
 export function buildStub(game, kit, { tint = 'peach', lanterns = 4, styles = ['peach', 'cream', 'blue', 'ochre', 'white'] } = {}) {
   const { L, r, FZ, ground, block, vbox, lantern, cp, cam, shaft, farBuilding } = kit;
