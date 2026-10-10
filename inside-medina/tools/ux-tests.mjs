@@ -128,12 +128,18 @@ await scenario('gamepad', async () => {
     const buttons = Array.from({ length: 17 }, () => ({ pressed: false, value: 0, touched: false }));
     window.__pad = { id: 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)', index: 0, connected: true, mapping: 'standard', timestamp: 0, axes: [0, 0, 0, 0], buttons, rumbles: 0,
       vibrationActuator: { type: 'dual-rumble', playEffect: () => { window.__pad.rumbles++; return Promise.resolve('complete'); } } };
-    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [window.__pad, null, null, null] });
+    // a press lasts exactly one poll (window.__tap(b)), however slow the software frames are
+    window.__taps = [];
+    window.__tap = (b) => window.__taps.push(b);
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => {
+      for (const b of window.__pad.buttons) if (b.tap) { b.pressed = false; b.value = 0; b.tap = false; }
+      const b = window.__taps.shift(); if (b !== undefined) { const B = window.__pad.buttons[b]; B.pressed = true; B.value = 1; B.tap = true; }
+      return [window.__pad, null, null, null];
+    } });
   };
   const { page, ctx, errors } = await open({ url: `${BASE}?${Q}`, init });
   const B = { up: 12, down: 13, left: 14, right: 15, confirm: 0, back: 1, next: 5, prev: 4, pause: 9 };
-  // one polled frame down, then up (held longer than 400 ms, a direction repeats, as on a real pad)
-  const press = async (k, n = 1) => { for (let i = 0; i < n; i++) { await page.evaluate((b) => { __pad.buttons[b].pressed = true; __pad.buttons[b].value = 1; }, B[k]); await frames(page, 1); await page.evaluate((b) => { __pad.buttons[b].pressed = false; __pad.buttons[b].value = 0; }, B[k]); await frames(page, 2); } };
+  const press = async (k, n = 1) => { for (let i = 0; i < n; i++) { await page.evaluate((b) => __tap(b), B[k]); await page.waitForFunction(() => !__taps.length, null, { polling: 30 }); await frames(page, 2); } };
   await waitFor(page, () => window.__ui && __ui.input, null, 60000);
   const [v, out] = await journey(page, press, { pad: true });
   out.device = await page.evaluate(() => [__ui.input.lastDevice, __ui.input.pad?.kind]);
@@ -285,7 +291,7 @@ await scenario('artifact', async () => {
     const st = await f.evaluate(async () => {
       let sw = 'none';
       try { sw = navigator.serviceWorker ? (await navigator.serviceWorker.getRegistrations()).length : 'none'; } catch { sw = 'refused'; }
-      return { chapter: __medina.chapter(), mode: __medina.game.mode, menu: __ui.focus.top?.el.id, origin: location.origin, storage: __ui.storage.available, sw, controller: (() => { try { return !!navigator.serviceWorker?.controller; } catch { return false; } })(), scripts: document.scripts.length, external: [...document.querySelectorAll('script[src],link[href]')].map((e) => e.src || e.href) };
+      return { chapter: __medina.chapter(), mode: __medina.game.mode, menu: __ui.focus.top?.el.id, origin: self.origin, storage: __ui.storage.available, sw, controller: (() => { try { return !!navigator.serviceWorker?.controller; } catch { return false; } })(), scripts: document.scripts.length, external: [...document.querySelectorAll('script[src],link[href]')].map((e) => e.src || e.href) };
     });
     // a minute of the title and a start, still without errors
     await f.evaluate(() => __ui.mainAction('new'));

@@ -394,21 +394,33 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   #credits .scrim { background: rgba(11, 8, 6, .35); }
   #touch .tzone { width: 50%; }
 }
+/* phones in landscape: the wordmark (or the chapter) on the left, the entries in a second column */
 @media (max-height: 460px) and (orientation: landscape) {
-  .menu .brand { top: calc(7vh + var(--st)); }
-  .wordmark { font-size: clamp(36px, 6.4vw, 70px); }
-  .menu .entries { top: calc(40vh + var(--st)); }
-  .entry { min-height: 44px; font-size: calc(22px * var(--ms)); }
-  .rule { margin-top: 14px; }
-  .tagline { margin-top: .6em; }
-  #pause .where { top: calc(6vh + var(--st)); }
-  #pause .entries { top: calc(6vh + var(--st) + 96px); }
+  .menu::before { background: linear-gradient(90deg, rgba(11, 8, 6, .74) 0%, rgba(11, 8, 6, .5) 45%, rgba(11, 8, 6, .62) 70%, rgba(11, 8, 6, .7) 100%); }
+  .menu .brand { top: 50%; transform: translateY(-50%); }
+  .wordmark { font-size: clamp(34px, 5.6vw, 64px); }
+  .menu .entries { left: auto; right: calc(6vw + var(--sr)); top: 50%; transform: translateY(-50%); }
+  .entry { min-height: 44px; font-size: calc(21px * var(--ms)); }
+  .entry .sub { font-size: calc(14px * var(--ms)); }
+  .rule { margin-top: 14px; width: min(240px, 28vw); }
+  .tagline { margin-top: .6em; font-size: calc(14px * var(--ms)); }
+  #pause .where { top: 50%; transform: translateY(-50%); }
+  #pause.in .where { transform: translateY(-50%); }
   #pause .pg { width: 48px; height: 48px; }
-  #settings .sheet { padding-top: calc(5vh + var(--st)); width: min(640px, 64vw); }
+  #pause .entries { top: 50%; }
+  #settings .sheet { padding-top: calc(4vh + var(--st)); width: min(640px, 66vw); }
+  #settings .tabs { margin-top: 10px; }
+  #settings .tab { min-height: 44px; }
   .row { min-height: 44px; }
-  .ccard { --w: min(17vw, 160px, 40vh); }
-  #chapters .cards { transform: translateY(-42%); }
-  .ccard .num { margin-top: 8px; font-size: 26px; }
+  .ccard { --w: min(17vw, 150px, 34vh); }
+  .ccard .arch { aspect-ratio: 1 / 1.15; }
+  #chapters .cards { transform: translateY(-44%); }
+  #chapters header { top: calc(5vh + var(--st)); }
+  .ccard .num { margin-top: 6px; font-size: 24px; }
+  .ccard .lab { font-size: 14px; }
+  .ccard .pips { margin-top: 4px; gap: 2px; }
+  .ccard .pips i { width: 15px; height: 15px; }
+  .ccard .pips i::before { width: 5px; height: 5px; }
 }
 /* reduce motion: no drift, no spin, no staggered travel */
 #ui.reduce-motion .cpat, #ui.reduce-motion .entry .mark svg { animation: none; }

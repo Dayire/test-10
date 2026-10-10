@@ -146,9 +146,12 @@ export async function boot(canvas, params) {
 // navigator.wakeLock during play (guarded: iframes and older browsers refuse it)
 function wakeLock(game) {
   let lock = null, want = false;
+  // a frame without the permission (the artifact's sandbox) must not even ask: Chrome logs the refusal as an error
+  let allowed = !!navigator.wakeLock;
+  try { const pp = document.permissionsPolicy || document.featurePolicy; if (pp?.allowsFeature && !pp.allowsFeature('screen-wake-lock')) allowed = false; } catch { allowed = false; }
   const release = () => { want = false; const l = lock; lock = null; try { l?.release?.()?.catch?.(() => {}); } catch { /* gone */ } };
   const sync = () => {
-    const on = game.mode === 'play' && !game.paused && !document.hidden;
+    const on = allowed && game.mode === 'play' && !game.paused && !document.hidden;
     if (!on) { if (lock || want) release(); return; }
     if (lock || want) return;
     want = true;
