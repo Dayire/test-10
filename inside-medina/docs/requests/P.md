@@ -110,7 +110,7 @@ side. Tested by the foundation scenario `LUT looks follow the time of day` (`?ch
 
 **Done (I0).** All three, plus four levers of the integrator's own; every Chapter I spot is now within the low and
 medium budgets, measured as the heaviest frame (a shadow refresh plus the main pass). The before/after table is in
-`docs/systems/graphics.md` ("Last run").
+`docs/systems/graphics.md` ("Integration run (I0)").
 - Characters: one `SkinnedMesh` per material bound to the joints (the boy: 6 draws per pass, plus the scarf's tail).
 - Lanterns: `levelkit.staticCaster(obj)` flags the levelkit lantern and the hero alley's.
 - The main pass: instead of a far set, batches chunk by depth (0.6 × chunk wide near the play plane, 2 × in the

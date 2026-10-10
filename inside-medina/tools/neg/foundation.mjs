@@ -88,6 +88,25 @@ async function startBaseServer() {
 
 const frames = (page, n = 3) => page.evaluate((n) => new Promise((r) => { const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
 
+// Linux CPU accounting for the boot budget: the machine's busy jiffies (/proc/stat) and those of this process's
+// descendants (the browser, the base tree's server), so a boot can be told apart from the load other work put on the
+// machine while it ran. Without /proc both read null and every pair counts.
+function machineCpu() {
+  try { const v = fs.readFileSync('/proc/stat', 'utf8').split('\n')[0].trim().split(/\s+/).slice(1).map(Number); const total = v.reduce((a, b) => a + b, 0); return { busy: total - v[3] - (v[4] || 0), total }; } catch { return null; }
+}
+function ownCpu() {
+  try {
+    const kids = new Map();
+    for (const d of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(d)) continue;
+      try { const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8'), f = st.slice(st.lastIndexOf(')') + 2).split(' '); const pp = +f[1]; if (!kids.has(pp)) kids.set(pp, []); kids.get(pp).push([+d, +f[11] + +f[12]]); } catch { /* gone */ }
+    }
+    let sum = 0; const walk = (p) => { for (const [c, t] of kids.get(p) || []) { sum += t; walk(c); } };
+    walk(process.pid);
+    return sum;
+  } catch { return null; }
+}
+
 export const scenarios = [
   {
     // §11.2 acceptance 5: souk cp 6 + finale -> chapterEnd -> card -> sundown; the save points at sundown; ?continue=1 lands there
@@ -652,9 +671,11 @@ export const scenarios = [
     // running server of it) and the two trees boot in interleaved pairs under the same load, after one warm-up boot
     // each. A pair's two boots are seconds apart, so the load they see is nearly the same: the verdict is the median of
     // the per-pair ratios (current / base), with the order inside a pair alternating (ABBA) so a drifting load favours
-    // neither side. One slow boot moves one ratio, not the median. When the median lands within 4 % of the budget
-    // the verdict is too close to call on a noisy machine: four more pairs are timed (once). The budget is unchanged:
-    // the median ratio must stay ≤ 1.1. --absolute times against the recorded baseline instead (an idle machine only).
+    // neither side. One slow boot moves one ratio, not the median. A pair counts only when other work loaded the machine
+    // about equally during its two boots (the CPU the rest of the machine used, from /proc); a pair that straddles a
+    // burst of someone else's work is timed again. When the median lands within 4 % of the budget the verdict is too
+    // close to call: four more pairs are timed (once). The budget is unchanged: the median ratio must stay ≤ 1.1.
+    // --absolute times against the recorded baseline instead (an idle machine only).
     name: 'boot budget and loading bar', url: false,
     run: async ({ page, o }) => {
       await page.addInitScript(() => {
@@ -663,13 +684,22 @@ export const scenarios = [
         const tick = () => { const i = document.querySelector('#loading .lbar i'); if (i && i.style.width) window.__painted.add(i.style.width); if (!window.__readyAt) requestAnimationFrame(tick); };
         requestAnimationFrame(tick);
       });
-      // each boot starts from a blank page: tearing down the previous game (its GL context on SwiftShader) takes
-      // 4-7 s and would otherwise be charged to whichever tree boots next
+      // both trees link a Google Fonts stylesheet that blocks their scripts: fetched through this machine's network
+      // it adds 0-9 s to a boot at random, so it is answered here with an empty one and the timing is the game's
+      const fonts = /^https:\/\/fonts\.(googleapis|gstatic)\.com\//;
+      await page.route(fonts, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+      // each boot starts from a blank page (tearing down the previous game's GL context on SwiftShader takes 4-7 s
+      // and would otherwise be charged to whichever tree boots next) and records how many CPUs other work kept busy
+      // meanwhile (`ext`)
+      const ncpu = os.cpus().length;
       const boot = async (port) => {
         await page.goto('about:blank');
+        const m0 = machineCpu(), o0 = ownCpu();
         await page.goto(port ? `http://127.0.0.1:${port}/?autostart=1&tex=0.1&tier=low&noauto=1` : gameUrl({ ...o, chapter: null, cp: undefined }, { hold: null }));
         await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000, polling: 100 });
-        return page.evaluate(() => ({ ms: Math.round(window.__readyAt), painted: [...window.__painted] }));
+        const m1 = machineCpu(), o1 = ownCpu();
+        const ext = m0 && m1 && o0 !== null && o1 !== null && m1.total > m0.total ? Math.max(0, (m1.busy - m0.busy - (o1 - o0)) / (m1.total - m0.total) * ncpu) : null;
+        return page.evaluate((ext) => ({ ms: Math.round(window.__readyAt), painted: [...window.__painted], ext }), ext);
       };
       const median = (v) => { const a = [...v].sort((x, y) => x - y), n = a.length; return n % 2 ? a[n >> 1] : (a[n / 2 - 1] + a[n / 2]) / 2; };
       let srv = null, ab = o.basePort ? +o.basePort : 0;
@@ -683,21 +713,28 @@ export const scenarios = [
           return { readyMs: cur.map((x) => x.ms), median: median(cur.map((x) => x.ms)), budget, ok: median(cur.map((x) => x.ms)) <= budget, against: `recorded warm ${baseline.boot.readyMs.warm}`, painted: cur[1].painted.length, values: cur[1].painted.join(' ') };
         }
         await boot(ab); await boot(0);
+        // a pair counts when other work loaded the machine about equally during both boots (within 0.6 CPU); a pair
+        // that straddles a burst of someone else's work is timed again, up to twice the rounds
+        const matched = [], ext = [];
         const pair = async (k) => {
           let b, c;
           if (k % 2) { c = await boot(0); b = await boot(ab); } else { b = await boot(ab); c = await boot(0); }
-          base.push(b); cur.push(c); ratios.push(c.ms / b.ms);
+          base.push(b); cur.push(c); ratios.push(c.ms / b.ms); ext.push([b.ext, c.ext]);
+          if (b.ext === null || c.ext === null || Math.abs(b.ext - c.ext) <= 0.6) matched.push(c.ms / b.ms);
         };
-        for (let k = 0; k < rounds; k++) await pair(k);
+        let k = 0;
+        for (; matched.length < rounds && k < rounds * 2; k++) await pair(k);
         let extended = false;
-        if (Math.abs(median(ratios) - 1.1) < 0.04) { extended = true; for (let k = rounds; k < rounds + 4; k++) await pair(k); }
-        const ratio = +median(ratios).toFixed(3);
+        const use = () => (matched.length >= 3 ? matched : ratios);
+        if (Math.abs(median(use()) - 1.1) < 0.04) { extended = true; const want = matched.length + 4; for (let n = 0; matched.length < want && n < 8; n++, k++) await pair(k); }
+        const ratio = +median(use()).toFixed(3);
         return {
-          ratio, ok: ratio <= 1.1, extended, pairs: ratios.map((r) => +r.toFixed(2)),
+          ratio, ok: ratio <= 1.1, extended, pairs: ratios.map((r) => +r.toFixed(2)), matched: matched.map((r) => +r.toFixed(2)),
+          ext: ext.map(([b, c]) => [b, c].map((v) => (v === null ? null : +v.toFixed(2)))),
           readyMs: cur.map((x) => x.ms), median: median(cur.map((x) => x.ms)), baseMedian: median(base.map((x) => x.ms)),
           against: `base tree${srv ? ' ' + srv.ref : ''} on ${ab}: ${base.map((x) => x.ms).join(' ')}`, painted: cur[1].painted.length, values: cur[1].painted.join(' '),
         };
-      } finally { srv?.stop(); }
+      } finally { srv?.stop(); await page.unroute(fonts).catch(() => {}); }
     },
     check: (r) => (r.ok && r.painted >= 10 ? true : r.ratio !== undefined ? `boot ${r.median} ms vs base ${r.baseMedian} ms: median pair ratio ${r.ratio} (budget 1.1), ${r.painted} painted values` : `boot ${r.median} ms (budget ${r.budget}), ${r.painted} painted values`),
   },

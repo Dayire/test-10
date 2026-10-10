@@ -1,6 +1,6 @@
-# Graphics and performance (package P)
+# Graphics and performance (package P; integration I0)
 
-Owner files: `src/render/{renderer,post,dynres,shadowpolicy,layers,fxaa,ssao,flare,lut,particles,fx,shafts,sky,lighting,atmosphere,glsl}.js`,
+Owner files (the integrator's since the first integration pass): `src/render/{renderer,post,dynres,shadowpolicy,layers,fxaa,ssao,flare,lut,particles,fx,shafts,sky,lighting,atmosphere,glsl}.js`,
 `tools/perf.mjs`. The plan is FULL_GAME §9.2 (tiers), §8.5 (budgets) and §11.4 P; this page is how it is built and how to use it.
 
 ## Frame
@@ -49,6 +49,8 @@ class, not MSAA off.
 | merged static casters (proxies) | on | on | on | on |
 | shadow reach (proxies behind the play plane) | 8 m | 14 m | all | all |
 | small-caster cull | on | on | off | off |
+| alpha-tested static casters (ivy, lattice) | off | on | on | on |
+| geometry built for the tier (`lite`) | lighter | full | full | full |
 | DOF taps (half res) | off | 16 | 36 | 48 |
 | god rays | off | on | on | on |
 | soft beams and shafts | off (hard additive) | on | on | on |
@@ -57,7 +59,12 @@ class, not MSAA off.
 | flares and lens dirt | off | on | on | on |
 
 The sky is drawn after the opaques on every tier, the flock is instanced and characters carry the rim
-term on every tier. Without `EXT_color_buffer_half_float`/`float` (or with `?ldr`), the renderer runs the
+term on every tier. A chapter loaded on low is built with lighter geometry (`DETAIL.lite` in
+`src/assets/geom.js`: arch outlines, extrusion curves, lathes and tubes with about half their segments, no bevels
+under 3 cm; set by the chapter loader around the build), which halves its triangles; a tier change mid-chapter
+keeps the geometry the chapter was built with, as it keeps the texture scale. On every tier the static batches
+chunk by depth (0.6 × chunk near the play plane, 2 × in the far city) and are culled by their world box, the
+characters draw one skinned mesh per material, and hanging lanterns cast through the merged proxies. Without `EXT_color_buffer_half_float`/`float` (or with `?ldr`), the renderer runs the
 low tier on RGBA8 targets: every material stores `c / (1 + c)` (one line appended to `fog_fragment`) and
 the post chain decodes it, so HDR bloom and the grade survive.
 
@@ -231,7 +238,8 @@ The table visits the six Chapter I tour spots per tier and reports shadow-pass v
 post passes and programs, the flock's share (with and without every bird in view), and shadow calls on a
 simulated 60 fps clock (the rAF loop cannot interleave with that synchronous loop, so time-based
 policies are measured at a real cadence; SwiftShader frames are far slower than 33 ms). After the table it
-prints the §8.5 budget per tier and spot (shadow + main calls, triangles) and warns when a spot is over. It
+prints the §8.5 budget per tier and spot (shadow + main calls, triangles; the heaviest frame, with the 60 fps average
+beside it) and fails the run when a spot is over (and when a check fails or is pending). It
 runs on any build, so the "before" column comes from the pre-presentation tree. The checks: FXAA on low,
 tier round trip (targets, textures, geometries, programs, post materials), programs stable after warm-up,
 frame cap (10 s of 120/144 Hz timestamps), the light state stable across frames with the soft pass on
@@ -249,7 +257,57 @@ shadow draws), `dynSignal` (`trackFrame` fed a minute or more of frames from a d
 saves, a CPU-bound frame no tier helps) and `throttleLoop` (the real boot loop under a 30 Hz rAF stub whose
 clock `performance.now` follows, GPU timer hidden: the tier and the resolution must hold).
 
-### Last run
+### Integration run (I0)
+
+SwiftShader, 640 × 360, `tex=0.1`, `node tools/perf.mjs --tiers low,medium,high --checks`. "Before" is the merged F + P
+tree (`4c166b2`). Each cell is the heaviest frame at the spot: shadow calls of a frame that refreshes the maps (every
+frame on low at its own 30 fps and on high; every other frame on medium at 60 fps) plus the main pass, and its
+triangles; `perf.mjs` now fails a run when a spot is over its tier's budget.
+
+| tier | budget (calls / tris) | souk | raised | rooftops | courtyard | balcony | chase |
+|---|---|---|---|---|---|---|---|
+| low | 130 / 400 k | 151 / 393 k → **112 / 238 k** | 154 / 540 k → **112 / 236 k** | 146 / 499 k → **103 / 206 k** | 147 / 484 k → **105 / 217 k** | 181 / 668 k → **115 / 258 k** | 157 / 575 k → **117 / 237 k** |
+| medium | 180 / 550 k | 157 / 399 k → **123 / 353 k** | 159 / 545 k → **125 / 361 k** | 149 / 506 k → **114 / 389 k** | 148 / 479 k → **112 / 393 k** | 185 / 673 k → **126 / 443 k** | 162 / 580 k → **131 / 432 k** |
+| high | 240 / 700 k | 161 / 406 k → **127 / 360 k** | 162 / 549 k → **128 / 365 k** | 154 / 511 k → **119 / 395 k** | 187 / 657 k → **155 / 570 k** | 203 / 681 k → **160 / 452 k** | 172 / 588 k → **141 / 439 k** |
+
+The 60 fps averages are lower still (low 95–108 calls, 172–211 k). The courtyard lamp's map refreshes at 15 Hz and
+the table catches it only when that refresh falls in the measured frames; with every map forced to refresh in the
+same frame (`rs.shadows.invalidate()`), the worst spot on both tiers is the courtyard: 116 calls (90 main, 18 sun,
+8 lamp) and 277 k triangles on low, 126 calls and 522 k triangles on medium, inside both budgets. What brought it there:
+
+| lever | where | effect |
+|---|---|---|
+| merged characters | `character.js` | the boy: 22 → 6 main draws, 21 → 2 per shadow pass (`rig.shadowMeshes`, one per material side) |
+| static lanterns | `levelkit.staticCaster` | the swaying lanterns cast through the proxies: −24 shadow draws at the courtyard |
+| depth chunks, box culling | `geom.js` `Batcher` | main-pass triangles −30 to −40 % on every tier for 0–6 more draws |
+| swept-box sun cull | `shadowpolicy.js` | proxy tiles far along the light (rooftops whose shadow never reaches the view) leave the sun's pass |
+| sway counts as static | `shadowpolicy.js` | the rolled-up rope ladder (16 meshes) stops casting on low and medium |
+| lite geometry (low) | `geom.js` `DETAIL` | half the curve segments, no bevels under 3 cm: low's triangles halve |
+| no cut-out shadows (low) | `QUALITY.low.alphaCasters` | ivy and lattice batches stop casting on low |
+
+High is unchanged on screen: the tour spots at 960 × 540 match the pre-integration tree within grain and the
+flock's random positions, except the crawl tunnel, where the rubble pile now stands over the lintel (its stones had
+been turning about the world origin, 50 m into the sky). Programs: 45 / 51 / 54 on low / medium / high (the skinned
+character variants), stable after warm-up.
+
+**Texture memory** (§8.5, the touch classes' `tex=0.5`, 844 × 390 CSS px at DPR 3; unchanged by I0): the baked
+surfaces (34 surfaces × albedo, normal, ORM, with mips) take 13.6 MB on low and 54.3 MB on medium, plus 2.6 MB of
+LUT, sky and particle textures on medium: 14 / 57 MB against 60 / 80 MB. Counting every render target as well, medium
+reaches 115 MB: the post chain 10 MB and the shadow maps 48 MB, half of which is the RGBA8 colour attachment three
+allocates beside each depth texture and never samples (an R8 attachment would save 18 MB on medium, 9 MB on low).
+
+**Boot** (FULL_GAME §8.6). The profile of a boot on SwiftShader was two thirds shader compiles: the 34 surface bakes
+(each program evaluated `surf()` five times for its normals) and the scene's programs at the first frame. A surface's
+program now evaluates `surf()` once and one shared program derives its normal and ORM maps (every texture matches the
+old bake within 1/255), and the loader issues every program before the build so the driver compiles while the level
+is built (`world.prebake` / `world.finishBake`). Boot to `__ready`, each boot from a blank page: 6.2–7.0 s against
+10.7–11.4 s for `4c166b2`. The foundation suite's boot check (interleaved ABBA pairs against the pre-foundation tree,
+6.4–6.9 s against 7.9–8.8 s) gives pair ratios of 0.78–0.88, median 0.81, against its 1.1 budget. Its earlier noise
+(single boots of 6 to 16 s) was the Google Fonts stylesheet both trees link, fetched over the network before their
+scripts run; the check now answers it with an empty one, and counts only pairs whose two boots shared the machine
+with about the same outside load.
+
+### Presentation package run (P)
 
 SwiftShader, 640 × 360, `tex=0.1`; "before" is the pre-presentation tree (`0f7b31b`). The flock column counts
 its own draws (main + shadow).
