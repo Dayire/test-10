@@ -13,7 +13,8 @@ import { Crate } from './entities.js';
 export const FZ = -1.6;
 
 // a prop that only sways (a hanging lantern: ±0.03 rad) casts like the static level: the shadow policy merges it into
-// its static proxies, whose shadow keeps the pose it had when merged (within 2 cm), instead of one draw per pass
+// its static proxies, whose shadow keeps the pose it had when merged (within 2 cm), instead of one draw per pass.
+// One that later moves further (8 cm) leaves the proxies and casts on its own from the next scan (within a second)
 export function staticCaster(obj) {
   obj.traverse((o) => { if (o.isMesh && o.castShadow) o.userData.staticCaster = true; });
   return obj;
@@ -43,11 +44,13 @@ export function createLevelKit(game, { K, root, L, r = rng(42) }) {
     }
     return s;
   };
-  // hanging lantern (optionally on a forged bracket); light: true adds a pool source
-  const lantern = (x, y, z, { light = false, s = 1, bracketDir = 0, yaw, chain, intensity = 3, lit = true } = {}) => {
+  // hanging lantern (optionally on a forged bracket); light: true adds a pool source. It only sways, so it casts
+  // through the static shadow proxies; pass staticCaster: false for one a script moves (a carried or lowered lamp)
+  const lantern = (x, y, z, { light = false, s = 1, bracketDir = 0, yaw, chain, intensity = 3, lit = true, staticCaster: pinned = true } = {}) => {
     let p = new THREE.Vector3(x, y, z);
     if (bracketDir) p = bracket(K, x, y, z, { len: 0.55, dir: bracketDir, yaw });
-    const m = staticCaster(lanternMesh(game.mats, { s, chain: chain ?? (bracketDir ? 0.06 : 0.3), lit }));
+    const m = lanternMesh(game.mats, { s, chain: chain ?? (bracketDir ? 0.06 : 0.3), lit });
+    if (pinned) staticCaster(m);
     m.position.copy(p);
     root.add(m);
     const glow = { mesh: m, light: null, phase: r() * 10, lit };

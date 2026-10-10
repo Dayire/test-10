@@ -318,6 +318,30 @@ if (checks || only === 'checks') {
       out.ok = out.softOn.medium && out.softOn.shared && out.softOn.shaftOnBeams && Object.values(emitted).every((n) => n > 0) && pv && out.shafts.moved && out.shafts.restored && out.dispose.ok && out.particlesClear.ok && out.particlesWarm.ok;
       return out;
     });
+    // the merged boy casts exactly the parts authored as casters (not his ears and nose); a levelkit lantern casts
+    // through the static proxies until it moves past a sway, then on its own (a scripted lamp keeps a live shadow)
+    if (want('casters')) result.checks.casters = await page.evaluate(async () => {
+      const M = window.__medina, G = M.game, S = G.world.rs.shadows;
+      const frame = () => new Promise((res) => { const n = window.__frames; const t = () => (window.__frames > n + 1 ? res() : requestAnimationFrame(t)); t(); });
+      const url = (f) => performance.getEntriesByType('resource').map((e) => e.name).find((n) => n.includes(`/src/assets/${f}`));
+      const { Rig, BOY } = await import(url('character.js'));
+      const plain = new Rig(BOY, G.mats, { merge: false }), count = (g) => (g.index ? g.index.count : g.attributes.position.count);
+      const authored = plain.meshes.filter((m) => m.castShadow).reduce((a, m) => a + count(m.geometry), 0), all = plain.meshes.reduce((a, m) => a + count(m.geometry), 0);
+      const merged = G.rig.shadowMeshes.reduce((a, m) => a + count(m.geometry), 0);
+      for (const m of plain.meshes) m.geometry.dispose();
+      const boy = { authored, merged, all, ok: merged === authored && authored < all };
+      M.photo(97, 0, 1, 0.2); await frame(); await frame();
+      const lan = G.level.lanterns.find((l) => { let f = false; l.mesh.traverse((o) => { f ||= !!o.userData.staticCaster; }); return f; });
+      const parts = []; lan.mesh.traverse((o) => { if (o.isMesh && o.userData.staticCaster) parts.push(o); });
+      const until = async (f) => { for (let i = 0; i < 200 && !f(); i++) await frame(); };
+      const before = { proxied: S.stats.proxied, cast: parts.filter((o) => o.castShadow).length };
+      lan.mesh.position.x += 1; S.nextScan = 0;
+      await frame(); await until(() => !S.building);
+      const after = { proxied: S.stats.proxied, cast: parts.filter((o) => o.castShadow).length };
+      lan.mesh.position.x -= 1;
+      const lantern = { parts: parts.length, before, after, ok: parts.length > 0 && before.cast === 0 && after.cast === parts.length && after.proxied === before.proxied - parts.length };
+      return { boy, lantern, ok: boy.ok && lantern.ok };
+    });
     await page.context().close();
     // ?slowgpu=8: dynamic resolution drops within 2 s, recovers after 5 s of headroom, <= 1 tier change per 30 s
     // ?noauto keeps the resolution fixed unless ?dynres=1 asks for dynamic resolution (the settings cannot)

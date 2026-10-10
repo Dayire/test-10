@@ -67,7 +67,7 @@ export class ShadowPolicy {
     this.hz = 60; this.cull = false; this.reach = Infinity; this.proxies = true; this.alphaCast = true;
     this.force = true; this.lastUpdate = -1e9; this.lastSpot = -1e9; this.lastFrame = -1e9;
     this.camPos = new THREE.Vector3(1e9, 0, 0); this.camDir = new THREE.Vector3();
-    this.meta = new WeakMap(); // mesh → { cast (authored), set (last value written here), small, fp, stable, proxied }
+    this.meta = new WeakMap(); // mesh → { cast (authored), set (last value written here), small, fp, stable, proxied, pin, loose }
     this.tracked = [];
     this.scene = null; this.kids = []; this.nextScan = 0;
     this.spots = new WeakMap(); // spot light → 'off' (cone unseen) | 'sched' (refreshed on this policy's clock)
@@ -115,17 +115,23 @@ export class ShadowPolicy {
       let m = this.meta.get(o);
       if (!m) {
         if (!o.castShadow) return; // only ever touch meshes that were authored as casters
-        m = { cast: true, set: undefined, small: false, fp: null, stable: 0, proxied: false };
+        m = { cast: true, set: undefined, small: false, fp: null, stable: 0, proxied: false, pin: null, loose: false };
         this.meta.set(o, m);
       }
       // the flag is authored unless this policy wrote it, and so is any change made since it last wrote it
       if (m.set === undefined || o.castShadow !== m.set) { m.cast = o.castShadow; m.set = undefined; }
-      if (this.proxies && m.cast && proxiable(o)) {
-        const root = rootOf(o, scene);
-        let list = sources.get(root); if (!list) sources.set(root, list = []);
-        list.push(o);
-        if (m.proxied && o.castShadow) this._set(o, m, false); // its proxy casts for it
-        return;
+      if (this.proxies && m.cast && !m.loose && proxiable(o)) {
+        // a flagged prop (userData.staticCaster) that moved past a sway since it was merged is not static after all:
+        // it leaves the proxies (the root's set changes, so they are merged again) and casts on its own from now on
+        const e = o.matrixWorld.elements, pin = m.pin;
+        if (pin && Math.abs(e[12] - pin[0]) + Math.abs(e[13] - pin[1]) + Math.abs(e[14] - pin[2]) > 0.08) { m.loose = true; m.pin = null; }
+        else {
+          const root = rootOf(o, scene);
+          let list = sources.get(root); if (!list) sources.set(root, list = []);
+          list.push(o);
+          if (m.proxied && o.castShadow) this._set(o, m, false); // its proxy casts for it
+          return;
+        }
       }
       if (m.proxied) { m.proxied = false; this._set(o, m, m.cast); }
       if (o.userData.smallCaster) { m.small = true; seen.push(o); return; }
@@ -207,13 +213,16 @@ export class ShadowPolicy {
     R.meshes.length = 0; R.sources.length = 0;
   }
   *buildJob(root, list, sig) {
-    const slots = new Array(2048), used = [];
-    // pass 1: world positions and a tile per triangle (x / TX and a depth band), triangle counts and bounds per tile
+    const slots = new Array(2048), used = [], at = new Map();
+    // pass 1: world positions and a tile per triangle (x / TX and a depth band), triangle counts and bounds per tile.
+    // A source's world matrix is brought up to date first (a root that just arrived has never been rendered) and
+    // kept for pass 2, which runs frames later, after a lantern has swayed
     for (const o of list) {
       if (!shownIn(o, root)) continue;
       used.push(o);
       yield;
-      const n = this.prep(o), W = _P, I = _I, K = _K, step = _side === 2 ? 2 : 1;
+      o.updateWorldMatrix(true, false); at.set(o, o.matrixWorld.clone());
+      const n = this.prep(o, at.get(o)), W = _P, I = _I, K = _K, step = _side === 2 ? 2 : 1;
       for (let t = 0; t < n; t++) {
         let T = slots[K[t]];
         if (!T) T = slots[K[t]] = { n: 0, b: [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], w: 0, a: null, c: null, s: 1 };
@@ -238,7 +247,7 @@ export class ShadowPolicy {
     // pass 2: 16-bit positions around each tile's centre (one uniform scale, truncated: under a millimetre)
     for (const o of used) {
       yield;
-      const n = this.prep(o), side = _side, W = _P, I = _I, K = _K;
+      const n = this.prep(o, at.get(o)), side = _side, W = _P, I = _I, K = _K;
       for (let t = 0; t < n; t++) {
         const T = slots[K[t]], a = T.a, cx = T.c[0], cy = T.c[1], cz = T.c[2], f = 32767 / T.s;
         let w = T.w;
@@ -273,7 +282,11 @@ export class ShadowPolicy {
       this.group.add(p); p.updateMatrixWorld(true);
       meshes.push(p);
     }
-    for (const o of used) { const m = this.meta.get(o); m.proxied = true; this._set(o, m, false); }
+    for (const o of used) {
+      const m = this.meta.get(o), e = at.get(o).elements;
+      m.proxied = true; this._set(o, m, false);
+      if (o.userData.staticCaster === true) m.pin = [e[12], e[13], e[14]]; // where its merged shadow was cast from
+    }
     this.force = true;
     // the lowest static geometry: no shadow of this root lands below it
     let floor = Infinity; for (const T of tiles.values()) floor = Math.min(floor, T.b[1]);
@@ -281,13 +294,13 @@ export class ShadowPolicy {
   }
   // a source's world-space vertices (_P: its own array, or _W), the vertex triple of each triangle (_I) and its tile
   // (_K); _side: 1 front faces as authored, -1 reversed, 2 both. Returns the triangle count.
-  prep(o) {
-    const g = o.geometry, pos = g.attributes.position, idx = g.index, e = o.matrixWorld.elements, nv = pos.count;
+  prep(o, mw = o.matrixWorld) {
+    const g = o.geometry, pos = g.attributes.position, idx = g.index, e = mw.elements, nv = pos.count;
     const m = o.material, eff = m.shadowSide ?? (m.side === THREE.FrontSide ? THREE.BackSide : m.side === THREE.BackSide ? THREE.FrontSide : THREE.DoubleSide);
     _side = eff === THREE.DoubleSide ? 2 : eff === THREE.BackSide ? 1 : -1;
     const plain = !pos.isInterleavedBufferAttribute && !pos.normalized && pos.itemSize === 3, a = pos.array;
     // batches sit at the origin: their own positions are world positions
-    if (plain && o.matrixWorld.equals(IDENTITY)) _P = a;
+    if (plain && mw.equals(IDENTITY)) _P = a;
     else {
       if (_W.length < nv * 3) _W = new Float32Array(Math.ceil(nv * 3 * 1.25));
       for (let v = 0; v < nv; v++) {
