@@ -6,6 +6,7 @@ const NAV = ['up', 'down', 'left', 'right', 'confirm', 'back'];
 export class Input {
   constructor() {
     this.keys = new Set();
+    this.taps = new Set(); // pressed since the last poll (a tap shorter than a frame still counts once)
     this.state = { x: 0, y: 0, jump: false, grab: false, pause: false, any: false };
     this.prev = { ...this.state };
     this.jumpPressed = false; this.grabPressed = false; this.pausePressed = false; this.anyPressed = false;
@@ -20,7 +21,7 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
       if (e.repeat) return;
-      this.keys.add(e.code); this.lastDevice = 'keyboard';
+      this.keys.add(e.code); this.taps.add(e.code); this.lastDevice = 'keyboard';
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
@@ -37,7 +38,7 @@ export class Input {
     } catch { /* keyboard map not allowed in this frame */ }
   }
 
-  k(...codes) { return codes.some((c) => this.keys.has(c)); }
+  k(...codes) { return codes.some((c) => this.keys.has(c) || this.taps.has(c)); }
 
   poll() {
     let x = 0, y = 0, jump = false, grab = false, pause = false;
@@ -71,7 +72,8 @@ export class Input {
     if (t.x) x = t.x; if (t.y) y = t.y; jump = jump || t.jump; grab = grab || t.grab;
     if (this.override) ({ x, y, jump, grab } = { x: 0, y: 0, jump: false, grab: false, ...this.override });
     this.prev = this.state;
-    const any = !!(x || y || jump || grab || this.keys.size);
+    const any = !!(x || y || jump || grab || this.keys.size || this.taps.size);
+    this.taps.clear();
     const P = this._ptr, ptr = this.pointer;
     ptr.active = P.down; ptr.pressed = P.pressed; ptr.released = P.released; P.pressed = false; P.released = false;
     this.navEdges(nav);
