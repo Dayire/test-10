@@ -62,7 +62,7 @@ export class Rig {
   // Every part is rigid on its joint, so the parts of one material merge into a single skinned
   // mesh whose vertices each follow one joint with weight 1: the pose is exactly the jointed one, in 5-7 draws
   // instead of 20 or more (FULL_GAME §8.5), and one or two in each shadow pass (this.shadowMeshes: every casting part,
-  // by material side, as a depth pass culls faces by its material's side). The
+  // by material side, as a depth pass culls faces by its material's side; parts authored with cast = false stay out). The
   // joints stay plain groups (the skeleton's bones), so the animator and anything hung on a joint (the guard's
   // lantern) work unchanged; this.meshes lists the per-material meshes.
   merge() {
@@ -94,9 +94,11 @@ export class Rig {
       });
       const merged = mergeGeometries(geos, false);
       if (g.cast) {
+        // only the parts authored as casters (the boy's ears and nose are not)
+        const cast = geos.filter((_, i) => g.parts[i].castShadow), cm = cast.length === geos.length ? merged : mergeGeometries(cast, false);
         const c = new THREE.BufferGeometry();
-        for (const k of ['position', 'skinIndex', 'skinWeight']) c.setAttribute(k, merged.attributes[k]);
-        c.setIndex(merged.index);
+        for (const k of ['position', 'skinIndex', 'skinWeight']) c.setAttribute(k, cm.attributes[k]);
+        c.setIndex(cm.index);
         if (!casters.has(g.mat.side)) casters.set(g.mat.side, []);
         casters.get(g.mat.side).push(c);
       }
