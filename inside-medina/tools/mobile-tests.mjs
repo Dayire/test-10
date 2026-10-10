@@ -105,8 +105,18 @@ async function device(dev) {
   // ------------------------------------------------------------------ gameplay (deterministic: the sim reads the live touch input)
   if (want('stick') || want('jump') || want('grab') || want('lens')) {
     await page.goto(`${BASE}?${Q}&autostart=1&hold=1&chapter=souk&cp=0`); await ready(page); await frames(page, 3);
-    const run = (sec) => page.evaluate((sec) => { const G = __medina.game; let vmax = 0, ymax = 0; const n = Math.round(sec * 120); for (let i = 0; i < n; i++) { __medina.sim(1 / 120, () => G.input.poll()); vmax = Math.max(vmax, Math.abs(G.player.body.vx)); ymax = Math.max(ymax, G.player.y); } return { vx: +G.player.body.vx.toFixed(2), vmax: +vmax.toFixed(2), ymax: +ymax.toFixed(2), x: +G.player.x.toFixed(2), st: G.player.state, inX: +G.input.state.x.toFixed(2) }; }, sec);
+    // the sim reads the live input: poll() each step, with the previous state kept for the sim's own press edges
+    const run = (sec) => page.evaluate((sec) => { const G = __medina.game; let vmax = 0, ymax = 0; const n = Math.round(sec * 120); for (let i = 0; i < n; i++) { __medina.sim(1 / 120, () => { const prev = G.input.state; const s = G.input.poll(); G.input.state = prev; return s; }); vmax = Math.max(vmax, Math.abs(G.player.body.vx)); ymax = Math.max(ymax, G.player.y); } return { vx: +G.player.body.vx.toFixed(2), vmax: +vmax.toFixed(2), ymax: +ymax.toFixed(2), x: +G.player.x.toFixed(2), st: G.player.state, inX: +G.input.state.x.toFixed(2) }; }, sec);
     const R = await page.evaluate(() => __ui.touch.radius());
+    // jump: a tap on the button, standing in the open street
+    await page.evaluate(() => { __medina.teleport(3, 0, 1); }); await run(0.3);
+    const jr = await page.evaluate(() => __ui.touch.rects().jump);
+    const y0 = await page.evaluate(() => __medina.state().y);
+    await touch('start', 2, ...centre(jr)); await frames(page, 1);
+    const jumped = await run(0.25);
+    await touch('end'); await frames(page, 1);
+    await run(0.8);
+    check('jump', jumped.ymax > y0 + 0.4, { y0, ymax: jumped.ymax, st: jumped.st });
     // stick: the thumb lands in the left zone, the base appears under it
     const sx = dev.viewport.width > dev.viewport.height ? 140 : 90, sy = H - I.bottom - 150;
     await page.evaluate(() => { __medina.teleport(4, 0, 1); });
@@ -118,16 +128,8 @@ async function device(dev) {
     const runS = await run(0.8);
     await touch('end'); await frames(page, 1);
     const stop = await run(0.4);
-    check('stick', Math.abs(base[0] - sx) < 3 && Math.abs(base[1] - sy) < 3 && walk.inX === 0.5 && walk.vx > 0.4 && walk.vx < 2.5 && runS.vx > 3.9 && stop.inX === 0,
+    check('stick', Math.abs(base[0] - sx) < 3 && Math.abs(base[1] - sy) < 3 && walk.inX === 0.5 && walk.vx > 0.4 && walk.vx < 2.5 && runS.vmax > 3.9 && runS.inX === 1 && stop.inX === 0,
       { R, base: base.map(Math.round), walk, run: runS, released: stop.inX });
-    // jump
-    const jr = await page.evaluate(() => __ui.touch.rects().jump);
-    const y0 = await page.evaluate(() => __medina.state().y);
-    await touch('start', 2, ...centre(jr)); await frames(page, 1);
-    const jumped = await run(0.25);
-    await touch('end'); await frames(page, 1);
-    await run(0.8);
-    check('jump', jumped.ymax > y0 + 0.4, { y0, ymax: jumped.ymax });
     // grab + push: the souk's first crate (36.7–37.7); stick right and grab held together
     await page.evaluate(() => { __medina.teleport(35.6, 0, 1); });
     await run(0.2);
@@ -158,22 +160,37 @@ async function device(dev) {
     let res;
     if (!lab.mirrors) {
       // the stub lab: a touch on the scene must reach the boy as the world point under the finger
-      const pt = await page.evaluate(() => { const G = __medina.game, p = G.player; const V = new (G.camera.position.constructor)(p.x + 2.5, 2.0, 0).project(G.camera); return { want: [p.x + 2.5, 2.0], sx: (V.x * 0.5 + 0.5) * innerWidth, sy: (-V.y * 0.5 + 0.5) * innerHeight }; });
+      // a point right of the controls' zone, a third of the way down: its world point on the play plane
+      const pt = await page.evaluate(() => {
+        const G = __medina.game, C = G.camera, V3 = C.position.constructor, sx = innerWidth * 0.62, sy = innerHeight * 0.34;
+        const d = new V3((sx / innerWidth) * 2 - 1, -(sy / innerHeight) * 2 + 1, 0.5).unproject(C).sub(C.position).normalize();
+        const t = -C.position.z / d.z;
+        return { want: [+(C.position.x + d.x * t).toFixed(3), +(C.position.y + d.y * t).toFixed(3)], sx, sy, hit: document.elementFromPoint(sx, sy)?.tagName };
+      });
       await touch('start', 4, pt.sx, pt.sy); await frames(page, 2);
-      const got = await page.evaluate(() => { const G = __medina.game; const st = G.input.poll(); __medina.sim(1 / 120, () => st); const pin = G.makePin(st, true); return { aim: pin.aimTarget && [+pin.aimTarget.x.toFixed(3), +pin.aimTarget.y.toFixed(3)], kind: st.pointer?.kind, active: st.pointer?.active }; });
+      // the world point under the finger with the camera of this moment, and the boy's pin from the live input
+      const got = await page.evaluate(({ sx, sy }) => {
+        const G = __medina.game, C = G.camera, V3 = C.position.constructor;
+        const d = new V3((sx / innerWidth) * 2 - 1, -(sy / innerHeight) * 2 + 1, 0.5).unproject(C).sub(C.position).normalize();
+        const t = -C.position.z / d.z, want = [C.position.x + d.x * t, C.position.y + d.y * t];
+        const prev = G.input.state, st = G.input.poll(); G.input.state = prev;
+        const pin = G.makePin(st, true);
+        return { want: want.map((v) => +v.toFixed(3)), aim: pin.aimTarget && [+pin.aimTarget.x.toFixed(3), +pin.aimTarget.y.toFixed(3)], kind: st.pointer?.kind, active: st.pointer?.active };
+      }, pt);
       await touch('end'); await frames(page, 2);
-      const err = got.aim ? Math.hypot(got.aim[0] - pt.want[0], got.aim[1] - pt.want[1]) : 99;
-      res = [got.active && got.kind === 'touch' && err < 0.05, { stub: true, want: pt.want, ...got, err: +err.toFixed(4), note: 'lab stub: no mirror on this branch; aimTarget checked' }];
+      const err = got.aim ? Math.hypot(got.aim[0] - got.want[0], got.aim[1] - got.want[1]) : 99;
+      res = [got.active && got.kind === 'touch' && err < 0.05 && pt.hit === 'CANVAS', { stub: true, hit: pt.hit, ...got, err: +err.toFixed(4), note: 'lab stub: no mirror on this branch; aimTarget checked' }];
     } else {
       // the Sunwork lab: grip M2 (room "tilt", checkpoint 3), touch the lock L4: the mirror settles on −45°
       await page.evaluate(() => { __medina.checkpoint(3); __medina.teleport(54.3, 0, 1); });
-      await page.evaluate(() => { const G = __medina.game; for (let i = 0; i < 60; i++) __medina.sim(1 / 120, () => G.input.poll()); });
+      const step = (n) => page.evaluate((n) => { const G = __medina.game; for (let i = 0; i < n; i++) __medina.sim(1 / 120, () => { const prev = G.input.state; const s = G.input.poll(); G.input.state = prev; return s; }); }, n);
+      await step(60);
       const gr = await page.evaluate(() => __ui.touch.rects().grab);
-      await tap(...centre(gr));
-      await page.evaluate(() => { const G = __medina.game; for (let i = 0; i < 30; i++) __medina.sim(1 / 120, () => G.input.poll()); });
+      await touch('start', 3, ...centre(gr)); await frames(page, 1); await step(6); await touch('end'); await frames(page, 1); await step(30);
       const pt = await page.evaluate(() => { const G = __medina.game; const V = new (G.camera.position.constructor)(56.23, 5.8, 0).project(G.camera); return { sx: (V.x * 0.5 + 0.5) * innerWidth, sy: (-V.y * 0.5 + 0.5) * innerHeight }; });
       await touch('start', 4, pt.sx, pt.sy); await frames(page, 2);
-      const got = await page.evaluate(() => { const G = __medina.game; for (let i = 0; i < 120; i++) __medina.sim(1 / 120, () => G.input.poll()); const m = __medina.ext.light().mirrors.find((q) => q.id === 'M2'); return { alpha: m.alpha, notch: m.notch, settled: m.settled, grip: !!G.player.grip, aim: G.player.aimAt }; });
+      await step(120);
+      const got = await page.evaluate(() => { const G = __medina.game; const m = __medina.ext.light().mirrors.find((q) => q.id === 'M2'); return { alpha: m.alpha, notch: m.notch, settled: m.settled, grip: !!G.player.grip, aim: G.player.aimAt, aiming: __ui.touch.aiming, hit: null }; });
       await touch('end'); await frames(page, 2);
       res = [got.grip && Math.round(got.alpha) === -45, { lab: true, ...got }];
     }

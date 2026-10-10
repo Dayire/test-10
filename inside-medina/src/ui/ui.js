@@ -26,6 +26,7 @@ export class UI {
     this.autostart = !!params.autostart;
     this.ready = false; this.queued = null; this.frameNo = 0;
     this.local = (storage?.getJSON?.(UI_KEY)) || {};
+    this.bootCompleted = !!save?.data?.completed; // the credits are skippable once the journey has been finished
     this.S = { ...defaultSettings(dev), ...(save?.data?.settings || {}) };
     root.classList.add('shell');
     root.insertAdjacentHTML('beforeend', `
@@ -139,7 +140,7 @@ export class UI {
       if (mode === 'play') this.maybeRotateHint();
     });
     E.on('save', () => this.fillMain());
-    E.on('credits', () => { this.wasCompleted = this.local.completed; this.local.completed = true; this.writeLocal(); });
+    E.on('credits', () => { this.wasCompleted = !!(this.local.completed || this.bootCompleted); this.local.completed = true; this.writeLocal(); });
     E.on('contextLost', () => this.showLost());
     game.applySettings(resolveSettings(this.S, this), { persist: false });
     this.menuChanged();
@@ -199,7 +200,7 @@ export class UI {
     if (k.startsWith('volumes.')) { const sub = k.slice(8); S.volumes = { ...S.volumes, [sub]: v }; patch = { volumes: S.volumes }; }
     else { S[k] = v; patch = { [k]: v }; }
     this.save?.settings(patch);
-    if (this.game) this.game.applySettings(resolveSettings(patch, this), { persist: false });
+    if (this.game) { this.game.applySettings(resolveSettings(patch, this), { persist: false }); this.game.redraw(); } // a paused frame shows it too
     else this.input?.applySettings(patch);
     this.applyLocal(S);
     return S;

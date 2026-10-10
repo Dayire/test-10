@@ -36,7 +36,7 @@ export class TouchControls {
       capture(e.currentTarget, e);
       const R = this.radius();
       let cx = e.clientX, cy = e.clientY;
-      if (this.S.touchStick === 'fixed') { const c = this.fixedCentre(); if (Math.hypot(cx - c.x, cy - c.y) > R * 1.8) return; cx = c.x; cy = c.y; }
+      if (this.S.touchStick === 'fixed' || this.aiming) { const c = this.fixedCentre(); if (Math.hypot(cx - c.x, cy - c.y) > R * 1.8) return; cx = c.x; cy = c.y; }
       else { cx = Math.max(R + 8, Math.min(innerWidth - R - 8, cx)); cy = Math.max(R + 8, Math.min(innerHeight - R - 8, cy)); }
       this.stick = { id: e.pointerId, cx, cy, nx: 0, ny: 0, yOn: false, axis: 'x', axisT: 0 };
       this.stickEl.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
@@ -156,6 +156,10 @@ export class TouchControls {
       this.el.dataset.ctx = k ? (SUN_KINDS.has(k) ? 'sun' : 'hand') : '';
     }
     this.nearVine = !!p && (g.vines || []).some((v) => v.enabled !== false && p.x > v.x0 - 0.3 && p.x < v.x1 + 0.3 && p.y + 0.6 > v.y0 && p.y < v.y1);
+    // holding a mirror, a crank or the capstan: the stick stays on its resting base and the rest of the screen is
+    // the scene, so the finger can aim anywhere (FULL_GAME §6.3 finger aim)
+    const aiming = !!p && !!(p.grip?.mirror || (p.lever && (p.state === 'crank' || p.state === 'capstan')));
+    if (aiming !== this.aiming && !this.stick) { this.aiming = aiming; this.el.classList.toggle('aiming', aiming); this.layout(); }
   }
   // control rectangles (tests, docs)
   rects() {

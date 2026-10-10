@@ -113,7 +113,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #settings.in .sheet { opacity: 1; transform: none; }
 #settings header { position: relative; }
 #settings .tabs { display: flex; flex-wrap: wrap; gap: 4px 26px; margin-top: 22px; }
-#settings .tab { min-height: 44px; font-size: calc(19px * var(--ms)); letter-spacing: .1em; color: var(--faint); transition: color .25s ease; }
+#settings .tab { min-height: 44px; min-width: 44px; padding: 0 2px; font-size: calc(19px * var(--ms)); letter-spacing: .1em; color: var(--faint); transition: color .25s ease; }
 #settings .tab.active { color: var(--ivory-hi); }
 #settings .tab.focused { color: var(--brass-hi); }
 #settings .tabline { position: relative; height: 1px; background: rgba(233, 196, 143, .14); margin-top: 2px; }
@@ -326,7 +326,9 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #touch.hide { opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility 0s linear .25s; }
 #touch .tzone { position: absolute; left: 0; top: 18%; bottom: 0; width: 45%; pointer-events: auto; touch-action: none; }
 #touch[data-hand="left"] .tzone { left: auto; right: 0; }
-#touch[data-stick="fixed"] .tzone { pointer-events: none; }
+#touch[data-stick="fixed"] .tzone, #touch.aiming .tzone { pointer-events: none; }
+#touch.aiming .tstick { opacity: 1; }
+#touch.aiming .tbase { pointer-events: auto; touch-action: none; }
 #touch .tstick { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; opacity: .5; transition: opacity .25s ease; will-change: transform; }
 #touch.sticking .tstick, #touch[data-stick="fixed"] .tstick { opacity: 1; }
 #touch[data-stick="fixed"] .tstick { pointer-events: none; }
@@ -385,10 +387,13 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   .row { padding-left: 18px; gap: 10px; }
   .row .rl { font-size: calc(17px * var(--ms)); }
   #settings .calib, #settings .code { left: calc(20px + var(--sl)); right: calc(20px + var(--sr)); top: auto; width: auto; bottom: calc(10vh + var(--sb)); }
-  #chapters .cards { flex-wrap: wrap; gap: 26px 7vw; top: calc(16vh + var(--st)); transform: none; padding: 0 20px; }
-  .ccard { --w: min(38vw, 190px, 24vh); }
-  .ccard .num { margin-top: 10px; font-size: calc(28px * var(--ms)); }
-  .ccard .pips i { width: 18px; height: 22px; }
+  #chapters .cards { flex-wrap: wrap; gap: 18px 7vw; top: calc(12vh + var(--st)); transform: none; padding: 0 20px; }
+  .ccard { --w: min(38vw, 190px, 22vh); }
+  .ccard .arch { aspect-ratio: 1 / 1.2; }
+  .ccard .num { margin-top: 8px; font-size: calc(28px * var(--ms)); }
+  .ccard .pips { margin-top: 6px; gap: 2px; }
+  .ccard .pips i { width: 14px; height: 14px; }
+  .ccard .pips i::before { width: 5px; height: 5px; }
   #chapters header { left: 0; right: 0; display: flex; justify-content: center; top: calc(6vh + var(--st)); }
   #credits .roll { right: 0; left: 0; width: auto; padding: 0 28px; }
   #credits .scrim { background: rgba(11, 8, 6, .35); }
