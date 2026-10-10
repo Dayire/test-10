@@ -131,7 +131,7 @@ export class Game {
     this.camRig.setKeys(L.cameraKeys);
     this.checkpoints = L.checkpoints.sort((a, b) => a.x - b.x);
     if (!this.checkpoints.length) this.checkpoints.push({ x: -100, spawn: { x: 0, y: 0, facing: 1 } });
-    if (L.shadowExtent) this.world.light.setExtent?.(L.shadowExtent);
+    this.world.light.setExtent?.(L.shadowExtent || 22); // 22 m: the world's default sun shadow extent
     this.initialSnap = this.snapshot();
   }
 

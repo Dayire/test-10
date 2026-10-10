@@ -7,7 +7,7 @@ they are missing. Each is a small addition in a file F does not own.
 
 - **Change:** `setExtent(e)` sets `this.extent = e` and the sun shadow camera's `left/right = ∓e`, `top/bottom = ±0.8e`, then `updateProjectionMatrix()`.
 - **Reason:** a chapter may declare `L.shadowExtent` (FULL_GAME §11.2 F1); the loader calls `world.light.setExtent?.(L.shadowExtent)`. Today the extent is fixed at 22 m.
-- **Test:** load a chapter whose `build` sets `L.shadowExtent = 30`; `__medina.game.world.light.sun.shadow.camera.right === 30`; loading souk afterwards (no `shadowExtent`) must restore 22 (F will pass the default when absent once this exists).
+- **Test:** load a chapter whose `build` sets `L.shadowExtent = 30`; `__medina.game.world.light.sun.shadow.camera.right === 30`; loading souk afterwards (no `shadowExtent`) restores 22 (the loader passes 22 when a chapter declares none).
 
 ## 2. `src/core/audio.js` (P): `setMuted(on)`
 
