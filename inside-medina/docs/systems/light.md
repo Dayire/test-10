@@ -33,7 +33,7 @@ the normal (−sin α, cos α)) block instead.
 | `light/time.js` | `Terminator`, `SunClock`, `Hatch` |
 | `light/beams.js` | `BeamRenderer`: ribbons, sunspots and glints on `LAYERS.BEAMS`, the priority pool light |
 | `light/index.js` | everything above, one import |
-| `assets/lightprops.js` | `trayMesh`, `mirrorStand`, `crankBracket`, `crankHandle`, `capstanMesh`, `rosetteLock`, `beamLampMesh`, `sensorMesh`, `ropeMesh`, `starInlay`, `starCookie`, `lightTextures`, `lightMaterials` (registers `mirrorBrass`, `brassAged`, `silverPlate`, `ironDark`, `hemp`) |
+| `assets/lightprops.js` | `trayMesh`, `mirrorStand`, `crankBracket`, `crankHandle`, `capstanMesh`, `rosetteLock`, `beamLampMesh`, `sensorMesh`, `ropeMesh`, `starInlay`, `starCookie`, `lightTextures`, `lightMaterials` (registers `mirrorBrass`, `brassAged` (a satin patina, metal 0.6, rough 0.55, so it keeps a warm value at dusk and night), `silverPlate`, `ironDark`, `hemp`) |
 
 ## Using it in a chapter
 
@@ -66,7 +66,7 @@ above it, which would otherwise shut the ray that holds a sun-bolt.
 | `Capstan` | `x, y, mirror (continuous), dir, rate 6, magnet {alpha, window 2}, range` | via the mirror |
 | `SunLock` | `x, y, r 0.35, need (0.8 gold, 0.4 silver), mode latch / hold / bolt, chargeT 0.6, decayT 0.5, metal gold / silver / iron, degree, mount (stem length to the wall), rod [[x, y, z], …], onOpen, rides {body, ox, oy}` | `{level, done}`; `value` = gate source |
 | `Photocell` | a hold-mode lock, r 0.15, chargeT 0.08, may `ride` a body | `{level, done}` |
-| `LampEye` | `x, y, z, r 0.8, lamp, onHit, hold 0.1, dazzle 7, face` (reflected light only; assist +50 %; with `face` (deg) only light travelling toward that face counts: the fortress lamp looks east, so a beam sent straight back from the west never ends the chapter) | `{fired}` |
+| `LampEye` | `x, y, z, r 0.8, lamp, onHit, hold 0.1, dazzle 7, face` (reflected light only; assist +50 %; with `face` (deg) only light travelling toward that face counts: the fortress lamp looks east, so a beam sent straight back from the west never ends the chapter). Refractory: while its lamp is `blind` (dazzled or settling) it neither fires nor re-arms; it re-arms 0.5 s after the reflection has left it once the lamp sees again | `{fired}` |
 | `Sensor` | `from [x, y], to [x, y], darkT 0.2, lamp (a Searchlight to slave)` — creates its own `BeamLamp` | `{state}` |
 | `BurnRope` | `x0, y0, x1, y1, need 1.6, burnT 1.5, cool 0.5, onBurnt` | `{heat, burnt}` |
 | `Occluder` | `x0, y0, x1, y1, mesh`; `to({y0, y1}, sec)` | `{x0, y0, x1, y1}` |
@@ -107,14 +107,23 @@ cover box crosses the 3D line, and the 2D line from the lamp to the point crosse
 bodies, mirror trays, guards). Chapters without a LightSystem use `physicsWorld(game)` (solids and bodies only).
 Chapter I is unchanged: its courtyard has no blocker between the lamp and the floor (the souk bot keeps its
 hash, all 13 souk negatives pass). New: `mode 'sweep' | 'watch'` (`watchAt`, `detect`), `dazzle(sec)` (aim up 8 m,
-white beam, sees nothing), `fixate(target, {while})` (a 0.05 rad wedge on the target), `light.lamp(sl)`. The cone
-is on `LAYERS.BEAMS` with `softFade` and ends with the fog chunk (requests/P.md #9). It still takes one of the rig's
-two spots near the view.
+the beam whitens, sees nothing), `fixate(target, {while})` (a 0.05 rad wedge on the target), `light.lamp(sl)`. The
+cone is on `LAYERS.BEAMS` with `softFade` and ends with the fog chunk (requests/P.md #9). It still takes one of the
+rig's two spots near the view.
+
+The dazzle's lifecycle: `dazzled` for `sec` (7, 10.5 with assist), then `recover` for 0.9 s: the aim eases back
+onto the street (no jump) while the sweep runs on toward the far end with no pause, away from the rest that blinded
+it; `blind` is true in both states (nothing is seen, its eye cannot fire). It then sweeps normally and sees the boy
+again within one sweep cycle; at its rest the mirror can dazzle it again. A blind beam fades out over the last 70 %
+of its reach (it ends in the air near its aim) instead of showing its cut end; the whitening and the lens boost are
+halved again by `reduceFlashing`.
 
 ### Guards
 
-`stun(sec)`: shield-eyes, no chase, then 2 s of immunity; `stun(Infinity)`: the asleep collapse (a turret dart).
-`onLight(I)`: I ≥ 0.8 stuns for 1.2 s (sun shafts, a reflected beam). Steps of ≤ 0.26 m are climbed, not vaulted.
+`stun(sec)`: shield-eyes, no chase, then 2 s of immunity; `stun(Infinity)`: the asleep collapse (a turret dart),
+his body (a light and line-of-sight blocker) dropping to 0.45 m while he lies there. `onLight(I, dt, sys, sky)`: daylight
+of I ≥ 0.8 stuns for 1.2 s (a sun shaft, a reflected sunbeam); `sky` is the share of sun and moon rays, so a
+searchlight's or a tripwire's own beam never stuns a lamp-keeper. Steps of ≤ 0.26 m are climbed, not vaulted.
 
 ## Rendering
 
@@ -122,16 +131,27 @@ two spots near the view.
   and drifting motes, faded into geometry by the soft pass; its half-width never drops under 2.2 px, so thin beams
   still read on a phone. A segment that ends in a lamp's eye is drawn to the lamp's real z. A searchlight's own
   first segment is its cone, not a ribbon.
-- Where a beam ends: a sunspot glow (a lock's glow sits on its lens); where it reflects: a star glint above the bloom
-  threshold (one instanced draw for both; the glint texture keeps its strength in alpha). `settings.reduceFlashing`
-  dims them.
+- Where a beam ends: a sunspot glow; on a lock, a halo ring just outside its rim, drawn behind the petals (its
+  strength follows I / need) so the petals stay silhouetted against it; where it reflects: a star glint above the
+  bloom threshold (one instanced draw for all three; the glint texture keeps its strength in alpha).
+  `settings.reduceFlashing` dims them, the rod glints and the dazzle.
+- `settings.highContrast`: beams and tripwires gain an outline along both ribbon edges (and a 3.4 px floor), a
+  searchlight cone its silhouette line, and every lock a bright rim ring.
 - The brightest end spot is a priority dynamic source of the light pool (priority 3), so a real point light warms
   the wall around it; the census never changes.
 - Beam colours: the sun's beams take the live key light's hue (lifted toward warm white), the moon's are silver-blue,
   a searchlight's follow its lamp (red in alarm, white when dazzled), tripwires are thin amber lines.
-- Locks: twelve brass petals hinged on the rim open with the level over a glass lens whose glow follows it; silver
-  for moon-locks, iron for bolts (whose petals close while lit); a latch sends a glint along its brass rod.
-- The terminator is an invisible depth-only slab toward the sun whose shadow edge sits at T on the play plane.
+- Locks read by shape: twelve brass petals hinged on the rim. Closed they meet over the lens as a domed bud (a disc
+  of radius r); with the level they swing out through the camera side (half: a crown standing toward the camera)
+  until, open, they lie past the rim as a twelve-ray sunburst (~1.9 r) around the lens. The lens glow follows the
+  level and stays under the bloom threshold (0.9 at full, +0.35 latched). Silver for moon-locks, iron for bolts
+  (whose petals close while lit); a latch sends a glint along its brass rod. The petals are re-composed only when
+  they move.
+- The terminator is an invisible slab toward the sun whose shadow edge sits at T on the play plane. It is drawn into
+  the sun's shadow map only (an empty draw range in every camera pass and other lights' shadow maps).
+- The boy's hands hold the prop: the player gives the animator world points (`handHolds`: two points on the near
+  rim of a gripped tray, the crank's knob and the rim opposite, the capstan bar crossing in front of him) and a
+  two-bone IK over the pose puts the wrists there, eased in and out.
 - `starCookie()` is the lamp-keepers' eight-point star lattice for the rig spots (`lightRig.setCookie`); the lab
   uses it in its night rooms.
 

@@ -68,3 +68,22 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 - **Test.** With exactly this patch (applied locally, run, then reverted), `node tools/negative.mjs --suite foundation
   --only "lab end keeps"` and `--only "x-keyed look"` pass; without it they are the suite's only two failures
   (15 / 17).
+
+## 7. `docs/FULL_GAME.md` §6 and §3.2 (design owner / integrator): the rules Sunwork ships
+
+- **Change.** Sign off these shipped rules so C2–C4 build against them:
+  - §6.1 "What blocks light": "Mirror trays (one-sided: the back face blocks)" becomes "Mirror trays (both faces
+    reflect; `oneSided: true` makes the back face block)". II-B2 starts on the underside at +30° and IV-A1's crank
+    is solved on its underside, so one-sided trays would break both puzzles as specified.
+  - §6.2 / §3.2 II-C2: a `Gate` is a lattice portcullis and lets light through (`light: 'pass'` by default,
+    `light: 'block'` for a solid door). A lifted solid gate would cut the II-C2 window ray and hold G6 open.
+  - §6.2 `LampEye`: `face` (deg) for an eye behind a window that only sees light travelling toward it (the IV-E
+    fortress lamp looks east).
+  - §6.2 `Searchlight` / §4.2 III-B2: after the dazzle (7 s, assist 10.5 s) the beam settles back onto the street
+    over 0.9 s while the sweep runs on away from the rest that blinded it, still blind; the eye re-arms only once
+    the lamp sees again. The lamp sees the boy again within one sweep cycle.
+  - §6.2 `Guard`: the stun rule counts daylight only (sun or moon rays, direct or reflected): a searchlight's or
+    a tripwire's own beam never stuns a lamp-keeper. An asleep guard's body drops to 0.45 m.
+- **Reason.** The fixtures of `tools/light-unit.mjs` (II-B2, II-C2, IV-A1, IV-E) and the lab negatives depend on
+  them; the design text still says otherwise.
+- **Test.** `node tools/light-unit.mjs` (29 / 29) and `node tools/negative.mjs --chapter lab` on the merged tree.
