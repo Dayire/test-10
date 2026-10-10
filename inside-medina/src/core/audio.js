@@ -217,7 +217,10 @@ export class Audio {
     // the chapter zone under the listener, overridden by mix.zone (or setZone when mix names none)
     const zm = this.applyZone(fin(this.listenerX, 0), mix.zone ?? this.zoneOverride);
     const m = mix.music || {};
-    const tension = fin(mix.tension, fin(zm.tension, 0.1));
+    // a zone's tension and hum are floors under the mix's (the game's generic mix always carries tension 0.1 and
+    // hum 0, so a zone that asks for more gets it; a chapter mix that wants more still wins)
+    const tension = Math.max(fin(mix.tension, 0.1), fin(zm.tension, 0));
+    const hum = Math.max(fin(mix.hum, 0), fin(zm.hum, 0));
     // an explicit state, then the game's flags (finale, chase), then the zone's music, then explore
     const state = musicState(m.state) ?? (mix.finale ? 'finale' : mix.chase ? 'chase' : null) ?? musicState(zm.music) ?? 'explore';
     this.musicState = state;
@@ -231,7 +234,7 @@ export class Audio {
     // ducking under death and alarms
     const duck = t < this.duckUntil ? 1 - this.duckAmt : 1;
     this.mix.musicUser.gain.setTargetAtTime(Math.pow(this.mix.volumes.music / 10, 2) * duck, t, t < this.duckUntil ? 0.08 : this.duckRelease / 3);
-    this.amb.update(fin(dt, 0), { ...mix, tension, hum: mix.hum ?? zm.hum });
+    this.amb.update(fin(dt, 0), { ...mix, tension, hum });
     if (!this.music.timer) this.music.tick();
   }
   drum(g, f = 90) { this.synth.drum(this.mix.music, f > 100 ? 'tek' : 'doum', { gain: g }); }

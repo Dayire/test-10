@@ -1,13 +1,16 @@
 // Synthesis primitives and instruments, all played through the voice pool.
-// oud (Karplus–Strong, buffers cached per pitch), qanun (bright KS + tremolo), ney (breath + vibrato
+// oud (Karplus–Strong, buffers cached per pitch, as long as the longest note asked of them, at most
+// KS_CACHE of them, least recently used out first), qanun (bright KS + tremolo), ney (breath + vibrato
 // sine), darbuka / bendir (doum, tek, ka), singing bowl (partials 1, 2.76, 5.4) and noise / tone hits.
+const KS_CACHE = 32;
+
 export class Synth {
   constructor(ctx, voices) {
     this.ctx = ctx; this.voices = voices;
     let seed = 7;
     this.rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
     this.white = this.noise(2, 'white'); this.pink = this.noise(4, 'pink'); this.brown = this.noise(4, 'brown');
-    this.ks = new Map(); this.ksOrder = [];
+    this.ks = new Map(); // key → AudioBuffer (insertion order is recency)
   }
   noise(sec, kind) {
     const ctx = this.ctx, n = Math.floor(ctx.sampleRate * sec);
@@ -52,14 +55,16 @@ export class Synth {
     return v;
   }
 
-  // Karplus–Strong string, rendered once per (pitch, brightness) and cached
+  // Karplus–Strong string, rendered once per (pitch, brightness) and cached; the buffer is as long as the longest
+  // note played from it (in 0.2 s steps) and b.rate is the playback rate that corrects the whole-sample period
   ksBuffer(freq, bright = 0.5, dur = 2.4) {
-    const key = `${Math.round(freq * 4)}|${Math.round(bright * 20)}|${dur}`;
+    const key = `${Math.round(freq * 4)}|${Math.round(bright * 10)}`, len = Math.ceil(Math.min(4, Math.max(0.2, dur)) * 5 - 1e-6) / 5;
     let b = this.ks.get(key);
-    if (b) return b;
-    const ctx = this.ctx, sr = ctx.sampleRate, n = Math.floor(sr * dur);
+    if (b && b.duration >= len - 1e-3) { this.ks.delete(key); this.ks.set(key, b); return b; }
+    const ctx = this.ctx, sr = ctx.sampleRate, n = Math.floor(sr * len);
     b = ctx.createBuffer(1, n, sr); const d = b.getChannelData(0);
     const period = Math.max(2, Math.round(sr / freq));
+    b.rate = freq * period / sr;
     const ring = new Float32Array(period);
     for (let i = 0; i < period; i++) ring[i] = (this.rnd() * 2 - 1) * (1 - bright * 0.5 + this.rnd() * bright * 0.5);
     let idx = 0, prev = 0;
@@ -72,15 +77,17 @@ export class Synth {
       d[i] = cur * Math.min(1, i / 60);
       idx = (idx + 1) % period;
     }
-    this.ks.set(key, b); this.ksOrder.push(key);
-    if (this.ksOrder.length > 96) this.ks.delete(this.ksOrder.shift());
+    this.ks.delete(key); this.ks.set(key, b);
+    if (this.ks.size > KS_CACHE) this.ks.delete(this.ks.keys().next().value);
     return b;
   }
+  // bytes held by the string cache (tests)
+  get ksBytes() { let n = 0; for (const b of this.ks.values()) n += b.length * 4; return n; }
   pluck(dest, f, { when, gain = 0.25, bright = 0.5, dur = 2.4, pan = 0, body = 900, prio = 2 } = {}) {
     const t = this.t(when);
     const v = this.voices.acquire(dest, t, t + dur, prio);
     if (!v) return null;
-    const s = this.src(this.ksBuffer(f, bright));
+    const buf = this.ksBuffer(f, bright, dur), s = this.src(buf); s.playbackRate.value = buf.rate;
     v.filter.type = 'peaking'; v.filter.frequency.setValueAtTime(body, t); v.filter.gain.setValueAtTime(5, t); v.filter.Q.setValueAtTime(1.2, t);
     const g = v.env.gain; g.setValueAtTime(gain, t); g.setTargetAtTime(0, t + dur - 0.3, 0.08);
     this.voices.setPan(v, pan);
@@ -97,11 +104,11 @@ export class Synth {
     const n = Math.min(12, Math.floor(dur * 13)), len = (n - 1) / 13 + 0.9;
     const v = this.voices.acquire(dest, t, t + len, prio);
     if (!v) return null;
-    const ctx = this.ctx, buf = this.ksBuffer(f, 0.85);
+    const ctx = this.ctx, buf = this.ksBuffer(f, 0.85, 0.9);
     v.filter.type = 'peaking'; v.filter.frequency.setValueAtTime(2400, t); v.filter.gain.setValueAtTime(5, t); v.filter.Q.setValueAtTime(1.2, t);
     v.env.gain.setValueAtTime(gain, t); v.env.gain.setValueAtTime(0, t + len);
     for (let i = 0; i < n; i++) {
-      const ti = t + i / 13, s = this.src(buf), a = ctx.createGain();
+      const ti = t + i / 13, s = this.src(buf), a = ctx.createGain(); s.playbackRate.value = buf.rate;
       a.gain.setValueAtTime(i ? 0.55 + 0.1 * Math.sin(i) : 1, ti); a.gain.setTargetAtTime(0, ti + 0.6, 0.08);
       s.connect(a); this.voices.feed(v, a); v.srcs.push(s);
       s.start(ti); s.stop(ti + 0.9);

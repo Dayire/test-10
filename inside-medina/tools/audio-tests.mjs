@@ -336,6 +336,24 @@ await run('ksCache', async () => page.evaluate(async () => {
   return { buffers: S.ks.size, firstPitchBuffers: first, ms: +ms.toFixed(1), ok: first === 1 && S.ks.size === 2 };
 }));
 
+// 12. the string cache stays phone-sized: one engine through every theme and music state (the menu, the souk
+// chase, the sundown clock, the night chase, the dawn finale, the credits) with ui sounds and stingers
+await run('ksMemory', async () => page.evaluate(async () => {
+  const { UI_SOUNDS, STINGERS } = window.AudioMod;
+  const plan = [['menu', 'explore'], ['souk', 'chase'], ['sundown', 'clock'], ['night', 'chase'], ['dawn', 'finale'], ['credits', 'credits']];
+  const SEG = 25;
+  let peak = 0, peakN = 0, k = 0;
+  const { A, err } = await window.renderOffline({ sec: SEG * plan.length, dt: 0.1, onTick: (A, t) => {
+    const i = Math.min(plan.length - 1, Math.floor(t / SEG)), [theme, state] = plan[i];
+    if (A._seg !== i) { A._seg = i; A.setChapter({ theme }, { id: theme }); if (state === 'finale') A.finale(); }
+    A._mix = { music: state === 'finale' ? null : { state }, finale: state === 'finale', chase: state === 'chase', zone: null };
+    if (++k % 15 === 0) { A.ui(UI_SOUNDS[k % UI_SOUNDS.length], { value: (k % 11) / 10 }); A.stinger(STINGERS[k % STINGERS.length], { degree: k % 7 }); }
+    peak = Math.max(peak, A.synth.ksBytes); peakN = Math.max(peakN, A.synth.ks.size);
+  } });
+  const sr = A.ctx.sampleRate;
+  return { sampleRate: sr, buffers: peakN, peakMB: +(peak / 1048576).toFixed(2), err, ok: !err && peakN <= 32 && peak <= 12 * 1048576 * (sr / 48000) };
+}));
+
 const ok = Object.values(results).every((r) => r.ok) && !errors.length;
 if (errors.length) console.log('errors:', errors.slice(0, 10));
 console.log(ok ? 'AUDIO TESTS PASS' : 'AUDIO TESTS FAIL');

@@ -31,7 +31,10 @@ Owner files: `src/core/audio.js` (the engine facade), `src/audio/{mixer,voices,i
   on one of 8 spare strips (a burst that outruns the spares drops the new note instead of cutting).
   Music may hold at most 24 voices and steals from itself beyond that, so effects and menu sounds always
   find one. A qanun tremolo (up to 12 re-plucks) is one voice. Karplus–Strong strings are rendered once per
-  (pitch, brightness) and cached (up to 96 buffers, oldest evicted first).
+  (pitch, brightness in 0.1 steps) and cached: each buffer is as long as the longest note asked of it (in 0.2 s
+  steps: an oud's 2.4 s, a qanun re-pluck's 0.9 s, a ui pluck's 1–1.2 s), at most 32 of them, the least
+  recently used out first. Each buffer plays at the rate that corrects its whole-sample period, so high strings
+  are in tune (uncorrected, a D6 is 6 cents flat at 48 kHz and 21 at 44.1 kHz).
 
 ## API (`new Audio()`)
 
@@ -66,7 +69,8 @@ clock; `intensity` 0–1 pushes the tempo 70 → 96 bpm), `credits`, `finale`. P
 | `zones[].verb` | `alley, souk, courtyard, madrasa, cistern, minaret, open` (`menu` for the title). |
 | `zones[].amb` | A number (bed level, 1 = as is); a place that colours the chapter's bed (`alley, souk, courtyard, madrasa, cistern, minaret, open, roof`: the cistern kills the wind and adds drips, the courtyard halves the murmur…); or another theme's bed (`night`, `dawn`…). |
 | `zones[].music` | A music state, or `none` (silent), `stealth` (tension), `souk` (explore); anything else is ignored. |
-| `zones[].tension, hum, drips` | Numbers, used when the mix gives none. |
+| `zones[].tension, hum` | Numbers, floors under the mix's: the louder of the zone's and the mix's applies. The game's generic mix always carries `tension: 0.1, hum: 0`, so a zone's values take effect whenever they are higher, and a chapter `L.mix` can still raise them per x. |
+| `zones[].drips` | A number, used when the mix gives none. |
 
 ## Music
 
@@ -119,7 +123,9 @@ every 0.3 s: no steal, no drop, and the same peak as with a 512-voice pool), `st
 note leaves no step in the waveform and is silent 50 ms later), `schema` (the foundation's chapter blocks:
 maqam-named themes, place and bed names, unknown music names, null zones, frozen mix objects; Chapter I's
 chase keeps its 0.21 s pulse), `resumeGuard` (a real context: the gesture resume leaves a paused game and a
-context the game suspended alone; unpausing resumes one the platform suspended), `ksCache`.
+context the game suspended alone; unpausing resumes one the platform suspended), `ksCache`, `ksMemory` (one
+engine through the menu, the souk chase, the sundown clock, the night chase, the dawn finale and the credits,
+25 s each, with ui sounds and stingers: at most 32 cached strings, at most 12 MB at 48 kHz).
 
 Last run (SwiftShader container, 4 CPUs): every test passes. `voiceBudget`, `stealFade`, `schema` and
 `resumeGuard` fail on the previous engine (`7a0f8e4`): the answered light lost 23 voices and peaked at
@@ -128,14 +134,15 @@ non-finite `setTargetAtTime` on every update, and a key press resumed a context 
 
 | Test | Result |
 |---|---|
-| themes (20 s each) | no NaN; peak / RMS dBFS: menu −7.6 / −27.8, souk −2.0 / −20.7, sundown −1.9 / −23.8, night −1.7 / −21.8, dawn −1.9 / −21.1, credits −3.7 / −26.0 |
+| themes (20 s each) | no NaN; peak / RMS dBFS: menu −8.0 / −27.8, souk −2.0 / −20.7, sundown −2.1 / −23.8, night −1.7 / −21.8, dawn −2.1 / −21.1, credits −3.8 / −26.0 |
 | jitter (4× throttle) | 57 of 57 onsets found, none late, onset spread 0.14 ms (constant output latency 12 ms) |
 | muteFadeIn | −104 dBFS RMS after `fadeIn` while muted |
 | uiWhilePaused | ui confirm −40 dBFS over a −87 dBFS floor; the game mix drops from −26 to −41 dBFS when paused |
 | voiceCap | 200 steps at once: at most 32 sounding voices (8 fading steals, the rest of the burst dropped) |
 | allNames | 81 names, no failures, peak −1.6 dBFS |
-| voiceBudget | catch over the 96 bpm clock, lock opening, answered light, dawn finale, dawn finale + 104 footstep voices: 0 steals, 0 drops, peaks equal to a 512-voice pool (−3.27, −7.81, −4.21, −1.85, −1.78 dBFS) |
+| voiceBudget | catch over the 96 bpm clock, lock opening, answered light, dawn finale, dawn finale + 104 footstep voices: 0 steals, 0 drops, peaks equal to a 512-voice pool (−3.39, −7.77, −4.33, −1.93, −1.80 dBFS) |
 | stealFade | largest sample step at the steal 0.011 (the sine's own: 0.011; a hard cut: 0.26); −64 dBFS 60 ms later |
 | schema | souk / sundown / night / dawn / lab blocks: themes resolve to the chapter, maqams hijaz / bayati / saba / rast / hijaz, no error, chase state reached; the souk chase keeps its 0.21 s pulse |
 | resumeGuard | stays suspended after the game suspends it and while paused; resumes on unpause and on a gesture |
 | ksCache | 40 notes of one pitch → 1 buffer |
+| ksMemory | menu, souk chase, sundown clock, night chase, dawn finale, credits (25 s each) with ui sounds and stingers: 32 cached strings, 11.1 MB at 48 kHz (the previous cache: 57 buffers, 26.3 MB, up to 96) |
