@@ -6,6 +6,13 @@ import { NOISE } from './glsl.js';
 // GPU texture baker: every surface is described by a GLSL `surf()` function
 // that is evaluated into three textures (albedo+alpha, normal, ORM).
 // Textures tile over [0,1) (unless `clamp` is set) and get mipmaps + aniso.
+// A surface's own program evaluates surf() once per texel: albedo into the map, then height, roughness, AO and
+// metalness into a float scratch target; one shared program derives the normal map (central differences of the
+// height, exactly the texels the old five-evaluation shader sampled) and the ORM map from it. A software
+// rasteriser compiles a surface in about a fifth of the time. Without float colour targets the old single
+// program is used.
+// prepare(def) creates the targets and issues the compile without waiting for it (the driver links while the
+// caller builds a level); run(job) draws the passes.
 // ---------------------------------------------------------------------------
 
 const VERT = /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }`;
@@ -40,6 +47,42 @@ void main(){
 }`;
 }
 
+// one surf() evaluation: pass 0 albedo + alpha, pass 1 (h, r, ao, m) into the float scratch target
+function fragSplit(surfCode) {
+  return /* glsl */ `
+precision highp float;
+uniform vec2 uRes; uniform int uPass; uniform float uNormalStrength; uniform float uSeed;
+${NOISE}
+${surfCode}
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec3 alb; float h, r, ao, m, a;
+  surf(uv, alb, h, r, ao, m, a);
+  gl_FragColor = uPass == 0 ? vec4(max(alb, 0.), a) : vec4(h, r, ao, m);
+}`;
+}
+
+// shared: the normal map (pass 1) and the ORM map (pass 2) from the scratch target
+const FINISH = /* glsl */ `
+precision highp float;
+uniform highp sampler2D tSurf; uniform vec2 uRes; uniform int uPass; uniform float uNormalStrength; uniform bool uClamp;
+float sat(float x){ return clamp(x, 0., 1.); }
+float hAt(ivec2 p){
+  ivec2 s = ivec2(uRes);
+  p = uClamp ? clamp(p, ivec2(0), s - 1) : ivec2(mod(vec2(p), vec2(s)));
+  return texelFetch(tSurf, p, 0).x;
+}
+void main(){
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  if (uPass == 1) {
+    vec2 g = vec2(hAt(p + ivec2(1, 0)) - hAt(p - ivec2(1, 0)), hAt(p + ivec2(0, 1)) - hAt(p - ivec2(0, 1))) * 0.5 * uRes * uNormalStrength / 1024.;
+    gl_FragColor = vec4(normalize(vec3(-g, 1.)) * .5 + .5, 1.);
+  } else {
+    vec4 s = texelFetch(tSurf, p, 0);
+    gl_FragColor = vec4(sat(s.z), sat(s.y), sat(s.w), 1.);
+  }
+}`;
+
 export class TextureBaker {
   constructor(renderer, { scale = 1 } = {}) {
     this.renderer = renderer;
@@ -47,6 +90,15 @@ export class TextureBaker {
     this.quad = new FullScreenQuad(null);
     this.aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     this.targets = [];
+    this.split = !!renderer.extensions.has('EXT_color_buffer_float');
+    this.scratch = new Map(); // size -> float target (h, r, ao, m)
+    this.finish = this.split ? new THREE.ShaderMaterial({
+      glslVersion: null, vertexShader: VERT, fragmentShader: FINISH, depthTest: false, depthWrite: false,
+      uniforms: { tSurf: { value: null }, uRes: { value: new THREE.Vector2() }, uPass: { value: 1 }, uNormalStrength: { value: 1 }, uClamp: { value: false } },
+    }) : null;
+    // compiles are issued through a mesh of their own (the quad's is private)
+    this._cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this._mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), null);
   }
 
   _rt(size, srgb) {
@@ -65,13 +117,23 @@ export class TextureBaker {
     this.targets.push(rt);
     return rt;
   }
+  _scratch(size) {
+    let rt = this.scratch.get(size);
+    if (!rt) {
+      rt = new THREE.WebGLRenderTarget(size, size, { type: THREE.FloatType, format: THREE.RGBAFormat, depthBuffer: false, generateMipmaps: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+      this.scratch.set(size, rt);
+    }
+    return rt;
+  }
+  _compile(mat) { this._mesh.material = mat; try { this.renderer.compile(this._mesh, this._cam); } catch (e) { console.warn('bake compile', e); } }
 
-  // bake a surface into new render targets (kept, so a lost GL context can be re-baked in place)
-  bake(def, into = null) {
+  // targets and a compiling program for a surface; out (the textures) can be handed to materials before run()
+  prepare(def, into = null) {
     const size = into ? into.size : Math.max(64, Math.round((def.size || 1024) * this.scale));
+    const split = this.split;
     const mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
-      fragmentShader: fragFor(def.glsl, !!def.clamp),
+      fragmentShader: split ? fragSplit(def.glsl) : fragFor(def.glsl, !!def.clamp),
       uniforms: {
         uRes: { value: new THREE.Vector2(size, size) },
         uPass: { value: 0 },
@@ -81,30 +143,57 @@ export class TextureBaker {
       depthTest: false,
       depthWrite: false,
     });
-    this.quad.material = mat;
-    const r = this.renderer;
-    const prev = r.getRenderTarget();
-    const out = {};
     const passes = def.passes || ['map', 'normalMap', 'ormMap'];
-    const passIndex = { map: 0, normalMap: 1, ormMap: 2 };
     const rts = into ? into.rts : {};
+    const out = {};
     for (const p of passes) {
       const rt = rts[p] || (rts[p] = this._rt(size, p === 'map'));
       if (def.clamp) { rt.texture.wrapS = rt.texture.wrapT = THREE.ClampToEdgeWrapping; }
-      mat.uniforms.uPass.value = passIndex[p];
-      r.setRenderTarget(rt);
-      this.quad.render(r);
       rt.texture.name = `${def.name}.${p}`;
       out[p] = rt.texture;
     }
-    r.setRenderTarget(prev);
-    mat.dispose();
-    if (!into) (this.jobs ||= []).push({ def, size, rts });
-    return out;
+    this._compile(mat);
+    if (split && this.finish && !this._finishCompiled) { this._finishCompiled = true; this._compile(this.finish); }
+    return { def, size, rts, mat, out, passes, fresh: !into };
   }
 
+  // draw a prepared surface (waits for its program if it is still compiling)
+  run(job) {
+    const { def, size, rts, mat, passes } = job;
+    const r = this.renderer, prev = r.getRenderTarget(), q = this.quad;
+    if (this.split) {
+      const needSurf = passes.some((p) => p !== 'map');
+      if (passes.includes('map')) { mat.uniforms.uPass.value = 0; q.material = mat; r.setRenderTarget(rts.map); q.render(r); }
+      if (needSurf) {
+        const sc = this._scratch(size), F = this.finish.uniforms;
+        mat.uniforms.uPass.value = 1; q.material = mat; r.setRenderTarget(sc); q.render(r);
+        F.tSurf.value = sc.texture; F.uRes.value.set(size, size); F.uNormalStrength.value = def.normalStrength ?? 1.0; F.uClamp.value = !!def.clamp;
+        q.material = this.finish;
+        for (const p of passes) {
+          if (p === 'map') continue;
+          F.uPass.value = p === 'normalMap' ? 1 : 2;
+          r.setRenderTarget(rts[p]); q.render(r);
+        }
+        F.tSurf.value = null;
+      }
+    } else {
+      const passIndex = { map: 0, normalMap: 1, ormMap: 2 };
+      q.material = mat;
+      for (const p of passes) { mat.uniforms.uPass.value = passIndex[p]; r.setRenderTarget(rts[p]); q.render(r); }
+    }
+    r.setRenderTarget(prev);
+    mat.dispose();
+    if (job.fresh) (this.jobs ||= []).push({ def, size, rts });
+    return job.out;
+  }
+
+  // bake a surface into new render targets (kept, so a lost GL context can be re-baked in place)
+  bake(def, into = null) { return this.run(this.prepare(def, into)); }
+
   // after a lost and restored GL context: render every baked surface again into its own targets
-  rebakeAll() { for (const j of this.jobs || []) this.bake(j.def, j); return (this.jobs || []).length; }
+  rebakeAll() { this._finishCompiled = false; for (const j of this.jobs || []) this.bake(j.def, j); return (this.jobs || []).length; }
+  // the float scratch targets are only needed while baking
+  releaseScratch() { for (const rt of this.scratch.values()) rt.dispose(); this.scratch.clear(); }
 }
 
 // ---------------------------------------------------------------------------
@@ -633,14 +722,26 @@ export function bakeAll(baker, names = SURFACE_NAMES, onProgress) {
 // yield to the browser so it can paint (rAF, with a timer fallback for hidden tabs)
 export const yieldFrame = () => new Promise((r) => { let done = false; const go = () => { if (!done) { done = true; setTimeout(r, 0); } }; requestAnimationFrame(go); setTimeout(go, 50); });
 
-// progressive bake: time-sliced, yielding so the loading bar really paints
+// progressive bake: time-sliced, yielding so the loading bar really paints. Every program is issued first, so the
+// driver compiles the next surfaces while the first ones draw
 export async function bakeAsync(baker, names, onProgress, out = {}, slice = 40) {
+  const jobs = prepareBake(baker, names, out);
+  await finishBake(baker, jobs, onProgress, slice);
+  return out;
+}
+// the targets of every surface not baked yet (their textures go into `out` at once, so materials can take them
+// before they are drawn) and their compiling programs; finishBake draws them
+export function prepareBake(baker, names, out = {}) {
+  const jobs = [];
+  for (const n of names) if (!out[n] && SURFACES[n]) { const j = baker.prepare({ name: n, ...SURFACES[n] }); out[n] = j.out; jobs.push(j); }
+  return jobs;
+}
+export async function finishBake(baker, jobs, onProgress, slice = 40) {
   let t0 = performance.now();
-  for (let i = 0; i < names.length; i++) {
-    const n = names[i];
-    if (!out[n]) out[n] = baker.bake({ name: n, ...SURFACES[n] });
-    onProgress && onProgress((i + 1) / names.length, n);
+  for (let i = 0; i < jobs.length; i++) {
+    baker.run(jobs[i]);
+    onProgress && onProgress((i + 1) / jobs.length, jobs[i].def.name);
     if (performance.now() - t0 > slice) { await yieldFrame(); t0 = performance.now(); }
   }
-  return out;
+  if (jobs.length) baker.releaseScratch();
 }

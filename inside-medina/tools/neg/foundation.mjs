@@ -649,9 +649,12 @@ export const scenarios = [
   {
     // §11.2 acceptance 10: boot to __ready within the baseline + 10 %, and the loading bar paints at least 10 values.
     // The machine is shared, so by default the pre-foundation tree is served alongside (or --base-port N names a
-    // running server of it) and the two trees boot alternately under the same load, after one warm-up boot each:
-    // five rounds, so one slow boot on either side moves neither median; the budget is the base median + 10 %.
-    // --absolute times against the recorded baseline instead (an idle machine only).
+    // running server of it) and the two trees boot in interleaved pairs under the same load, after one warm-up boot
+    // each. A pair's two boots are seconds apart, so the load they see is nearly the same: the verdict is the median of
+    // the per-pair ratios (current / base), with the order inside a pair alternating (ABBA) so a drifting load favours
+    // neither side. One slow boot moves one ratio, not the median. When the median lands within 4 % of the budget
+    // the verdict is too close to call on a noisy machine: four more pairs are timed (once). The budget is unchanged:
+    // the median ratio must stay ≤ 1.1. --absolute times against the recorded baseline instead (an idle machine only).
     name: 'boot budget and loading bar', url: false,
     run: async ({ page, o }) => {
       await page.addInitScript(() => {
@@ -660,23 +663,43 @@ export const scenarios = [
         const tick = () => { const i = document.querySelector('#loading .lbar i'); if (i && i.style.width) window.__painted.add(i.style.width); if (!window.__readyAt) requestAnimationFrame(tick); };
         requestAnimationFrame(tick);
       });
+      // each boot starts from a blank page: tearing down the previous game (its GL context on SwiftShader) takes
+      // 4-7 s and would otherwise be charged to whichever tree boots next
       const boot = async (port) => {
+        await page.goto('about:blank');
         await page.goto(port ? `http://127.0.0.1:${port}/?autostart=1&tex=0.1&tier=low&noauto=1` : gameUrl({ ...o, chapter: null, cp: undefined }, { hold: null }));
         await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000, polling: 100 });
         return page.evaluate(() => ({ ms: Math.round(window.__readyAt), painted: [...window.__painted] }));
       };
-      const med = (a) => { const v = a.map((x) => x.ms).sort((x, y) => x - y); return v[Math.floor(v.length / 2)]; };
+      const median = (v) => { const a = [...v].sort((x, y) => x - y), n = a.length; return n % 2 ? a[n >> 1] : (a[n / 2 - 1] + a[n / 2]) / 2; };
       let srv = null, ab = o.basePort ? +o.basePort : 0;
       if (!ab && !o.absolute) { srv = await startBaseServer(); ab = srv.port; }
       try {
-        if (ab) { await boot(ab); await boot(0); }
-        const cur = [], base = [];
-        for (let k = 0; k < (+o.rounds || 5); k++) { if (ab) base.push(await boot(ab)); cur.push(await boot(0)); }
-        const budget = Math.round((ab ? med(base) : baseline.boot.readyMs.warm) * 1.1);
-        return { readyMs: cur.map((x) => x.ms), median: med(cur), budget, against: ab ? `base tree${srv ? ' ' + srv.ref : ''} on ${ab}: ${base.map((x) => x.ms).join(' ')}` : `recorded warm ${baseline.boot.readyMs.warm}`, painted: cur[1].painted.length, values: cur[1].painted.join(' ') };
+        const rounds = +o.rounds || 5, cur = [], base = [], ratios = [];
+        if (!ab) {
+          await boot(0);
+          for (let k = 0; k < rounds; k++) cur.push(await boot(0));
+          const budget = Math.round(baseline.boot.readyMs.warm * 1.1);
+          return { readyMs: cur.map((x) => x.ms), median: median(cur.map((x) => x.ms)), budget, ok: median(cur.map((x) => x.ms)) <= budget, against: `recorded warm ${baseline.boot.readyMs.warm}`, painted: cur[1].painted.length, values: cur[1].painted.join(' ') };
+        }
+        await boot(ab); await boot(0);
+        const pair = async (k) => {
+          let b, c;
+          if (k % 2) { c = await boot(0); b = await boot(ab); } else { b = await boot(ab); c = await boot(0); }
+          base.push(b); cur.push(c); ratios.push(c.ms / b.ms);
+        };
+        for (let k = 0; k < rounds; k++) await pair(k);
+        let extended = false;
+        if (Math.abs(median(ratios) - 1.1) < 0.04) { extended = true; for (let k = rounds; k < rounds + 4; k++) await pair(k); }
+        const ratio = +median(ratios).toFixed(3);
+        return {
+          ratio, ok: ratio <= 1.1, extended, pairs: ratios.map((r) => +r.toFixed(2)),
+          readyMs: cur.map((x) => x.ms), median: median(cur.map((x) => x.ms)), baseMedian: median(base.map((x) => x.ms)),
+          against: `base tree${srv ? ' ' + srv.ref : ''} on ${ab}: ${base.map((x) => x.ms).join(' ')}`, painted: cur[1].painted.length, values: cur[1].painted.join(' '),
+        };
       } finally { srv?.stop(); }
     },
-    check: (r) => (r.median <= r.budget && r.painted >= 10 ? true : `boot ${r.median} ms (budget ${r.budget}), ${r.painted} painted values`),
+    check: (r) => (r.ok && r.painted >= 10 ? true : r.ratio !== undefined ? `boot ${r.median} ms vs base ${r.baseMedian} ms: median pair ratio ${r.ratio} (budget 1.1), ${r.painted} painted values` : `boot ${r.median} ms (budget ${r.budget}), ${r.painted} painted values`),
   },
   {
     // §8.2: a lost and restored GL context re-bakes the surfaces and reloads the chapter at its checkpoint

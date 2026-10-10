@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { installAtmosphereChunks, G } from './atmosphere.js';
 import { RenderSystem } from './renderer.js';
 import { createSky, buildEnvironment } from './sky.js';
-import { TextureBaker, bakeAll, bakeAsync } from './textures.js';
+import { TextureBaker, bakeAll, bakeAsync, prepareBake, finishBake } from './textures.js';
 import { Materials } from './materials.js';
 import { Lighting } from './lighting.js';
 import { LOOK } from './look.js';
@@ -60,6 +60,11 @@ export function createWorld(canvas, { tier = 'high', texScale = 1, onProgress, b
   try { coarse = matchMedia('(pointer: coarse)').matches; } catch { /* no media queries */ }
   world.bakeSlice = world.software ? 200 : coarse ? 16 : 33;
   world.bake = (names, onProgress, slice = world.bakeSlice) => bakeAsync(baker, names.filter((n) => !tex[n]), onProgress, tex, slice);
+  // split bake: prebake(names) creates the targets (their textures are in world.tex at once) and issues every
+  // program without waiting for the driver; finishBake(jobs) draws them. The chapter loader builds the level in
+  // between, so the shaders compile while it runs
+  world.prebake = (names) => prepareBake(baker, names.filter((n) => !tex[n]), tex);
+  world.finishBake = (jobs, onProgress, slice = world.bakeSlice) => finishBake(baker, jobs, onProgress, slice);
   return world;
 }
 
