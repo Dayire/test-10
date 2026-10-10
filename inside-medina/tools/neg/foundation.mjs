@@ -1,10 +1,17 @@
 // Foundation contract checks (FULL_GAME §11.2 acceptance 5, 6, 8, 9, 10):
-//   node tools/negative.mjs --suite foundation
+//   node tools/negative.mjs --suite foundation [--base-port N | --absolute]
 // The chain into the next chapter and Continue, a throwing localStorage, the
-// title shot's shadow focus, the LookDirector round trip and the boot budget.
+// title shot's shadow focus, the LookDirector round trip, the boot budget, and
+// the flow negatives: a cinematic's look and mix leave with it, the title holds
+// the chapter, a dev chapter's end keeps the save, the loader serialises,
+// recovers and drops chapter-lived subscriptions.
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import http from 'http';
-import { execSync } from 'child_process';
+import net from 'net';
+import { execSync, spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 import { gameUrl, waitReady, ROOT } from '../lib/harness.mjs';
 
 const baseline = JSON.parse(fs.readFileSync(new URL('docs/baselines/souk.json', ROOT), 'utf8'));
@@ -31,25 +38,70 @@ async function diff(page, a, b, thr = 24) {
     return { differing: +(n / px * 100).toFixed(3), meanAbs: +(sum / px / 255 * 100).toFixed(3) };
   }, [a, b, thr]);
 }
+// The pre-foundation tree (the commit souk.json was recorded on) served by its own Vite on a free port, so the
+// boot budget is timed against it under the same machine load. The tree is extracted once into the OS temp dir.
+async function startBaseServer() {
+  const ref = (baseline.recorded.match(/HEAD ([0-9a-f]{7,40})/) || [])[1];
+  if (!ref) throw new Error('souk.json names no base commit');
+  const root = fileURLToPath(ROOT);
+  const dir = path.join(os.tmpdir(), `medina-base-${ref}`);
+  if (!fs.existsSync(path.join(dir, 'index.html'))) {
+    const prefix = execSync('git rev-parse --show-prefix', { cwd: root, encoding: 'utf8' }).trim().replace(/\/$/, '');
+    const top = execSync('git rev-parse --show-toplevel', { cwd: root, encoding: 'utf8' }).trim();
+    fs.mkdirSync(dir, { recursive: true });
+    // from the top level: run in a subdirectory, git archive would keep only that subdirectory of the tree
+    execSync(`git archive --format=tar ${ref}${prefix ? ':' + prefix : ''} | tar -x -C "${dir}"`, { cwd: top, stdio: 'pipe' });
+  }
+  if (!fs.existsSync(path.join(dir, 'node_modules'))) fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'dir');
+  const port = await new Promise((res, rej) => { const srv = net.createServer(); srv.on('error', rej); srv.listen(0, '127.0.0.1', () => { const p = srv.address().port; srv.close(() => res(p)); }); });
+  // its own dependency cache: the shared node_modules/.vite belongs to the main dev server
+  const cfg = path.join(dir, 'vite.base.config.mjs');
+  fs.writeFileSync(cfg, `import base from './vite.config.js';\nexport default { ...base, cacheDir: '.vite-base', server: { ...(base.server || {}), host: '127.0.0.1', port: ${port}, strictPort: true, hmr: false } };\n`);
+  const child = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), '--config', cfg, '--clearScreen', 'false'], { cwd: dir, stdio: 'ignore' });
+  const stop = () => { try { child.kill('SIGTERM'); } catch { /* gone */ } };
+  process.once('exit', stop);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60000) {
+    const ok = await new Promise((r) => { http.get(`http://127.0.0.1:${port}/`, (res) => { res.resume(); r(res.statusCode === 200); }).on('error', () => r(false)); });
+    if (ok) return { port, ref, stop };
+    if (child.exitCode !== null) break;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  stop();
+  throw new Error(`base tree ${ref} did not serve`);
+}
+
 const frames = (page, n = 3) => page.evaluate((n) => new Promise((r) => { const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
 
 export const scenarios = [
   {
     // §11.2 acceptance 5: souk cp 6 + finale -> chapterEnd -> card -> sundown; the save points at sundown; ?continue=1 lands there
+    // The finale's letterbox and its faded mix must not follow the boy into the next chapter.
     name: 'chain souk -> sundown and continue', cp: 6, query: { nosave: null },
     run: async ({ page, o }) => {
+      await page.mouse.click(4, 4); // a user gesture: the audio context may run
       const r = await page.evaluate(async () => {
-        const M = __medina, G = M.game;
+        const M = __medina, G = M.game, A = G.audio, P = G.world.rs.post.params;
+        A.start(); if (A.ctx?.state === 'suspended') await A.ctx.resume().catch(() => {});
+        await new Promise((r) => setTimeout(r, 2700)); // the start ramp
+        const gain = () => (A.master ? +A.master.gain.value.toFixed(3) : null);
+        const before = gain();
         const cards = [];
         const hook = G.hooks.card;
         G.hooks.card = (m, opts) => { cards.push({ id: m.id, reason: opts.reason, numeral: m.numeral }); return hook(m, opts); };
         M.finale();
-        for (let i = 0; i < 40 * 120 && G.mode !== 'chapterEnd' && G.mode !== 'loading'; i++) M.sim(1 / 120, { x: 0 });
+        let lbFinale = 0;
+        for (let i = 0; i < 40 * 120 && G.mode !== 'chapterEnd' && G.mode !== 'loading'; i++) { M.sim(1 / 120, { x: 0 }); lbFinale = Math.max(lbFinale, G.director.ov.letterbox || 0); }
         const atEnd = { mode: G.mode, z: M.state().z };
-        await G.events.next('chapterStart');
+        let atReveal = null;
+        const off = G.events.on('chapterStart', () => { atReveal = gain(); });
+        await G.events.next('chapterStart'); off();
         await new Promise((r) => { const f = () => (G.mode === 'play' ? r() : setTimeout(f, 50)); f(); });
+        await new Promise((r) => setTimeout(r, 2500)); // the reveal fades the mix back in over 1.5 s
+        const mix = { ctx: A.ctx?.state ?? null, before, atReveal, after: gain(), muted: !!A.muted };
+        const look = { lbFinale: +lbFinale.toFixed(3), letterbox: P.letterbox, cur: G.director.cur.letterbox ?? null, ov: Object.keys(G.director.ov) };
         const ev = M.events().filter((e) => ['chapterEnd', 'chapterStart', 'save'].includes(e.name)).map((e) => ({ name: e.name, ...e.data }));
-        return { atEnd, cards, chapter: M.chapter(), mode: G.mode, save: M.save(), stored: JSON.parse(localStorage.getItem('medina.save.v1') || 'null'), ev, cardVisible: !document.getElementById('card').classList.contains('hidden') };
+        return { atEnd, cards, chapter: M.chapter(), mode: G.mode, save: M.save(), stored: JSON.parse(localStorage.getItem('medina.save.v1') || 'null'), ev, cardVisible: !document.getElementById('card').classList.contains('hidden'), mix, look };
       });
       await page.goto(gameUrl({ ...o, chapter: null, cp: undefined }, { continue: 1, nosave: null }));
       await waitReady(page);
@@ -64,9 +116,231 @@ export const scenarios = [
       if (r.save.chapter !== 'sundown' || r.save.cp !== 0) return `save is ${r.save.chapter}/${r.save.cp}`;
       if (!r.stored || r.stored.chapter !== 'sundown' || r.stored.cp !== 0) return `localStorage holds ${JSON.stringify(r.stored)}`;
       if (r.continued.chapter !== 'sundown') return `continue landed in ${r.continued.chapter}`;
+      if (!(r.look.lbFinale > 0.05) || r.look.letterbox !== 0 || r.look.ov.length) return `the finale's letterbox followed into sundown: ${JSON.stringify(r.look)}`;
+      if (r.mix.ctx !== 'running') return `the audio context never ran (${r.mix.ctx}): the mix cannot be checked`;
+      if (!(r.mix.before > 0.8) || !(r.mix.atReveal < 0.85) || !(r.mix.after > 0.8)) return `the mix after the chain: ${JSON.stringify(r.mix)}`;
       return true;
     },
   },
+  {
+    // a cinematic stopped early (restart chapter, title) takes its look with it; the title returns to the checkpoint
+    name: 'restart and title mid-finale', cp: 6,
+    run: async ({ page }) => {
+      await page.mouse.click(4, 4);
+      return page.evaluate(async () => {
+        const M = __medina, G = M.game, A = G.audio, P = G.world.rs.post.params, D = G.director;
+        A.start(); if (A.ctx?.state === 'suspended') await A.ctx.resume().catch(() => {});
+        const frames = (n) => new Promise((r) => { const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const gain = () => (A.master ? +A.master.gain.value.toFixed(3) : null);
+        const look = () => ({ letterbox: +P.letterbox.toFixed(3), cur: D.cur.letterbox ?? null, ov: Object.keys(D.ov).length, sunY: +D.sunDir.y.toFixed(3) });
+        await wait(2700); // the start ramp
+        const out = { sunY0: +D.sunDir.y.toFixed(3), gain0: gain() };
+        // 1. restart chapter after the walk has faded the mix out
+        M.finale();
+        for (let i = 0; i < 40 * 120 && !G.cinema?.done; i++) M.sim(1 / 120, { x: 1 });
+        await frames(2); await wait(1500);
+        out.faded = { mode: G.mode, done: !!G.cinema?.done, gain: gain(), ...look() };
+        await G.restartChapter(); await frames(3); await wait(2000);
+        out.restart = { mode: G.mode, x: M.state().x, z: M.state().z, gain: gain(), ...look() };
+        // 2. the title in the middle of the walk
+        M.checkpoint(6); M.finale(); M.sim(6, { x: 1 }); await frames(2);
+        out.walking = { mode: G.mode, z: M.state().z, ...look() };
+        G.params.autostart = undefined;
+        await G.toTitle(); await frames(2);
+        out.title = { mode: G.mode, x: M.state().x, z: M.state().z, cinema: !!G.cinema, scripted: !!G.player.scripted, title: !document.getElementById('title').classList.contains('hidden'), ...look() };
+        G.beginPlay(); M.sim(0.3, { x: 0 });
+        out.play = { mode: G.mode, x: M.state().x, cp: M.state().cp };
+        G.params.autostart = '1';
+        return out;
+      });
+    },
+    check: (r) => {
+      if (!r.faded.done || !(r.faded.letterbox > 0.05)) return `the walk never reached its end fade: ${JSON.stringify(r.faded)}`;
+      if (r.restart.mode !== 'play' || Math.abs(r.restart.x - 1.5) > 0.2 || r.restart.letterbox !== 0 || r.restart.cur || r.restart.ov || r.restart.sunY !== r.sunY0) return `restart chapter kept the finale's look: ${JSON.stringify(r.restart)}`;
+      if (r.faded.gain !== null && (!(r.gain0 > 0.8) || !(r.faded.gain < 0.85) || !(r.restart.gain > 0.8))) return `restart chapter left the mix faded: ${r.faded.gain} -> ${r.restart.gain}`;
+      if (!(r.walking.letterbox > 0)) return `no letterbox during the walk: ${JSON.stringify(r.walking)}`;
+      if (r.title.mode !== 'intro' || r.title.cinema || r.title.scripted || !r.title.title || Math.abs(r.title.x - 186.2) > 0.2 || r.title.z !== 0 || r.title.letterbox !== 0) return `title mid-finale: ${JSON.stringify(r.title)}`;
+      if (r.play.mode !== 'play' || r.play.cp !== 6) return `play after the title: ${JSON.stringify(r.play)}`;
+      return true;
+    },
+  },
+  {
+    // the title over a chase: the chapter goes back to its checkpoint and holds, so the guard never catches the boy
+    name: 'title during the chase holds', cp: 5,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game;
+      M.sim(1.0, { x: 1 });
+      const chase = M.state().extra.guard;
+      G.params.autostart = undefined;
+      await G.toTitle();
+      // exactly what frame() runs under the title
+      const Z = { x: 0, y: 0, jump: false, grab: false, pause: false, any: false, pointer: null };
+      const modes = new Set();
+      for (let i = 0; i < 6 * 120; i++) { G.fixed(1 / 120, Z, true); G.time += 1 / 120; modes.add(G.mode); }
+      const out = { chase, guard: M.state().extra.guard, x: M.state().x, modes: [...modes], deaths: G.stats.deaths, title: G.titleShown, visible: !document.getElementById('title').classList.contains('hidden') };
+      G.beginPlay(); M.sim(0.5, { x: 0 });
+      out.after = { mode: G.mode, title: G.titleShown, fading: G.titleFade !== undefined || document.getElementById('title').classList.contains('hidden') };
+      G.params.autostart = '1';
+      return out;
+    }),
+    check: (r) => (r.chase === 'chase' && r.guard === 'hidden' && Math.abs(r.x - 141.5) < 0.2 && r.modes.length === 1 && r.modes[0] === 'intro' && r.deaths === 0 && r.title && r.visible && r.after.mode === 'play' && !r.after.title && r.after.fading ? true : `title during the chase: ${JSON.stringify(r)}`),
+  },
+  {
+    // the dev lab's end neither rolls the credits nor writes the save; it starts over
+    name: 'lab end keeps the save', chapter: 'lab', cp: 0,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game;
+      const save0 = M.save();
+      M.teleport(26, 0);
+      for (let i = 0; i < 10 * 120 && G.mode === 'play'; i++) M.sim(1 / 120, { x: 1 });
+      const endMode = G.mode;
+      await new Promise((r) => { const t0 = performance.now(); const f = () => (G.mode === 'play' || performance.now() - t0 > 15000 ? r() : setTimeout(f, 50)); f(); });
+      const ev = M.events().filter((e) => ['chapterEnd', 'credits', 'chapterStart'].includes(e.name)).map((e) => `${e.name}:${e.data.id ?? ''}${e.data.dev ? ':dev' : ''}`);
+      const s = M.save();
+      return { endMode, mode: G.mode, chapter: M.chapter(), x: M.state().x, ev, save0: { chapter: save0.chapter, completed: save0.completed, unlocked: save0.unlocked }, save: { chapter: s.chapter, cp: s.cp, completed: s.completed, unlocked: s.unlocked }, end: !document.getElementById('end').classList.contains('hidden') };
+    }),
+    check: (r) => (r.endMode === 'chapterEnd' && r.mode === 'play' && r.chapter === 'lab' && Math.abs(r.x - 1.5) < 0.3 && r.ev.includes('chapterEnd:lab:dev') && !r.ev.some((e) => e.startsWith('credits')) && !r.end
+      && !r.save.completed && r.save.chapter === r.save0.chapter && !r.save.unlocked.includes('lab') ? true : `lab end: ${JSON.stringify(r)}`),
+  },
+  {
+    // overlapping loads run one at a time in call order; chapter-lived subscriptions go with the chapter;
+    // a failed import uncovers the old chapter; a failed build falls back to the souk under the title
+    name: 'loader serialises and recovers', chapter: 'lab', cp: 0,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game, Ld = G.loader;
+      const { CHAPTERS } = await import('/src/chapters/index.js');
+      const out = {};
+      // 1. three loads at once
+      const orig = Ld._load; let active = 0, maxActive = 0;
+      Ld._load = async function (...a) { active++; maxActive = Math.max(maxActive, active); try { return await orig.apply(this, a); } finally { active--; } };
+      const starts = [];
+      const off = G.events.on('chapterStart', (d) => starts.push(d.id));
+      await Promise.all(['sundown', 'night', 'lab'].map((id) => G.loadChapter(id, 0, { reason: 'restart' })));
+      off(); Ld._load = orig;
+      out.serial = { maxActive, starts, chapter: M.chapter(), busy: Ld.busy === null ? null : 'set' };
+      // 2. subscriptions through the kit live as long as the chapter
+      const counts = () => ({ death: G.events.map.get('death')?.size ?? 0, frame: G.hooks.frame.length, ext: typeof G.ext.scopedProbe });
+      const base = { id: 'scoped', n: 9, numeral: 'S', glyph: 'rosette', label: 'scoped', next: null, dev: true, exit: '#000000', tone: '#000000' };
+      CHAPTERS.push({ ...base, load: async () => ({ default: { ...base, look: 'goldenHour', needs: ['cobbles'], build: (g, kit) => {
+        kit.ground(-20, 40); kit.cp(-100, 1.5, 0, 1);
+        kit.on('death', () => {}); kit.onFrame(() => {}); kit.registerExt('scopedProbe', () => 1);
+        kit.L.dustRegions.push({ x0: -3, x1: 20, y0: 0.2, y1: 4, z0: -1, z1: 1 });
+        return kit.L;
+      } } }) });
+      const c0 = counts();
+      await G.loadChapter('scoped', 0, { reason: 'restart' }); const c1 = counts();
+      await G.loadChapter('scoped', 0, { reason: 'restart' }); const c2 = counts();
+      await G.loadChapter('lab', 0, { reason: 'restart' }); const c3 = counts();
+      out.scoped = { c0, c1, c2, c3 };
+      // 3. a module that fails to import: the lab stays, uncovered
+      CHAPTERS.push({ ...base, id: 'brokenImport', load: () => Promise.reject(new Error('no such module')) });
+      const errs = [];
+      const offE = G.events.on('loadError', (d) => errs.push(d.id));
+      let e1 = null; try { await G.loadChapter('brokenImport', 0, { reason: 'select' }); } catch (e) { e1 = e.message; }
+      const cardEl = document.getElementById('card');
+      await new Promise((r) => { const t0 = performance.now(); const f = () => ((cardEl.classList.contains('hidden') && G.fade < 0.05) || performance.now() - t0 > 8000 ? r() : setTimeout(f, 50)); f(); }); // the card keeps 2.5 s
+      out.importFail = { e1, chapter: M.chapter(), mode: G.mode, level: !!G.level, card: !document.getElementById('card').classList.contains('hidden'), fadeTarget: G.fadeTarget, suspended: G.suspended };
+      // 4. a build that throws after the lab was disposed: the souk loads under the title
+      CHAPTERS.push({ ...base, id: 'brokenBuild', load: async () => ({ default: { ...base, id: 'brokenBuild', look: 'goldenHour', needs: [], build: () => { throw new Error('build failed'); } } }) });
+      G.params.autostart = undefined; // as without ?autostart: the fallback's title waits for input
+      let e2 = null; try { await G.loadChapter('brokenBuild', 0, { reason: 'select' }); } catch (e) { e2 = e.message; }
+      await new Promise((r) => { const t0 = performance.now(); const f = () => ((M.chapter() === 'souk' && G.mode === 'intro') || performance.now() - t0 > 120000 ? r() : setTimeout(f, 100)); f(); });
+      await new Promise((r) => setTimeout(r, 1500));
+      offE();
+      out.buildFail = { e2, chapter: M.chapter(), mode: G.mode, title: G.titleShown, card: !document.getElementById('card').classList.contains('hidden'), errs };
+      G.params.autostart = '1';
+      return out;
+    }),
+    check: (r) => {
+      const s = r.serial, c = r.scoped;
+      if (s.maxActive !== 1 || s.starts.join() !== 'sundown,night,lab' || s.chapter !== 'lab' || s.busy !== null) return `overlapping loads: ${JSON.stringify(s)}`;
+      if (c.c1.death !== c.c0.death + 1 || c.c2.death !== c.c0.death + 1 || c.c3.death !== c.c0.death || c.c1.frame !== c.c0.frame + 1 || c.c2.frame !== c.c0.frame + 1 || c.c3.frame !== c.c0.frame || c.c1.ext !== 'function' || c.c3.ext !== 'undefined') return `scoped subscriptions: ${JSON.stringify(c)}`;
+      const i = r.importFail;
+      if (!i.e1 || i.chapter !== 'lab' || i.mode !== 'play' || !i.level || i.card || i.fadeTarget !== 0 || i.suspended) return `failed import: ${JSON.stringify(i)}`;
+      const b = r.buildFail;
+      if (!b.e2 || b.chapter !== 'souk' || b.mode !== 'intro' || !b.title || b.card || b.errs.join() !== 'brokenImport,brokenBuild') return `failed build: ${JSON.stringify(b)}`;
+      return true;
+    },
+  },
+  {
+    // render plumbing: an off-screen guard holds no pool light and an on-screen one keeps its own lantern look;
+    // presets tint the glow sprites; a sky change hands the new environment to GLB templates and scene materials
+    name: 'pool range, glow colour, env handover', cp: 5,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game, pool = G.lightPool;
+      const frames = (n) => new Promise((r) => { const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+      const out = { slice: G.world.bakeSlice, software: G.world.software };
+      M.sim(1.0, { x: 1 }); // the chase starts: the guard's lantern is on
+      const src = G.level.guard.light;
+      const holder = () => pool.lights.find((l) => l.userData.src === src);
+      M.photo(147, 0, 1, 0.1); await frames(3);
+      const h = holder();
+      out.near = { guard: M.state().extra.guard, held: !!h, distance: h?.distance, decay: h?.decay, color: h?.color.getHexString(), enabled: src.enabled };
+      M.photo(20, 0, 1, 0); await frames(3);
+      out.far = { held: !!holder(), enabled: src.enabled, xs: pool.lights.filter((l) => l.userData.src).map((l) => +l.position.x.toFixed(1)), styles: [...new Set(pool.lights.map((l) => `${l.distance}/${l.decay}`))] };
+      // glow colour from the preset
+      const lan = G.level.lanterns.find((l) => l.sprite);
+      G.director.override({ glowColor: '#4080ff' }); await frames(2);
+      const tinted = lan.sprite.material.color.getHexString();
+      G.director.restore(); await frames(2);
+      out.glow = { tinted, back: lan.sprite.material.color.getHexString(), preset: G.director.glowColor.getHexString() };
+      // environment handover
+      const { Overrides } = await import('/src/assets/library.js');
+      const old = G.world.env;
+      const tplMat = G.mats.get('brass').clone(); tplMat.envMap = old; tplMat.userData.medina = true;
+      const sceneMat = G.mats.get('brass').clone(); sceneMat.envMap = old;
+      let any = null; G.root.traverse((o) => { if (!any && o.isMesh) any = o; });
+      const tpl = new G.root.constructor(); tpl.add(new any.constructor(any.geometry, tplMat)); // a GLB template outside the scene
+      const sm = G.add(new any.constructor(any.geometry, sceneMat)); // a chapter material outside the cache
+      Overrides.models.set('__probe', tpl);
+      G.director.apply('night'); await frames(1);
+      const nightEnv = G.world.env;
+      out.env = { rebuilt: nightEnv !== old, tpl: tplMat.envMap === nightEnv, scene: sceneMat.envMap === nightEnv, overridesEnv: Overrides.envMap === null || Overrides.envMap !== old };
+      Overrides.models.delete('__probe'); sm.removeFromParent(); tplMat.dispose(); sceneMat.dispose();
+      G.director.apply('goldenHour'); await frames(1);
+      return out;
+    }),
+    check: (r) => {
+      if (!r.near.held || r.near.distance !== 7 || r.near.decay !== 1.6) return `on-screen guard lantern: ${JSON.stringify(r.near)}`;
+      if (r.far.held || !r.far.enabled || r.far.xs.some((x) => x > 100)) return `off-screen guard still holds a pool light: ${JSON.stringify(r.far)}`;
+      if (r.glow.tinted === r.glow.back || r.glow.back !== r.glow.preset) return `glow colour: ${JSON.stringify(r.glow)}`;
+      if (!r.env.rebuilt || !r.env.tpl || !r.env.scene) return `environment handover: ${JSON.stringify(r.env)}`;
+      if (r.software && r.slice !== 200) return `bake slice on a software rasteriser: ${r.slice}`;
+      return true;
+    },
+  },
+  {
+    // the old chapter waits while the screen fades out for a load (it used to keep running in play)
+    name: 'sim waits while a load fades out', cp: 0, query: { hold: null },
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game;
+      const until = (f, ms = 60000) => new Promise((r) => { const t0 = performance.now(); const k = () => (f() || performance.now() - t0 > ms ? r() : setTimeout(k, 20)); k(); });
+      const xa = M.state().x;
+      M.setInput({ x: 1 });
+      await until(() => M.state().x > xa + 0.05); // frames are slow on a loaded machine: wait for the run itself
+      const x0 = M.state().x;
+      // frames that start while the load is still fading (before mode loading), and x when loading begins
+      let fadeFrames = 0, xLoading = null, fading = false;
+      const hook = () => { if (fading) fadeFrames++; };
+      G.hooks.frame.push(hook);
+      const off = G.events.on('mode', (d) => { if (d.mode === 'loading' && xLoading === null) { xLoading = M.state().x; fading = false; } });
+      // the card holds the cover until two frames have run, so the window is observed even at a few frames a second
+      const card = G.hooks.card;
+      G.hooks.card = async (m, o) => { const c = await card(m, o); const f0 = window.__frames; await until(() => window.__frames >= f0 + 2, 30000); return c; };
+      fading = true;
+      const p = G.startChapter('lab');
+      await Promise.resolve();
+      const x1 = M.state().x, susp = G.suspended;
+      await p;
+      G.hooks.card = card;
+      off(); G.hooks.frame.splice(G.hooks.frame.indexOf(hook), 1);
+      M.setInput(null);
+      return { xa, x0, x1, xLoading, fadeFrames, susp, chapter: M.chapter(), after: G.mode, suspended: G.suspended };
+    }),
+    check: (r) => (r.x0 > r.xa && r.susp && r.fadeFrames >= 1 && r.xLoading === r.x1 && r.chapter === 'lab' && !r.suspended && ['play', 'intro'].includes(r.after) ? true : `fade before a load: ${JSON.stringify(r)}`),
+  },
+
   {
     // §11.2 acceptance 6: localStorage throwing: boots, plays to a checkpoint, saves in memory, no errors
     name: 'storage throwing: plays, saves in memory', cp: 0, query: { nosave: null },
@@ -116,8 +390,9 @@ export const scenarios = [
   },
   {
     // §11.2 acceptance 10: boot to __ready within the baseline + 10 %, and the loading bar paints at least 10 values.
-    // The machine may be shared: with --base-port N (a server of the pre-foundation tree) the two trees boot
-    // alternately under the same load and the budget is the base median + 10 %; otherwise it is the recorded baseline.
+    // The machine is shared, so by default the pre-foundation tree is served alongside (or --base-port N names a
+    // running server of it) and the two trees boot alternately under the same load: the budget is the base median
+    // + 10 %. --absolute times against the recorded baseline instead (an idle machine only).
     name: 'boot budget and loading bar', url: false,
     run: async ({ page, o }) => {
       await page.addInitScript(() => {
@@ -132,12 +407,15 @@ export const scenarios = [
         return page.evaluate(() => ({ ms: Math.round(window.__readyAt), painted: [...window.__painted] }));
       };
       const med = (a) => { const v = a.map((x) => x.ms).sort((x, y) => x - y); return v[Math.floor(v.length / 2)]; };
-      const ab = o.basePort ? +o.basePort : 0;
-      if (ab) { await boot(ab); await boot(0); }
-      const cur = [], base = [];
-      for (let k = 0; k < 3; k++) { if (ab) base.push(await boot(ab)); cur.push(await boot(0)); }
-      const budget = Math.round((ab ? med(base) : baseline.boot.readyMs.warm) * 1.1);
-      return { readyMs: cur.map((x) => x.ms), median: med(cur), budget, against: ab ? `base tree on ${ab}: ${base.map((x) => x.ms).join(' ')}` : `recorded warm ${baseline.boot.readyMs.warm}`, painted: cur[1].painted.length, values: cur[1].painted.join(' ') };
+      let srv = null, ab = o.basePort ? +o.basePort : 0;
+      if (!ab && !o.absolute) { srv = await startBaseServer(); ab = srv.port; }
+      try {
+        if (ab) { await boot(ab); await boot(0); }
+        const cur = [], base = [];
+        for (let k = 0; k < 3; k++) { if (ab) base.push(await boot(ab)); cur.push(await boot(0)); }
+        const budget = Math.round((ab ? med(base) : baseline.boot.readyMs.warm) * 1.1);
+        return { readyMs: cur.map((x) => x.ms), median: med(cur), budget, against: ab ? `base tree${srv ? ' ' + srv.ref : ''} on ${ab}: ${base.map((x) => x.ms).join(' ')}` : `recorded warm ${baseline.boot.readyMs.warm}`, painted: cur[1].painted.length, values: cur[1].painted.join(' ') };
+      } finally { srv?.stop(); }
     },
     check: (r) => (r.median <= r.budget && r.painted >= 10 ? true : `boot ${r.median} ms (budget ${r.budget}), ${r.painted} painted values`),
   },
