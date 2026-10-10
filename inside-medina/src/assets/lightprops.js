@@ -275,10 +275,11 @@ export function lightTextures() {
   const glint = mk((x, n) => {
     const h = n / 2;
     const g = x.createRadialGradient(h, h, 0, h, h, h);
-    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.08, 'rgba(255,245,220,.9)'); g.addColorStop(0.3, 'rgba(255,210,150,.18)'); g.addColorStop(1, 'rgba(255,200,140,0)');
+    // a pin-point core and four thin rays: a glint, not a disc (the beam's end already glows)
+    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.04, 'rgba(255,248,230,.9)'); g.addColorStop(0.12, 'rgba(255,225,180,.22)'); g.addColorStop(0.4, 'rgba(255,210,150,.04)'); g.addColorStop(1, 'rgba(255,200,140,0)');
     x.fillStyle = g; x.fillRect(0, 0, n, n);
     x.globalCompositeOperation = 'lighter';
-    for (const [a, w, l] of [[0, 2.2, 1], [Math.PI / 2, 2.2, 1], [Math.PI / 4, 1.2, 0.55], [-Math.PI / 4, 1.2, 0.55]]) {
+    for (const [a, w, l] of [[0, 1.3, 1], [Math.PI / 2, 1.3, 1], [Math.PI / 4, 0.8, 0.5], [-Math.PI / 4, 0.8, 0.5]]) {
       x.save(); x.translate(h, h); x.rotate(a);
       const lg = x.createLinearGradient(-h * l, 0, h * l, 0);
       lg.addColorStop(0, 'rgba(255,230,190,0)'); lg.addColorStop(0.5, 'rgba(255,250,235,.95)'); lg.addColorStop(1, 'rgba(255,230,190,0)');

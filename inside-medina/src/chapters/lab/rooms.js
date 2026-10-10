@@ -58,10 +58,15 @@ export function* buildLab(game, kit) {
   ground(-20, 140.5); ground(144, 520);
   block(-30, -4, 0, 14, { visual: false, ledges: false });
   const styles = ['peach', 'cream', 'ochre', 'white', 'blue', 'cream', 'peach', 'stone'];
+  const SQ0 = 207.6, SQ1 = 257.4;
+  ground(SQ0, SQ1, { z0: -8.4, z1: FZ - 0.3, collide: false });
   for (let x = -12, i = 0; x < 512; i++) {
     const w = 5 + r() * 4;
     const night = x > 206 && x < 345;
-    farBuilding(x, x + w, FZ - 0.02, (night ? 8 : 7) + r() * 6, styles[i % styles.length], { depth: 4 });
+    const h = (night ? 8 : 7) + r() * 6, st = styles[i % styles.length];
+    // the lamp room is an open square: no facade between the play plane and the lamp-keepers' wall, so the
+    // cones fall whole from the lamps to the street
+    for (const [a, b] of [[x, Math.min(x + w, SQ0)], [Math.max(x, SQ1), x + w]]) if (b - a > 0.4) farBuilding(a, b, FZ - 0.02, h, st, { depth: 4 });
     x += w;
   }
   for (let x = -40; x < 540;) { const w = 7 + r() * 9; farBuilding(x, x + w, -14 - r() * 12, 9 + r() * 8, styles[Math.floor(r() * styles.length)], { depth: 8, cast: false }); x += w + r() * 4; }
@@ -243,7 +248,8 @@ export function* buildLab(game, kit) {
   const LM2 = add(new Mirror(game, { id: 'LM2', kind: 'anchored', x: 235.25, alpha: -30, thetaHint: 225 }));
   for (const [x, z] of [[221, -8.35], [246, -8.35]]) { vbox(x - 1.6, 11.4 + (x === 221 ? 1 : 0), z, x + 1.6, 11.65 + (x === 221 ? 1 : 0), z + 1.3, 'woodDark', { base: 11 }); }
   vbox(208, 0, -9.6, 258, 17, -8.4, 'plasterCream', { base: 0, grime: 3 });
-  for (const x of [210.5, 238.5, 256.5]) lantern(x, 3.2, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.0 });
+  // lamp posts on the open square (no facade to hang a bracket on)
+  for (const x of [210.5, 238.5, 256.5]) { pole(K, x, 0, 3.55, FZ + 0.25, 0.07); lantern(x, 3.3, FZ + 0.25, { bracketDir: 1, light: true, intensity: 2.0 }); }
   cam(208, { dist: 18, distPortrait: 26, height: 3.0, lookY: 3.6, fov: 39, ahead: 1.0, focusBias: 2 });
   cam(256, { dist: 18, distPortrait: 26, height: 3.0, lookY: 3.6, fov: 39, ahead: 1.0, focusBias: 1 });
   room('lamp', () => { LM1.setState({ x: 229.45, y: 0, alpha: 0 }); LL1.setState({ level: 1, done: true }); G10.setState({ open: 1 }); LM2.setState({ x: 235.25, y: 0, alpha: -45 }); });

@@ -108,6 +108,19 @@ export class Player {
     return !!(this.crateAdjacent(this.facing) || this.game.interactNear(this.body.x, this.body.y, this.facing));
   }
 
+  // what grab holds or would take now, for the touch grab button's icon:
+  // 'mirror' | 'crank' | 'capstan' | 'crate' | 'lever' | null
+  reachable() {
+    const kindOf = (it) => (it.playerState === 'crank' || it.playerState === 'capstan' ? it.playerState : 'lever');
+    if (this.lever) return kindOf(this.lever);
+    if (this.grip) return this.grip.mirror ? 'mirror' : 'crate';
+    if (this.dead || this.state !== 'ground' || this.crawling) return null;
+    const b = this.body, it = this.game.interactNear(b.x, b.y, this.facing);
+    if (it) return kindOf(it);
+    const c = this.crateAdjacent(this.facing);
+    return c ? (c.mirror ? 'mirror' : 'crate') : null;
+  }
+
   // grips that latch: the grab-toggle setting, or touch on a mirror, crank or capstan (tap to take, tap to let go)
   sticky(target) {
     if (this.game.settings?.grabMode === 'toggle') return true;

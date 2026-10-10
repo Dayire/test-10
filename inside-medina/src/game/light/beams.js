@@ -72,7 +72,7 @@ void main(){
   vec2 q = vUv * 2. - 1.; float r2 = dot(q, q);
   float a;
   if (vKind < .5) a = exp(-r2 * 6.) * .75 + exp(-r2 * 40.) * .9;
-  else a = texture2D(uGlint, vUv).r * 1.4;
+  else a = pow(texture2D(uGlint, vUv).a, 1.4) * 1.8; // the canvas keeps its strength in alpha (r is 1 wherever a > 0)
   a *= softFade(.1);
   gl_FragColor = vec4(vCol.rgb * a * vCol.a, 1.);
   #include <fog_fragment>
@@ -165,7 +165,7 @@ export class BeamRenderer {
         const flick = 0.9 + 0.1 * Math.sin(t * 13 + i * 2.1 + bx);
         if (h.kind === MIRROR) {
           // a star glint on the tray, above the bloom threshold
-          this.glow(ng++, h.x, h.y, 0, col, 2.6 * Math.min(1.5, h.I) * flick * reduce, (0.75 + 0.35 * h.I) * (lamp ? 0.5 : 1), 1, 0.25, t * 0.15 + i);
+          this.glow(ng++, h.x, h.y, 0, col, 1.7 * Math.min(1.5, h.I) * flick * reduce, (0.7 + 0.3 * h.I) * (lamp ? 0.6 : 1), 1, 0.3, t * 0.15 + i);
         } else {
           const lock = h.kind === TARGET && h.obj.shape === 'circle';
           const px = lock ? h.obj.x : h.x + h.nx * 0.03, py = lock ? h.obj.y : h.y + h.ny * 0.03;
