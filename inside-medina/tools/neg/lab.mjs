@@ -164,18 +164,22 @@ export const scenarios = [
     check: (r) => (['walkT1', 'standT2', 'jumpT7'].every((k) => r[k].dead && r[k].kind === 'shot') && !r.crawl.dead && r.crawl.state === 'clear' && !r.walkT7.dead && r.walkT7.state === 'clear' ? true : `tripwires ${JSON.stringify(r)}`),
   },
   {
-    // III-D: the guard runs through T4 and the lamp-keepers' own turret darts him; the slaved lamp fixates him
+    // III-D: the guard runs through T4 and the lamp-keepers' own turret darts him; the slaved lamp fixates him.
+    // The tripwire's own beam never stuns him (only daylight does), so he falls past the wire, about x 305; asleep
+    // he lies low (no 1.8 m shadow), and once the line is whole again T4 clears and S5 lets him go
     name: 'the turret darts the guard', cp: 11,
     run: async ({ page }) => { await prep(page); return page.evaluate(() => {
       const { M, G, get, until } = __neg;
       G.triggers.find((t) => t.id === 'gustBasket').fired = true;
       M.teleport(296, 0, 1);
-      let fix = false, jumped = false;
-      const t = until(() => get('guard11').state === 'asleep', (s) => { if (get('S5').fix) fix = true; const j = s.x > 299.45 && s.x < 299.7 && s.st === 'ground' && !jumped; if (j) jumped = true; return { x: 1, jump: j }; }, 10);
+      let fix = false, jumped = false, stunned = false;
+      const g = get('guard11');
+      const t = until(() => g.state === 'asleep', (s) => { if (get('S5').fix) fix = true; if (g.state === 'stunned') stunned = true; const j = s.x > 299.45 && s.x < 299.7 && s.st === 'ground' && !jumped; if (j) jumped = true; return { x: 1, jump: j }; }, 10);
       until(() => G.player.x > 308, { x: 1 }, 4);
-      return { asleep: get('guard11').state, t, fix, gx: +get('guard11').body.x.toFixed(2), dead: G.player.dead, x: G.player.x };
+      M.sim(5, { x: 0 });
+      return { asleep: g.state, t, fix, stunned, gx: +g.body.x.toFixed(2), gh: g.body.h, T4: get('T4').state, S5fix: !!get('S5').fix, dead: G.player.dead, x: G.player.x };
     }); },
-    check: (r) => (r.asleep === 'asleep' && r.fix && !r.dead && r.gx < 306 ? true : `guard ${JSON.stringify(r)}`),
+    check: (r) => (r.asleep === 'asleep' && r.fix && !r.stunned && !r.dead && r.gx > 302 && r.gx < 306 && r.gh <= 0.5 && r.T4 === 'clear' && !r.S5fix ? true : `guard ${JSON.stringify(r)}`),
   },
   {
     // III-B2: without the dazzle the open run is death; with it, the boy crosses alive (and the tray shields him)

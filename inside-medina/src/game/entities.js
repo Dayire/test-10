@@ -174,7 +174,7 @@ const BEAM_VS = /* glsl */ `
 varying vec3 vPos; varying vec3 vN; varying vec3 vW;
 void main(){ vPos = position; vN = normalize(normalMatrix * normal); vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
 const BEAM_FS = /* glsl */ `
-uniform vec3 uColor; uniform float uIntensity; uniform float uTime; uniform float uLen; uniform vec3 uFade;
+uniform vec3 uColor; uniform float uIntensity; uniform float uTime; uniform float uLen; uniform vec3 uFade; uniform float uHC;
 varying vec3 vPos; varying vec3 vN; varying vec3 vW;
 ${SOFT_GLSL}
 float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719))) * 43758.5453); }
@@ -191,6 +191,8 @@ void main(){
   fall *= 1. - uFade.z * smoothstep(uFade.x, uFade.y, -vPos.y);
   float dust = .75 + .5 * n3(vW * 1.3 + vec3(0., -uTime * .3, uTime * .2));
   float a = pow(core, 3.5) * fall * dust * uIntensity * softFade(.6) * softNear(2.);
+  // high contrast: the cone's silhouette drawn as a line
+  a += uHC * smoothstep(.72, .92, edge) * fall * uIntensity * .55 * softFade(.6) * softNear(2.);
   gl_FragColor = vec4(uColor * a, 1.);
   #include <fog_fragment>
 }`;
@@ -236,7 +238,7 @@ export class Searchlight {
     cone.translate(0, -len / 2, 0);
     this.beamMat = new THREE.ShaderMaterial({
       vertexShader: BEAM_VS, fragmentShader: BEAM_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: softUniforms({ uColor: { value: new THREE.Color(1.0, 0.86, 0.62) }, uIntensity: { value: 0.35 }, uTime: game.globals.uTime, uLen: { value: len }, uFade: { value: new THREE.Vector3(len, len + 1, 0) } }),
+      uniforms: softUniforms({ uColor: { value: new THREE.Color(1.0, 0.86, 0.62) }, uIntensity: { value: 0.35 }, uTime: game.globals.uTime, uLen: { value: len }, uFade: { value: new THREE.Vector3(len, len + 1, 0) }, uHC: { value: 0 } }),
     });
     this.beam = new THREE.Mesh(cone, this.beamMat);
     this.beam.frustumCulled = false;
@@ -423,6 +425,7 @@ export class Searchlight {
     // a blind lamp's beam ends in the air near its aim: it fades out over the last 70 % of that length
     const reach = THREE.MathUtils.clamp(d.length() * 1.05, 8, 18);
     U.uFade.value.set(reach * 0.3, reach, blind);
+    U.uHC.value = this.game.settings?.highContrast ? 1 : 0;
     d.normalize();
     this.beam.position.copy(this.origin);
     this.beam.quaternion.setFromUnitVectors(_down, d);
@@ -471,7 +474,7 @@ export class Guard {
   }
   activate(x) {
     const b = this.body; b.x = x ?? this.home.x; b.y = this.home.y; b.vx = 0; b.vy = 0; this.prev.set(b.x, b.y);
-    this.state = 'chase'; this.t = 0; this.rig.root.visible = true; b.enabled = true; this.stunT = 0; this.immune = 0;
+    this.state = 'chase'; this.t = 0; this.rig.root.visible = true; b.enabled = true; this.stunT = 0; this.immune = 0; this.lie(false);
     this.anim.setState('ground', 0.01);
     this.game.sfx('shout', b.x);
   }
@@ -479,18 +482,21 @@ export class Guard {
   dispose() { if (this.light) this.game.lightPool?.remove(this.light); }
   prestep() { this.prev.set(this.body.x, this.body.y); }
   // Sunwork (FULL_GAME §6.2): stun(sec) stops him with his eyes shielded, then 2 s of immunity; Infinity is the
-  // asleep collapse (a turret's dart). onLight: a lamp-keeper cannot bear I ≥ 0.8 (sun shafts, a reflected beam)
+  // asleep collapse (a turret's dart). onLight: a lamp-keeper cannot bear daylight of I ≥ 0.8 (a sun shaft, a
+  // reflected sunbeam); his own lamps' beams (searchlights, tripwires) do not touch him
   stun(sec = 1.2) {
     if (this.state === 'hidden' || this.state === 'asleep') return;
     const b = this.body;
     b.vx = 0; this.vault = null;
-    if (sec === Infinity) { this.state = 'asleep'; this.t = 0; this.game.sfx('guardSleep', b.x); this.game.emit('guardAsleep', { x: b.x }); return; }
+    if (sec === Infinity) { this.state = 'asleep'; this.t = 0; this.lie(true); this.game.sfx('guardSleep', b.x); this.game.emit('guardAsleep', { x: b.x }); return; }
     if (this.state !== 'stunned') this.prevState = this.state === 'blocked' ? 'blocked' : 'chase';
     this.state = 'stunned'; this.stunT = sec; this.t = 0;
     this.game.sfx('guardStun', b.x);
     this.game.emit('guardStun', { x: b.x, sec });
   }
-  onLight(I) { if (I >= 0.8 && this.state === 'chase' && this.immune <= 0 && !this.vault) this.stun(1.2); }
+  // asleep he lies on the ground: his body (a light and line-of-sight blocker) drops to 0.45 m
+  lie(on) { this.body.h = on ? 0.45 : 1.8; }
+  onLight(I, dt, sys, sky = I) { if (sky >= 0.8 && this.state === 'chase' && this.immune <= 0 && !this.vault) this.stun(1.2); }
   step(dt) {
     if (this.state === 'hidden') return;
     const b = this.body, pl = this.game.player, ph = this.game.phys;
@@ -584,7 +590,7 @@ export class Guard {
     if (!s || s.state === 'hidden') { this.deactivate(); return; }
     const b = this.body; b.x = s.x; b.y = s.y; b.vx = s.vx; b.vy = s.vy; this.prev.set(b.x, b.y);
     this.state = s.state; this.t = s.t; this.facing = s.facing; this.vault = s.vault ? { ...s.vault } : null;
-    this.stunT = s.stunT ?? 0; this.immune = s.immune ?? 0; this.prevState = s.prevState ?? 'chase';
+    this.stunT = s.stunT ?? 0; this.immune = s.immune ?? 0; this.prevState = s.prevState ?? 'chase'; this.lie(s.state === 'asleep');
     this.rig.root.visible = true; b.enabled = true;
   }
 }

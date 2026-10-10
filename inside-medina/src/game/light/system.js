@@ -118,7 +118,15 @@ export class LightSystem {
       for (const h of R.hits) {
         if (h.kind === TARGET) { const g = h.obj; g._I += h.I; if (h.seg > 0 && (g.face == null || Math.cos((h.theta - g.face) * DEG) < 0)) g._Ir += h.I; if (!g._hit || h.I > g._hit.I) g._hit = h; }
         else if (h.kind === MIRROR) { const m = h.obj; m._lit += h.I; if (h.I > m._bestI) { m._bestI = h.I; m._inTheta = h.theta; } }
-        else if (h.kind === BODY) { const o = h.obj.owner; if (o?.onLight) { o._lightI = (this.lit.has(o) ? o._lightI : 0) + h.I; this.lit.add(o); } }
+        else if (h.kind === BODY) {
+          // a lit body hears the total and the share of it that is daylight (sun or moon, direct or reflected):
+          // a searchlight's or a tripwire's own beam is not the sun
+          const o = h.obj.owner;
+          if (o?.onLight) {
+            if (!this.lit.has(o)) { o._lightI = 0; o._lightSky = 0; this.lit.add(o); }
+            o._lightI += h.I; if (src.kind === 'sun' || src.kind === 'moon') o._lightSky += h.I;
+          }
+        }
       }
     }
     for (const m of this.mirrors) if (!m._bestI) m._inTheta = null; // unlit: finger aim falls back on thetaHint
@@ -128,7 +136,7 @@ export class LightSystem {
     S.samples[S.k++ % S.samples.length] = ms;
     if (held) return;
     for (const t of T) t.onLight?.(t._I, dt, this);
-    for (const o of this.lit) o.onLight(o._lightI, dt, this);
+    for (const o of this.lit) o.onLight(o._lightI, dt, this, o._lightSky);
   }
 
   p95() {
