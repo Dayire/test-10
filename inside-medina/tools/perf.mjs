@@ -134,6 +134,7 @@ async function measureSpot(page, s) {
     shadowCalls: round(avg(on, 'shadowCalls')), shadowCallsPerUpdate: upd.length ? round(avg(upd, 'shadowCalls')) : 0,
     shadowCalls60: round(avg(s60, 'shadowCalls')), shadowUpdates60: round(upd60.length / s60.length),
     shadowCallsPerUpdate60: upd60.length ? round(avg(upd60, 'shadowCalls')) : 0, shadowTris60: Math.round(avg(s60, 'shadowTris')),
+    shadowTrisPerUpdate60: upd60.length ? Math.round(avg(upd60, 'shadowTris')) : 0,
     shadowUpdateRate: round(upd.length / on.length), mainCalls: round(avg(on, 'mainCalls')), postCalls: round(avg(on, 'postCalls')),
     calls: round(avg(on, 'calls')), calls60: round(avg(s60, 'calls')), tris: Math.round(avg(on, 'tris')), shadowTris: Math.round(avg(on, 'shadowTris')), mainTris: Math.round(avg(on, 'mainTris')),
     flockCalls: round(avg(on, 'flockMain') + avg(on, 'flockShadow')), flockMain: round(avg(on, 'flockMain')), flockShadow: round(avg(on, 'flockShadow')),
@@ -166,11 +167,14 @@ if (only !== 'checks') {
     const flock = await flockStress(page);
     process.stdout.write(`${tier} flock-all-in-view ${JSON.stringify(flock)}\n`);
     const info = await page.evaluate(() => { const rs = window.__medina.game.world.rs; return { fxaa: !!(rs.post.fxaaActive ?? rs.post.q?.fxaa), aa: rs.post.stats?.aa ?? null, msaa: rs.q.msaa, scale: rs.scale ?? rs.q.scale, w: rs.w, h: rs.h }; });
-    // §8.5 budget at a 60 fps cadence (shadow-pass calls averaged over the frames that refresh them or not)
+    // §8.5 budget per frame, gated on the heaviest frame: one that refreshes the shadow maps (every frame on high
+    // and ultra, every other frame on medium's 30 Hz maps at 60 fps, every frame on low at its 30 fps target). The
+    // 60 fps average (shadow-pass calls over the frames that refresh them or not) is reported beside it
     const B = BUDGET[tier], budget = {};
     for (const [k, v] of Object.entries(spots)) {
-      const calls = round(v.shadowCalls60 + v.mainCalls), tris = Math.round(v.shadowTris60 + v.mainTris);
-      budget[k] = { calls, tris, ok: !B || (calls <= B.calls && tris <= B.tris) };
+      const calls = round((v.shadowCallsPerUpdate60 || v.shadowCalls60) + v.mainCalls), tris = Math.round((v.shadowTrisPerUpdate60 || v.shadowTris60) + v.mainTris);
+      const avgCalls = round(v.shadowCalls60 + v.mainCalls), avgTris = Math.round(v.shadowTris60 + v.mainTris);
+      budget[k] = { calls, tris, avgCalls, avgTris, ok: !B || (calls <= B.calls && tris <= B.tris) };
     }
     result.tiers[tier] = { spots, programsFirstPass: p1, programsSecondPass: p2, flockAllInView: flock, info, budget };
     await page.context().close();
@@ -761,10 +765,10 @@ if (compare && fs.existsSync(compare) && Object.keys(result.tiers).length) {
   }
 }
 if (Object.keys(result.tiers).length) {
-  console.log('\n§8.5 budget (calls shadow + main, triangles; per frame at 60 fps):');
+  console.log('\n§8.5 budget (calls shadow + main, triangles; the heaviest frame, a shadow refresh; [60 fps average]):');
   for (const [tier, T] of Object.entries(result.tiers)) {
     const B = BUDGET[tier], over = Object.entries(T.budget || {}).filter(([, v]) => !v.ok);
-    console.log(` ${tier.padEnd(7)} budget ${B ? `${B.calls} calls / ${B.tris / 1000}k tris` : 'n/a'}: ` + Object.entries(T.budget || {}).map(([k, v]) => `${k} ${v.calls}/${Math.round(v.tris / 1000)}k${v.ok ? '' : ' OVER'}`).join(', ') + (over.length ? `  (WARN ${over.length} spot${over.length > 1 ? 's' : ''} over)` : ''));
+    console.log(` ${tier.padEnd(7)} budget ${B ? `${B.calls} calls / ${B.tris / 1000}k tris` : 'n/a'}: ` + Object.entries(T.budget || {}).map(([k, v]) => `${k} ${v.calls}/${Math.round(v.tris / 1000)}k [${v.avgCalls}/${Math.round(v.avgTris / 1000)}k]${v.ok ? '' : ' OVER'}`).join(', ') + (over.length ? `  (FAIL ${over.length} spot${over.length > 1 ? 's' : ''} over)` : ''));
   }
 }
 if (Object.keys(result.checks).length) {
@@ -775,5 +779,12 @@ if (Object.keys(result.checks).length) {
 }
 if (errors.length) console.log('\nerrors:\n' + [...new Set(errors)].slice(0, 20).join('\n'));
 await browser.close();
-const failed = Object.values(result.checks).some((c) => c && c.ok === false) || errors.length > 0;
+// any failed or pending check, a spot over its tier's budget, or a page error fails the run
+const overBudget = Object.entries(result.tiers).flatMap(([t, T]) => Object.entries(T.budget || {}).filter(([, v]) => !v.ok).map(([k]) => `${t} ${k}`));
+const pending = Object.entries(result.checks).filter(([, c]) => c && typeof c === 'object' && c.ok === null).map(([k]) => k);
+const failedChecks = Object.entries(result.checks).filter(([, c]) => c && c.ok === false).map(([k]) => k);
+if (overBudget.length) console.log(`over budget: ${overBudget.join(', ')}`);
+if (pending.length) console.log(`pending: ${pending.join(', ')}`);
+const failed = failedChecks.length > 0 || pending.length > 0 || overBudget.length > 0 || errors.length > 0;
+console.log(failed ? `PERF FAIL${failedChecks.length ? ` (checks: ${failedChecks.join(', ')})` : ''}` : 'PERF PASS');
 process.exit(failed ? 1 : 0);

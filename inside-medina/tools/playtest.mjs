@@ -2,7 +2,7 @@
 //   node tools/playtest.mjs [--chapter souk] [--cp N] [--from step] [--to step] [--runs N] [--port 5173] [--tier low] [--hold 0|1]
 // Legacy: node tools/playtest.mjs [fromStepName] [cp]
 // Each run reloads the page; with --runs > 1 the end-state hashes must match (determinism).
-// Exit code 0 only if every run passes (and, for several runs, the hashes agree).
+// Exit code 0 only if every run passes with no page or console error (and, for several runs, the hashes agree).
 import { parseArgs, launch, openPage, gameUrl, inject, hash, exists } from './lib/harness.mjs';
 
 const o = parseArgs();
@@ -29,11 +29,12 @@ for (let k = 0; k < runs; k++) {
     return res;
   }, [o.chapter, o.from, o.to]);
   r.hash = hash(r.end);
-  r.errors = P.errors;
+  r.errors = [...P.errors, ...P.consoleErrors];
   results.push(r);
   if (runs === 1 || !r.ok) console.log(r.log.join('\n'));
-  const pass = r.ok && !P.errors.length;
-  console.log(`${pass ? 'PASS' : `FAIL at ${r.step}`} total game time ${r.time}s  end ${JSON.stringify({ x: r.end.x, y: r.end.y, z: r.end.z, mode: r.end.mode, cp: r.end.cp, deaths: r.end.deaths })}  hash ${r.hash}${P.errors.length ? `  pageerrors ${P.errors.length}` : ''}`);
+  for (const e of r.errors.slice(0, 5)) console.log('[error]', e);
+  const pass = r.ok && !r.errors.length;
+  console.log(`${pass ? 'PASS' : `FAIL at ${r.ok ? 'page or console errors' : r.step}`} total game time ${r.time}s  end ${JSON.stringify({ x: r.end.x, y: r.end.y, z: r.end.z, mode: r.end.mode, cp: r.end.cp, deaths: r.end.deaths })}  hash ${r.hash}${r.errors.length ? `  errors ${r.errors.length}` : ''}`);
   ok = ok && pass;
   await P.close();
 }

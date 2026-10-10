@@ -1,7 +1,7 @@
 // Failure-path suites: node tools/negative.mjs [--chapter souk | --suite foundation] [--only name] [--selftest-fail] [--artifact] [--port 5173]
 // Runs tools/neg/<chapter>.mjs. Each scenario { name, cp?, query?, fresh?, run(ctx) -> result, check(result) -> true | 'why' }
 // opens a fresh page when it names a checkpoint, a query or fresh: true; otherwise it continues on the previous page.
-// Every scenario is asserted; the exit code is 1 if any fails. --selftest-fail adds a deliberately broken assertion;
+// Every scenario is asserted (page and console errors fail it too); the exit code is 1 if any fails or none runs. --selftest-fail adds a deliberately broken assertion;
 // scenarios marked optIn run only with that flag (--artifact rebuilds and boots the single-file build).
 import { parseArgs, launch, openPage, gameUrl, exists } from './lib/harness.mjs';
 
@@ -11,6 +11,7 @@ if (!exists(`tools/neg/${suite}.mjs`)) { console.log(`no negative suite for ${su
 const mod = await import(new URL(`./neg/${suite}.mjs`, import.meta.url));
 let scenarios = mod.scenarios.filter((s) => !s.optIn || o[s.optIn]);
 if (o.only) scenarios = scenarios.filter((s) => s.name.includes(o.only));
+if (!scenarios.length) { console.log(`no scenario of ${suite} matches${o.only ? ` --only ${o.only}` : ''}`); process.exit(1); }
 if (o.selftestFail) scenarios.push({ name: 'selftest: broken assertion', cp: 0, run: async ({ page }) => page.evaluate(() => __medina.state().x), check: (x) => (x === -12345 ? true : `x is ${x}, the selftest expects -12345`) });
 
 const browser = await launch();
@@ -27,11 +28,15 @@ for (const sc of scenarios) {
     res = await sc.run({ page: P.page, P, o, gameUrl, openPage, browser });
     verdict = sc.check(res);
     if (verdict === true && P.errors.length && !sc.allowErrors) verdict = `page errors: ${P.errors.slice(0, 3).join(' | ')}`;
+    // console errors fail too (three reports a shader that does not compile there); allowConsole: the ones a
+    // scenario provokes on purpose
+    const ce = P.consoleErrors.filter((t) => !sc.allowConsole?.test(t));
+    if (verdict === true && ce.length && !sc.allowErrors) verdict = `console errors: ${ce.slice(0, 3).join(' | ')}`;
   } catch (e) { verdict = `threw: ${e.message.split('\n')[0]}`; }
   const ok = verdict === true;
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${sc.name.padEnd(36)} ${JSON.stringify(res)?.slice(0, 220)}${ok ? '' : `\n      -> ${verdict}`}`);
-  if (P && P.errors.length) P.errors.length = 0;
+  if (P) { P.errors.length = 0; P.consoleErrors.length = 0; }
 }
 if (P) await P.close();
 await browser.close();

@@ -43,6 +43,7 @@ if (c2.length && Math.max(...c2) > Math.max(...rows.filter((x) => x.cycle === 1)
 const L0 = JSON.stringify(rows[0].lights);
 for (const r of rows) if (JSON.stringify(r.lights) !== L0) fails.push(`light census changed in ${r.id}: ${JSON.stringify(r.lights)}`);
 if (P.errors.length) fails.push(`page errors: ${P.errors.slice(0, 3).join(' | ')}`);
+if (P.consoleErrors.length) fails.push(`console errors: ${P.consoleErrors.slice(0, 3).join(' | ')}`);
 await P.close();
 await browser.close();
 console.log(fails.length ? `FAIL\n  ${fails.join('\n  ')}` : `PASS ${rows.length} loads: memory flat, programs stable, light census constant, no page errors`);

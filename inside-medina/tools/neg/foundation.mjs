@@ -223,7 +223,7 @@ export const scenarios = [
   {
     // overlapping loads run one at a time in call order; chapter-lived subscriptions go with the chapter;
     // a failed import uncovers the old chapter; a failed build falls back to the souk under the title
-    name: 'loader serialises and recovers', chapter: 'lab', cp: 0,
+    name: 'loader serialises and recovers', chapter: 'lab', cp: 0, allowConsole: /no such module|build failed|unknown chapter/,
     run: ({ page }) => page.evaluate(async () => {
       const M = __medina, G = M.game, Ld = G.loader;
       const CHAPTERS = M.registry;
@@ -284,7 +284,7 @@ export const scenarios = [
     // a chain whose next chapter cannot be imported (a flaky network, a redeploy) never strands the boy in the ended
     // chapter: the import is retried behind the card, then the title comes up in place over that chapter, where
     // pause, play and the finale work again; replaying the finale chains once the import succeeds
-    name: 'chain import fails: retry, then title', cp: 6,
+    name: 'chain import fails: retry, then title', cp: 6, allowConsole: /Failed to fetch dynamically imported module/,
     run: ({ page }) => page.evaluate(async () => {
       const M = __medina, G = M.game, D = G.director, P = G.world.rs.post.params;
       const CHAPTERS = M.registry;
