@@ -18,7 +18,7 @@ const t0 = Date.now();
 for (const sc of scenarios) {
   let res, verdict;
   try {
-    if (!P || sc.cp !== undefined || sc.query || sc.fresh) {
+    if (!P || sc.cp !== undefined || sc.query || sc.fresh || sc.init || sc.url === false) {
       if (P) await P.close();
       const opts = { ...o, chapter: sc.chapter ?? (o.suite ? 'souk' : o.chapter), cp: sc.cp };
       P = await openPage(browser, { url: sc.url === false ? null : gameUrl(opts, sc.query || {}), w: sc.w || o.w, h: sc.h || o.h, init: sc.init || null, quiet: true });

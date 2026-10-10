@@ -115,7 +115,8 @@
     "dir": "docs/baselines/souk/ (tour and title saved as JPEG q90; look480 as PNG)",
     "tour": "souk, terrace, courtyard, balcony, chase, alley: ?autostart=1&tex=0.5&tier=high&noauto=1 at 960x540, Math.random seeded (LCG 12345), __medina.photo(x, y, 1, 0.4) then 3 frames",
     "look480": "x 20, y 1.5 at 480x270, same query and seed (LookDirector round-trip reference)",
-    "title": "?tex=0.5&tier=high&noauto=1 at 960x540 after 30 frames (intro shot)"
+    "title": "?tex=0.5&tier=high&noauto=1 at 960x540 after 30 frames (intro shot)",
+    "look480Fixed": "docs/baselines/souk/look480-fixed.png: the same spot from the pre-foundation tree (0f7b31b) with fixed animation time, for the LookDirector round trip (tools/neg/foundation.mjs): seeded Math.random, rAF timestamps advancing exactly 1/60 s per frame once ready, game time set to 20 before __medina.photo(20, 1.5, 1, 0.4) and to 20.4 after, then 3 frames; ?autostart=1&tex=0.5&tier=high&noauto=1 at 480x270. look480.png was shot with free-running time, so wind-driven cloth differs from any later shot by about 3 % of pixels."
   },
   "negatives": {
     "spotted by lamp": {

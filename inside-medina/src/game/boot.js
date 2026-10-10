@@ -25,6 +25,8 @@ export function deviceClass() {
 // ?hold=1 only __medina.sim advances the simulation; ?nosave=1 keeps saves in memory;
 // ?tier= ?tex= ?pool= ?noauto=1 rendering overrides
 export async function boot(canvas, params) {
+  const marks = window.__boot = { start: Math.round(performance.now()) };
+  const mark = (k) => { marks[k] = Math.round(performance.now()); };
   const ui = new UI(document.getElementById('ui'));
   const P = Object.fromEntries(params.entries());
   const flag = (k) => P[k] !== undefined && P[k] !== '0' && P[k] !== 'false';
@@ -39,10 +41,12 @@ export async function boot(canvas, params) {
   await nextFrame();
   const world = createWorld(canvas, { tier, texScale: +(P.tex || dev.tex), bake: false });
   if (P.noauto || (S.quality && S.quality !== 'auto')) world.rs.autoQuality = false;
+  mark('world');
   ui.progress(0.06, 'sweeping the alleys…');
   await nextFrame();
   const nOverrides = P.procedural !== undefined ? 0 : await Overrides.load('./assets/models/', world.env, world.mats);
   if (nOverrides) ui.progress(0.07, `${nOverrides} crafted assets loaded`);
+  mark('overrides');
   const input = new Input();
   const audio = new Audio();
   await world.bake(SESSION_SURFACES);
@@ -52,6 +56,7 @@ export async function boot(canvas, params) {
   game.hooks.card = (m, o) => ui.card(m, o);
   game.hooks.credits = (lines) => ui.credits(lines);
   game.applySettings(S, { persist: false });
+  mark('init');
   // where to start
   let id = 'souk', cp = 0;
   if (flag('continue') && save.exists) { id = save.data.chapter; cp = save.data.cp; }
@@ -59,6 +64,7 @@ export async function boot(canvas, params) {
   if (P.cp !== undefined) cp = +P.cp || 0;
   if (!meta(id)) { id = 'souk'; cp = 0; }
   await game.loadChapter(id, cp, { reason: 'boot', onProgress: (p, msg) => ui.progress(0.08 + p * 0.9, msg) });
+  mark('chapter');
   ui.progress(1, 'lighting the lanterns…');
   await nextFrame();
   ui.hideLoading();

@@ -77,6 +77,8 @@ export class ChapterLoader {
     const m = meta(id);
     if (!m) throw new Error(`unknown chapter ${id}`);
     const prog = (p, msg) => { try { onProgress?.(p, msg); } catch { /* ui gone */ } };
+    const phases = {}; let tp = t0;
+    const mark = (k) => { const t = performance.now(); phases[k] = Math.round(t - tp); tp = t; };
     // 1. cover the screen: the card (U's or the stub) on top of a canvas fade to the exit colour
     let card = null;
     if (reason !== 'boot') {
@@ -92,8 +94,10 @@ export class ChapterLoader {
     this.unload();
     // 5. per-chapter game fields
     g.resetChapterState();
+    mark('cover');
     prog(0.02, 'opening the gate…');
     const def = await getChapter(id);
+    mark('import');
     g.def = def; g.chapterId = id;
     // 6. time of day (re-bakes the env map when the sky changes)
     if (Array.isArray(def.look)) g.director.apply(def.look[0].preset).keys(def.look);
@@ -102,6 +106,7 @@ export class ChapterLoader {
     if (def.surfaces) registerSurfaces(def.surfaces);
     if (def.materials) g.mats.register(def.materials);
     if (def.needs?.length && g.world.bake) await g.world.bake(def.needs, (p, n) => prog(0.05 + p * 0.4, n));
+    mark('bake');
     // 8. build
     const root = new THREE.Group(); root.name = `chapter:${id}`;
     g.scene.add(root); g.root = root;
@@ -124,33 +129,39 @@ export class ChapterLoader {
       out = s.value;
     } else if (out && typeof out.then === 'function') out = await out;
     if (out && out !== L) Object.assign(L, out);
+    mark('build');
     batch.build(root);
+    mark('merge');
     prog(0.84, 'hanging the lanterns…');
     await yieldFrame();
     // 9. FX on the chapter root, glow sprites and pool sources
     g.wireChapter(L);
+    mark('fx');
     // 10-11. camera, checkpoints, snapshot, prepare, spawn
     const startCp = Math.max(0, Math.min(cp | 0, g.checkpoints.length - 1));
     g.placeAt(startCp);
     prog(0.88, 'lighting the lanterns…');
     // 12. compile every material (hidden ones too) before the first frame, then one warm-up render
-    await this.warm();
+    await this.warm(phases);
     prog(1, 'ready');
-    this.stats = { id, ms: Math.round(performance.now() - t0), reason };
+    this.stats = { id, ms: Math.round(performance.now() - t0), reason, phases };
     // 13. reveal
     g.enterChapter({ reason, card });
     return L;
   }
 
-  async warm() {
+  async warm(phases = {}) {
     const g = this.game, rs = g.world.rs;
+    let t = performance.now();
     const hidden = [];
     g.scene.traverse((o) => { if (!o.visible) { hidden.push(o); o.visible = true; } });
     try {
       if (rs.renderer.compileAsync) await rs.renderer.compileAsync(g.scene, g.camera);
       else rs.renderer.compile(g.scene, g.camera);
     } catch (e) { console.warn('compile', e); }
+    phases.compile = Math.round(performance.now() - t); t = performance.now();
     g.render(0.016, 0);
+    phases.render = Math.round(performance.now() - t);
     for (const o of hidden) o.visible = false;
     await yieldFrame();
   }

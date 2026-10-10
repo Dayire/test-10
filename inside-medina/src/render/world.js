@@ -39,8 +39,9 @@ export function createWorld(canvas, { tier = 'high', texScale = 1, onProgress, b
   rs.onTierChange = (t, q) => light.setShadowSize(q.shadow);
   const world = { rs, scene, sky, env, tex, mats, light, baker, sunDir };
   world.rebuildEnvironment = () => rebuildEnvironment(world);
-  // progressive bake of the surfaces a chapter needs (one slice per frame)
-  world.bake = (names, onProgress) => bakeAsync(baker, names.filter((n) => !tex[n]), onProgress, tex);
+  // progressive bake of the surfaces a chapter needs: 200 ms slices, each followed by a painted frame
+  // (a yield costs a present, so finer slices only slow the bake down)
+  world.bake = (names, onProgress, slice = 200) => bakeAsync(baker, names.filter((n) => !tex[n]), onProgress, tex, slice);
   return world;
 }
 
