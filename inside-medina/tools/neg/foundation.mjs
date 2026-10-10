@@ -89,22 +89,42 @@ async function startBaseServer() {
 const frames = (page, n = 3) => page.evaluate((n) => new Promise((r) => { const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
 
 // Linux CPU accounting for the boot budget: the machine's busy jiffies (/proc/stat) and those of this process's
-// descendants (the browser, the base tree's server), so a boot can be told apart from the load other work put on the
-// machine while it ran. Without /proc both read null and every pair counts.
+// descendants (the browser, the base tree's server) and of the current tree's dev server (started outside this
+// test: found by the port it listens on), so a boot can be told apart from the load other work put on the machine
+// while it ran, alike for both trees. Without /proc both read null and every pair counts.
 function machineCpu() {
   try { const v = fs.readFileSync('/proc/stat', 'utf8').split('\n')[0].trim().split(/\s+/).slice(1).map(Number); const total = v.reduce((a, b) => a + b, 0); return { busy: total - v[3] - (v[4] || 0), total }; } catch { return null; }
 }
-function ownCpu() {
+function ownCpu(servers = []) {
   try {
-    const kids = new Map();
+    const kids = new Map(), self = new Map();
     for (const d of fs.readdirSync('/proc')) {
       if (!/^\d+$/.test(d)) continue;
-      try { const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8'), f = st.slice(st.lastIndexOf(')') + 2).split(' '); const pp = +f[1]; if (!kids.has(pp)) kids.set(pp, []); kids.get(pp).push([+d, +f[11] + +f[12]]); } catch { /* gone */ }
+      try { const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8'), f = st.slice(st.lastIndexOf(')') + 2).split(' '); const pp = +f[1], t = +f[11] + +f[12]; if (!kids.has(pp)) kids.set(pp, []); kids.get(pp).push([+d, t]); self.set(+d, t); } catch { /* gone */ }
     }
-    let sum = 0; const walk = (p) => { for (const [c, t] of kids.get(p) || []) { sum += t; walk(c); } };
+    let sum = 0; const seen = new Set();
+    const walk = (p) => { for (const [c, t] of kids.get(p) || []) { if (seen.has(c)) continue; seen.add(c); sum += t; walk(c); } };
     walk(process.pid);
+    for (const p of servers) if (p && !seen.has(p) && self.has(p)) { seen.add(p); sum += self.get(p); walk(p); }
     return sum;
   } catch { return null; }
+}
+// the process listening on a local TCP port (/proc/net/tcp and tcp6, then the socket among the processes' fds)
+function servingPid(port) {
+  try {
+    const hex = `:${Number(port).toString(16).toUpperCase().padStart(4, '0')}`, inodes = new Set();
+    for (const f of ['/proc/net/tcp', '/proc/net/tcp6']) {
+      let t = ''; try { t = fs.readFileSync(f, 'utf8'); } catch { continue; }
+      for (const l of t.split('\n').slice(1)) { const c = l.trim().split(/\s+/); if (c.length > 9 && c[1].endsWith(hex) && c[3] === '0A') inodes.add(c[9]); }
+    }
+    if (!inodes.size) return null;
+    for (const d of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(d)) continue;
+      let fds = []; try { fds = fs.readdirSync(`/proc/${d}/fd`); } catch { continue; }
+      for (const fd of fds) { try { const m = /^socket:\[(\d+)\]$/.exec(fs.readlinkSync(`/proc/${d}/fd/${fd}`)); if (m && inodes.has(m[1])) return +d; } catch { /* gone */ } }
+    }
+  } catch { /* no /proc */ }
+  return null;
 }
 
 export const scenarios = [
@@ -750,13 +770,13 @@ export const scenarios = [
       // each boot starts from a blank page (tearing down the previous game's GL context on SwiftShader takes 4-7 s
       // and would otherwise be charged to whichever tree boots next) and records how many CPUs other work kept busy
       // meanwhile (`ext`)
-      const ncpu = os.cpus().length;
+      const ncpu = os.cpus().length, server = servingPid(o.port);
       const boot = async (port) => {
         await page.goto('about:blank');
-        const m0 = machineCpu(), o0 = ownCpu();
+        const m0 = machineCpu(), o0 = ownCpu([server]);
         await page.goto(port ? `http://127.0.0.1:${port}/?autostart=1&tex=0.1&tier=low&noauto=1` : gameUrl({ ...o, chapter: null, cp: undefined }, { hold: null }));
         await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000, polling: 100 });
-        const m1 = machineCpu(), o1 = ownCpu();
+        const m1 = machineCpu(), o1 = ownCpu([server]);
         const ext = m0 && m1 && o0 !== null && o1 !== null && m1.total > m0.total ? Math.max(0, (m1.busy - m0.busy - (o1 - o0)) / (m1.total - m0.total) * ncpu) : null;
         return page.evaluate((ext) => ({ ms: Math.round(window.__readyAt), painted: [...window.__painted], ext }), ext);
       };
@@ -791,7 +811,7 @@ export const scenarios = [
           ratio, ok: ratio <= 1.1, extended, pairs: ratios.map((r) => +r.toFixed(2)), matched: matched.map((r) => +r.toFixed(2)),
           ext: ext.map(([b, c]) => [b, c].map((v) => (v === null ? null : +v.toFixed(2)))),
           readyMs: cur.map((x) => x.ms), median: median(cur.map((x) => x.ms)), baseMedian: median(base.map((x) => x.ms)),
-          against: `base tree${srv ? ' ' + srv.ref : ''} on ${ab}: ${base.map((x) => x.ms).join(' ')}`, painted: cur[1].painted.length, values: cur[1].painted.join(' '),
+          against: `base tree${srv ? ' ' + srv.ref : ''} on ${ab}: ${base.map((x) => x.ms).join(' ')}`, server, painted: cur[1].painted.length, values: cur[1].painted.join(' '),
         };
       } finally { srv?.stop(); await page.unroute(fonts).catch(() => {}); }
     },
