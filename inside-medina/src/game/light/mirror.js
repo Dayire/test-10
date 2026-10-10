@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Body } from '../physics.js';
 import { DEG, NOTCH, angleOf, alphaFor, notchOf } from './trace.js';
 import { magnet } from './logic.js';
-import { trayMesh, mirrorStand, axleMesh, crankBracket, crankHandle } from '../../assets/lightprops.js';
+import { trayMesh, mirrorStand, axleMesh, crankBracket, crankHandle, capstanMesh } from '../../assets/lightprops.js';
 
 const TILT = 25 * DEG; // trays lean toward the camera so their polished face shows (visual only, §6.1)
 const RATE = 100;      // degrees per second: one 15° notch in 0.15 s
@@ -219,13 +219,13 @@ export class Crank {
 // pointer sets the angle directly. Within ±window of the solution, with the input released, the magnet eases the
 // mirror onto it in 0.4 s (every device gets it: it is not an assist).
 export class Capstan {
-  constructor(game, { id, x, y = 0, mirror, dir = -1, rate = 6, magnet: mg = null, range = [-20, 60], z = -0.2, mesh = true } = {}) {
+  constructor(game, { id, x, y = 0, mirror, dir = -1, rate = 6, magnet: mg = null, range = [-20, 60], z = -0.45, mesh = true } = {}) {
     this.game = game; if (id !== undefined) this.id = id;
     this.x = x; this.y = y; this.mirror = mirror; this.dir = dir; this.rate = rate; this.mag = mg; this.range = range; this.z = z;
     this.isInteractable = true; this.sunwork = true; this.playerState = 'capstan';
     this.faceDir = -dir; this.held = false; this.speed = 0; this.input = false; this.loopT = 0;
     if (mesh) {
-      const g = this.mesh = crankHandle(game.mats, { h: 1.0, wr: 0.34 });
+      const g = this.mesh = capstanMesh(game.mats);
       g.position.set(x, y, z);
       game.add(g);
     }
@@ -258,7 +258,7 @@ export class Capstan {
     if (this.mag && !(this.held && this.input)) { const a = magnet(m.alpha, this.mag.alpha, this.mag.window ?? 2, true, dt); m.alpha = m.target = a; }
     if (this.held && this.input) { this.loopT -= dt; if (this.loopT <= 0) { this.loopT = 0.12; this.game.sfx('capstan', this.x, { speed: Math.abs(this.speed) }); } }
   }
-  render() { if (this.mesh) this.mesh.userData.wheel.rotation.z = -this.mirror.alpha * DEG * 6; }
+  render() { if (this.mesh) this.mesh.userData.wheel.rotation.y = this.mirror.alpha * DEG * 6; }
   getState() { return {}; }
   setState() { this.held = false; this.input = false; this.speed = 0; }
 }

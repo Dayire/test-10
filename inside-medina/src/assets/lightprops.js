@@ -147,6 +147,30 @@ export function crankHandle(mats, { h = 0.92, wr = 0.24 } = {}) {
   return grp;
 }
 
+// the heliostat's capstan: a banded wooden drum on an iron foot, four bars at hand height (userData.wheel turns
+// about y). The boy leans into the bar that crosses in front of him.
+export function capstanMesh(mats, { h = 0.8, bar = 0.62 } = {}) {
+  lightMaterials(mats);
+  const grp = new THREE.Group();
+  const iron = [], wood = [], brass = [];
+  iron.push(lathe(smoothProfile([[0.001, 0], [0.3, 0], [0.3, 0.04], [0.22, 0.07], [0.001, 0.07]], 2), 16));
+  wood.push(lathe(smoothProfile([[0.001, 0.07], [0.17, 0.07], [0.15, 0.3], [0.13, 0.55], [0.15, h - 0.12], [0.18, h - 0.06], [0.18, h], [0.001, h]], 2), 16));
+  for (const y of [0.12, h - 0.1]) { const b = new THREE.TorusGeometry(0.165, 0.014, 6, 24); b.rotateX(Math.PI / 2); b.translate(0, y, 0); brass.push(b); }
+  const cap = new THREE.CylinderGeometry(0.09, 0.19, 0.08, 16); cap.translate(0, h + 0.04, 0); brass.push(cap);
+  grp.add(mesh(iron, mats.get('iron')), mesh(brass, mats.get('brassAged')));
+  const wheel = new THREE.Group();
+  const bars = [wood[0]];
+  const bw = [];
+  for (let i = 0; i < 4; i++) {
+    const b = new THREE.CylinderGeometry(0.026, 0.032, bar, 6); b.rotateZ(Math.PI / 2); b.translate(0.17 + bar / 2, h - 0.08, 0); b.rotateY((i / 4) * Math.PI * 2); bw.push(b);
+    const k = new THREE.SphereGeometry(0.04, 8, 6); k.translate(0.17 + bar, h - 0.08, 0); k.rotateY((i / 4) * Math.PI * 2); bw.push(k);
+  }
+  wheel.add(mesh(bars, mats.get('wood')), mesh(bw, mats.get('woodDark')));
+  grp.add(wheel);
+  grp.userData.wheel = wheel; grp.userData.axis = 'y';
+  return grp;
+}
+
 // ---------------------------------------------------------------- the rosette lock
 // Twelve brass petals hinged at the rim close over a glass lens; light opens them (level 0..1). Gold locks
 // glow amber, silver moon-locks pale blue, the iron sun-bolt red-orange and its petals close while lit.
