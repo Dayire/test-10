@@ -223,7 +223,7 @@ export class UI {
         const anyNav = n.up || n.down || n.left || n.right || n.confirm || n.back || n.prev || n.next;
         // any key wakes the resting title (the scene paused under the menu); Esc only wakes it
         if (anyNav && this.game?.paused && this.game.held) { this.game.setPaused(false); if (n.back) return this.afterUpdate(dt); }
-        if (this.focus.top === this.pause && this.input.pausePressed && !n.back) this.resume();
+        if (this.focus.top === this.pause && n.pause && !n.back) this.resume();
         else this.focus.update(n);
       }
     }
@@ -316,6 +316,7 @@ export class UI {
     this.main = new Screen(this, {
       el,
       items: () => [...nav.querySelectorAll('.entry')].filter((b) => !b.hidden),
+      initial: () => [...nav.querySelectorAll('.entry')].find((b) => !b.hidden),
       back: () => { if (this.game && this.ready) { this.sound('back'); this.game.setPaused(!this.game.paused); } },
       onOpen: () => { if (this.game?.held && this.audio && !this.menuTheme) { this.menuTheme = true; this.audio.setChapter?.({ theme: 'menu', verb: 'menu' }); } },
     });

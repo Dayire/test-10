@@ -106,6 +106,14 @@ export class SettingsScreen {
       back: () => { if (!el.querySelector('.code').classList.contains('hidden')) { this.closeCode(); return; } ui.focus.close(this.screen); },
       onOpen: () => this.render(),
       onClose: () => this.closeCode(true),
+      // the tabs are one row: down leaves it for the first option, up from the first option returns to the active tab
+      onNav: (dir, cur) => {
+        const isTab = cur?.classList.contains('tab');
+        if (isTab && dir === 'down') { const r = el.querySelector('.rows .item'); if (r) { this.ui.focus.set(r, { sound: true }); } return true; }
+        if (isTab && dir === 'up') return true;
+        if (!isTab && dir === 'up' && cur === el.querySelector('.rows .item')) { this.ui.focus.set(el.querySelector('.tab.active'), { sound: true }); return true; }
+        return false;
+      },
     });
     el.addEventListener('focusin', () => this.syncCalib());
     el.addEventListener('pointerover', () => queueMicrotask(() => this.syncCalib()));

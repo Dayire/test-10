@@ -4,15 +4,17 @@
 // reports the scene pointer (left mouse or a touch on the canvas, in NDC),
 // menu navigation edges with repeat (400 ms, then every 120 ms) and the
 // device in use, so glyphs and the touch layer follow the player's hands.
-const NAV = ['up', 'down', 'left', 'right', 'confirm', 'back', 'prev', 'next'];
+const NAV = ['up', 'down', 'left', 'right', 'confirm', 'back', 'prev', 'next', 'pause'];
 const GAME_KEYS = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 const editable = (t) => !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ''));
 
 // pad family from its id (vendor ids: 054c Sony, 045e Microsoft, 057e Nintendo), for button glyphs
+// ("Wireless Controller" alone is Sony's name, but Xbox pads carry it too: vendors first)
 export function padKind(id = '') {
-  if (/054c|playstation|dualshock|dualsense|wireless controller/i.test(id)) return 'ps';
-  if (/057e|nintendo|switch|joy-con|pro controller/i.test(id)) return 'nintendo';
   if (/045e|xbox|xinput|x-box/i.test(id)) return 'xbox';
+  if (/054c|playstation|dualshock|dualsense/i.test(id)) return 'ps';
+  if (/057e|nintendo|switch|joy-con|pro controller/i.test(id)) return 'nintendo';
+  if (/^wireless controller/i.test(id)) return 'ps';
   return 'generic';
 }
 
@@ -43,6 +45,7 @@ export class Input {
     this.state = { x: 0, y: 0, jump: false, grab: false, pause: false, any: false, pointer: null };
     this.prev = { ...this.state };
     this.jumpPressed = false; this.grabPressed = false; this.pausePressed = false; this.anyPressed = false;
+    this._raw = { jump: false, grab: false, pause: false, any: false };
     this.override = null; // scripted input for tests / cutscenes
     this.touch = { x: 0, y: 0, jump: false, grab: false };
     this.lastDevice = 'keyboard';
@@ -130,7 +133,7 @@ export class Input {
     if (this.k('Escape', 'KeyP')) pause = true;
     const nav = {
       up: this.k('ArrowUp', 'KeyW'), down: this.k('ArrowDown', 'KeyS'), left: this.k('ArrowLeft', 'KeyA'), right: this.k('ArrowRight', 'KeyD'),
-      confirm: this.k('Enter', 'NumpadEnter', 'Space'), back: this.k('Escape', 'Backspace'), prev: this.k('KeyQ', 'BracketLeft', 'PageUp'), next: this.k('KeyE', 'BracketRight', 'PageDown'),
+      confirm: this.k('Enter', 'NumpadEnter', 'Space'), back: this.k('Escape', 'Backspace'), prev: this.k('KeyQ', 'BracketLeft', 'PageUp'), next: this.k('KeyE', 'BracketRight', 'PageDown'), pause,
     };
     let pads = [];
     try { pads = (navigator.getGamepads && navigator.getGamepads()) || []; } catch { pads = []; } // blocked by permissions policy in some frames
@@ -151,7 +154,7 @@ export class Input {
       grab = grab || B[2] || B[1] || B[7] || B[6] || B[5];
       pause = pause || B[9];
       nav.up ||= gy > 0.5; nav.down ||= gy < -0.5; nav.left ||= gx < -0.5; nav.right ||= gx > 0.5;
-      nav.confirm ||= B[0]; nav.back ||= B[1]; nav.prev ||= B[4]; nav.next ||= B[5];
+      nav.confirm ||= B[0]; nav.back ||= B[1]; nav.prev ||= B[4]; nav.next ||= B[5]; nav.pause ||= B[9];
     }
     const t = this.touch;
     if (t.x) x = t.x; if (t.y) y = t.y; jump = jump || t.jump; grab = grab || t.grab;
@@ -173,14 +176,19 @@ export class Input {
     ptr.active = P.down; ptr.pressed = P.pressed; ptr.released = P.released; P.pressed = false; P.released = false;
     this.navEdges(nav);
     this.state = { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)), jump, grab, pause, any, pointer: ptr };
-    this.jumpPressed = jump && !this.prev.jump;
-    this.grabPressed = grab && !this.prev.grab;
-    this.pausePressed = pause && !this.prev.pause;
-    this.anyPressed = any && !this.prev.any;
+    // edges against the raw previous poll: the game zeroes state/prev while a menu is open, which must not turn a
+    // held key (Start that resumed, jump that confirmed) into a new press
+    const R = this._raw;
+    this.jumpPressed = jump && !R.jump;
+    this.grabPressed = grab && !R.grab;
+    this.pausePressed = pause && !R.pause;
+    this.anyPressed = any && !R.any;
+    this._raw = { jump, grab, pause, any };
     return this.state;
   }
 
-  // nav edges with repeat: true on the press, then after 400 ms every 120 ms (confirm, back and tabs never repeat)
+  // nav edges with repeat: true on the press, then after 400 ms every 120 ms (confirm, back, tabs and pause never
+  // repeat). They are kept apart from state/prev, which the game zeroes while a menu is open.
   navEdges(raw) {
     const now = performance.now();
     for (const k of NAV) {
