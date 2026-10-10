@@ -126,22 +126,13 @@ export function createLevelKit(game, { K, root, L, r = rng(42) }) {
     for (let i = 0; i < trees; i++) { const x = x0 + 10 + i * 10 + r() * 6; if (excludeTrees.some(([e0, e1]) => x > e0 && x < e1)) continue; cypress(x, -20 - r() * 14, 7 + r() * 6); }
     for (const [dx, dz, dr] of domes) dome(K, { x: dx, y: 9, z: dz, r: dr, drumH: 2.5 });
   };
-  // big stones and broken beams stacked over a low tunnel
+  // a low tunnel: a lintel before a back wall. The 26 big stones and 5 broken beams it once stacked never showed:
+  // they turned about the world origin, up to 50 m off screen (inflating the shadow tiles). Placed where they were
+  // meant to go they read as huge floating blocks, so they stay out; the stones' draws from the random stream are
+  // kept so everything built after the pile stays where it was
   const rubblePile = (x0, x1, gapY) => {
-    for (let i = 0; i < 26; i++) {
-      const cx = x0 + r() * (x1 - x0), cy = gapY + 0.2 + Math.pow(r(), 1.5) * 3.2, cz = -1.2 + r() * 2.4;
-      const s = 0.35 + r() * 0.5;
-      // each stone tilts about its own centre (it used to turn about the origin, which flung the pile up to 50 m
-      // into the sky and below the street)
-      const g = boxMM(-s, -s * 0.6, -s, s, s * 0.6, s, { round: 0.06 });
-      g.applyMatrix4(new THREE.Matrix4().makeRotationZ((r() - 0.5) * 0.5)); g.translate(cx, cy, cz);
-      K.add(g, r() < 0.5 ? 'sandstone' : 'limestone');
-    }
+    for (let i = 0; i < 26 * 6; i++) r();
     const lintel = boxMM(x0 - 0.1, gapY, -1.3, x1 + 0.2, gapY + 0.3, 1.3); K.add(lintel, 'woodDark');
-    for (let i = 0; i < 5; i++) {
-      const bx = x0 - 0.1 + i * 0.7, by = gapY + 1.4, g = boxMM(-0.2, -1.2, -1.4, 0.2, 1.2, -1.25);
-      g.applyMatrix4(new THREE.Matrix4().makeRotationZ(0.3 - i * 0.12)); g.translate(bx, by, 0); K.add(g, 'woodDark');
-    }
     const back = boxMM(x0, 0, -1.8, x1, gapY + 3.5, -1.5); K.add(back, 'sandstone');
     const dark = boxMM(x0 + 0.1, 0, -1.4, x1 - 0.1, gapY, -1.3); setColor(dark, 0xffffff); K.add(dark, 'darkInterior', null, { cast: false });
   };
