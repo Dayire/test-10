@@ -48,6 +48,8 @@ void main(){
   float ends = smoothstep(0., max(vP.x, 1e-3), t);
   if (vP.y > 0.) ends *= 1. - smoothstep(vLen - vP.y, vLen, t);
   float a = (core * (.85 + .3 * dust) + halo * (dust + motes)) * ends * vCol.a;
+  // high contrast: a crisp outline along both edges of the ribbon
+  a += uHC * smoothstep(.6, .76, x) * (1. - smoothstep(.86, .98, x)) * ends * min(vCol.a, 1.4) * .8;
   a *= softFade(.16) * softNear(1.2);
   gl_FragColor = vec4(vCol.rgb * a, 1.);
   #include <fog_fragment>
@@ -72,6 +74,7 @@ void main(){
   vec2 q = vUv * 2. - 1.; float r2 = dot(q, q);
   float a;
   if (vKind < .5) a = exp(-r2 * 6.) * .75 + exp(-r2 * 40.) * .9;
+  else if (vKind > 1.5) { float d = sqrt(r2) - .6; a = exp(-d * d * 90.) * .85 + exp(-r2 * 2.2) * .16; } // a lock's halo: a ring just outside the rim
   else a = pow(texture2D(uGlint, vUv).a, 1.4) * 1.8; // the canvas keeps its strength in alpha (r is 1 wherever a > 0)
   a *= softFade(.1);
   gl_FragColor = vec4(vCol.rgb * a * vCol.a, 1.);
@@ -141,7 +144,9 @@ export class BeamRenderer {
     const g = this.game, sys = this.sys;
     const rs = g.world.rs;
     this.mat.uniforms.uViewH.value = Math.max(1, rs?.h || rs?.renderer?.domElement?.height || 720);
-    this.mat.uniforms.uHC.value = g.settings?.highContrast ? 1 : 0;
+    const hc = g.settings?.highContrast ? 1 : 0;
+    this.mat.uniforms.uHC.value = hc;
+    this.mat.uniforms.uMinPx.value = hc ? 3.4 : 2.2; // room for the outline on thin beams
     const reduce = g.settings?.reduceFlashing ? 0.55 : 1;
     let nq = 0, ng = 0, best = null, bestI = 0, bestCol = null;
     const t = g.time;
@@ -167,11 +172,17 @@ export class BeamRenderer {
           // a star glint on the tray, above the bloom threshold
           this.glow(ng++, h.x, h.y, 0, col, 1.7 * Math.min(1.5, h.I) * flick * reduce, (0.7 + 0.3 * h.I) * (lamp ? 0.6 : 1), 1, 0.3, t * 0.15 + i);
         } else {
-          const lock = h.kind === TARGET && h.obj.shape === 'circle';
-          const px = lock ? h.obj.x : h.x + h.nx * 0.03, py = lock ? h.obj.y : h.y + h.ny * 0.03;
-          const pz = lock && h.obj.z !== undefined ? h.obj.z : 0;
-          const sz = lock ? (h.obj.r || 0.35) * 3.4 : (lamp ? 0.22 : 0.85 + 0.45 * h.I);
-          this.glow(ng++, px, py, pz, col, (lamp ? 0.9 : 1.5) * Math.min(1.6, h.I) * flick * reduce, sz, 0, lock ? 0.12 : 0.06);
+          const lock = h.kind === TARGET && h.obj.shape === 'circle' && h.obj.kind !== 'eye' && h.obj.kind !== 'sensor';
+          if (lock) {
+            // light on a lock is a halo around its rim, behind the petals (they stay silhouetted against it)
+            const o = h.obj, k = Math.min(1.2, h.I / (o.need || 1));
+            this.glow(ng++, o.x, o.y, o.z ?? 0, col, 1.1 * k * flick * reduce, (o.r || 0.35) * 4.2, 2, -0.04);
+          } else {
+            const px = h.x + h.nx * 0.03, py = h.y + h.ny * 0.03;
+            const pz = h.kind === TARGET && h.obj.z !== undefined ? h.obj.z : 0;
+            const sz = lamp ? 0.22 : 0.85 + 0.45 * h.I;
+            this.glow(ng++, px, py, pz, col, (lamp ? 0.9 : 1.5) * Math.min(1.6, h.I) * flick * reduce, sz, 0, 0.06);
+          }
           if (!lamp && h.I > bestI) { bestI = h.I; best = h; bestCol = col; }
         }
       }

@@ -84,18 +84,22 @@ export class SunLock {
     const U = this.mesh.userData;
     const want = this.mode === 'bolt' ? 1 - this.level : this.level;
     this.shown += (want - this.shown) * (1 - Math.exp(-10 * dt));
-    U.setOpen(smooth(this.shown));
-    // the lens: a warm ember while charging, blazing when open; a lit bolt glows hot iron
-    const flick = this.lit ? 0.85 + 0.15 * Math.sin(this.game.time * 23 + this.px) : 1;
-    const g = (this.mode === 'bolt' ? this.level * 3.5 : this.level * 4 + (this.done ? 3 : 0)) * flick + (this.I > 0 ? 0.6 : 0);
+    U.setOpen(smooth(this.shown)); // re-composes the petals only when they move
+    // the lens: an ember while charging, a steady warm glow when open, hot iron on a lit bolt; it stays under the
+    // bloom threshold so the petals keep their silhouette against it (the light touching the lock is the halo
+    // the beam renderer draws around the rim)
+    const flick = this.lit ? 0.9 + 0.1 * Math.sin(this.game.time * 23 + this.px) : 1;
+    const g = (this.mode === 'bolt' ? this.level * 1.3 : this.level * 0.9 + (this.done ? 0.35 : 0)) * flick + (this.I > 0 ? 0.15 : 0);
     this.glow += (g - this.glow) * (1 - Math.exp(-8 * dt));
     U.lensMat.emissiveIntensity = 0.05 + this.glow;
+    const hc = !!this.game.settings?.highContrast;
+    if (U.rim && U.rim.visible !== hc) U.rim.visible = hc;
     if (this.rodGlint) {
       if (this.rodT >= 0) {
         this.rodT += dt;
         const k = Math.min(1, this.rodT / 1.3);
         this.rodGlint.position.copy(this.rodCurve.getPointAt(smooth(k)));
-        this.rodGlint.material.opacity = k < 1 ? 1 : Math.max(0, 1 - (this.rodT - 1.3) / 0.8);
+        this.rodGlint.material.opacity = (k < 1 ? 1 : Math.max(0, 1 - (this.rodT - 1.3) / 0.8)) * (this.game.settings?.reduceFlashing ? 0.55 : 1);
         this.rodGlint.scale.setScalar(k < 1 ? 0.9 : 0.9 + (this.rodT - 1.3) * 2);
         if (this.rodT > 2.2) this.rodT = -1;
       } else this.rodGlint.material.opacity = 0;

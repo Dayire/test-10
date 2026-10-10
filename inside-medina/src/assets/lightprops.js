@@ -11,7 +11,8 @@ import { patchMaterial } from '../render/atmosphere.js';
 // mirror and lock materials (registered once on the session's material library)
 export const LIGHT_MATERIALS = {
   mirrorBrass: { surf: 'brass', tile: 0.35, metal: 1, rough: 0.22, color: 0xfff1cf, envInt: 2.6 },
-  brassAged: { surf: 'brass', tile: 0.45, metal: 1, rough: 1, color: 0xc29a62, envInt: 1.1 },
+  // aged brass: a patina albedo that keeps a warm value under dusk and night presets (part diffuse, satin)
+  brassAged: { surf: 'brass', tile: 0.45, metal: 0.6, rough: 0.55, color: 0xd2a868, envInt: 1.7 },
   silverPlate: { surf: null, color: 0xdde3ec, metal: 1, rough: 0.3, envInt: 2.2 },
   ironDark: { surf: 'iron', tile: 0.5, metal: 1, rough: 1, color: 0x8a8580 },
   hemp: { surf: 'burlap', tile: 0.25, color: 0xc9b083, translucency: 0.15 },
@@ -172,13 +173,17 @@ export function capstanMesh(mats, { h = 0.8, bar = 0.62 } = {}) {
 }
 
 // ---------------------------------------------------------------- the rosette lock
-// Twelve brass petals hinged at the rim close over a glass lens; light opens them (level 0..1). Gold locks
+// Twelve brass petals hinged at the rim close over a glass lens as a domed bud; light opens them (level 0..1):
+// they swing out past the rim into a twelve-ray sunburst, so the state reads by shape alone (closed: a disc of
+// radius r; half: a crown standing toward the camera; open: rays out to ~1.9 r around the lens). Gold locks
 // glow amber, silver moon-locks pale blue, the iron sun-bolt red-orange and its petals close while lit.
 const PETAL = (() => {
+  // hinge at y 0 (base 0.56 wide, so twelve of them close the rim), tip at y 1
   const s = new THREE.Shape();
-  s.moveTo(0, 0); s.quadraticCurveTo(0.2, 0.32, 0, 1); s.quadraticCurveTo(-0.2, 0.32, 0, 0);
+  s.moveTo(-0.28, 0); s.bezierCurveTo(-0.34, 0.32, -0.16, 0.72, 0, 1); s.bezierCurveTo(0.16, 0.72, 0.34, 0.32, 0.28, 0); s.lineTo(-0.28, 0);
   return s;
 })();
+const PETAL_SHUT = 0.2, PETAL_OPEN = 2.62; // rad about the hinge: a shallow dome, and open (30° proud of the wall)
 export const LOCK_TONES = {
   gold: { plate: 'brassAged', petal: 'mirrorBrass', glass: 0xffd9a0, glow: 0xffa040 },
   silver: { plate: 'silverPlate', petal: 'silverPlate', glass: 0xe6eeff, glow: 0x9cc2ff },
@@ -194,26 +199,35 @@ export function rosetteLock(mats, { r = 0.35, metal = 'gold', mount = 1.6 } = {}
   for (let i = 0; i < 12; i++) { const k = new THREE.SphereGeometry(0.03 * r, 6, 4); const a = (i / 12) * Math.PI * 2 + Math.PI / 12; k.translate(Math.cos(a) * 1.06 * r, Math.sin(a) * 1.06 * r, 0.02 * r); plate.push(k); }
   if (mount > 0.05) { const st = new THREE.CylinderGeometry(0.06, 0.08, mount, 8); st.rotateX(Math.PI / 2); st.translate(0, 0, -mount / 2 - 0.04 * r); plate.push(st); const fl = new THREE.CylinderGeometry(0.16, 0.16, 0.03, 12); fl.rotateX(Math.PI / 2); fl.translate(0, 0, -mount); plate.push(fl); }
   grp.add(mesh(plate, mats.get(T.plate)));
-  // petals: one instanced draw, hinged on the rim, pointing at the centre
-  const pg = extrude(PETAL, 0.05, { curveSeg: 8 });
-  pg.translate(0, 0, -0.025); pg.scale(0.62 * r, 0.9 * r, 0.24 * r);
-  const petals = new THREE.InstancedMesh(prep(pg), mats.get(T.petal), 12);
+  // petals: one instanced draw, hinged on the rim, pointing at the centre; a raised midrib catches the light
+  const pg = extrude(PETAL, 0.03, { curveSeg: 6, bevel: 0.012, bevelSeg: 1 });
+  pg.translate(0, 0, -0.015); pg.scale(r, 0.97 * r, r);
+  const rib = new THREE.CylinderGeometry(0.018, 0.03, 0.8, 4); rib.translate(0, 0.42, 0.022); rib.scale(r, 0.97 * r, r);
+  const petals = new THREE.InstancedMesh(merged([pg, rib]), mats.get(T.petal), 12);
   petals.castShadow = true; petals.receiveShadow = true;
   grp.add(petals);
-  // the lens: its own material so its glow follows the level
+  // the lens: a low glass dome under the bud, its own material so its glow follows the level (kept under the
+  // bloom threshold: the petals read as dark rays against it, not lost in a flare)
   const lensMat = patchMaterial(new THREE.MeshStandardMaterial({ color: T.glass, emissive: T.glow, emissiveIntensity: 0.05, roughness: 0.15, metalness: 0, envMap: mats.envMap, envMapIntensity: 1.4 }));
-  const lens = new THREE.Mesh(new THREE.SphereGeometry(0.34 * r, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), lensMat);
-  lens.rotation.x = Math.PI / 2; lens.position.z = -0.01 * r;
+  const lens = new THREE.Mesh(new THREE.SphereGeometry(0.42 * r, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2), lensMat);
+  lens.rotation.x = Math.PI / 2; lens.scale.set(1, 0.32, 1); lens.position.z = -0.005 * r;
   grp.add(lens);
+  // the high-contrast outline of the rim (settings.highContrast): a thin unlit ring, hidden otherwise
+  const rimMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.5, 1.3), toneMapped: false });
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.2 * r, 0.035 * r + 0.006, 4, 40), rimMat);
+  rim.position.z = 0.03 * r; rim.visible = false; rim.castShadow = false;
+  grp.add(rim);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s1 = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-  // open 0..1: petals fold back from the centre about their rim hinge
+  // open 0..1: each petal swings about its rim hinge from the bud (tips meeting over the lens) out through the
+  // camera side to lie past the rim; alternate petals sit a hair proud so the closed bud overlaps cleanly
+  let last = -1;
   const setOpen = (open) => {
+    if (Math.abs(open - last) < 1e-3) return;
+    last = open;
     for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      const hinge = 1.0 * r;
-      p.set(Math.cos(a) * hinge, Math.sin(a) * hinge, 0.012 * r);
-      // the petal points inward (local +y toward the centre), then tips back by `open`
-      e.set(-open * 1.25, 0, a + Math.PI / 2, 'ZXY');
+      const a = (i / 12) * Math.PI * 2, odd = i & 1;
+      p.set(Math.cos(a) * 0.98 * r, Math.sin(a) * 0.98 * r, (0.016 + odd * 0.012) * r);
+      e.set(PETAL_SHUT + odd * 0.05 + (PETAL_OPEN - PETAL_SHUT) * open, 0, a + Math.PI / 2, 'ZXY');
       q.setFromEuler(e);
       m4.compose(p, q, s1);
       petals.setMatrixAt(i, m4);
@@ -221,7 +235,7 @@ export function rosetteLock(mats, { r = 0.35, metal = 'gold', mount = 1.6 } = {}
     petals.instanceMatrix.needsUpdate = true;
   };
   setOpen(0);
-  grp.userData = { petals, lens, lensMat, setOpen, tone: T, r };
+  grp.userData = { petals, lens, lensMat, rim, rimMat, setOpen, tone: T, r };
   return grp;
 }
 
