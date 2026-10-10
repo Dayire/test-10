@@ -1,7 +1,8 @@
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('c');
-// dev views (asset sheet, exporter, texture and material previews) are stripped from the artifact build
-const dev = !import.meta.env.VITE_ARTIFACT && (params.get('dev') || location.hash === '#assets');
+// dev views (asset sheet, exporter, texture and material previews) exist on the dev server only: release and
+// artifact builds strip them
+const dev = import.meta.env.DEV && !import.meta.env.VITE_ARTIFACT && (params.get('dev') || location.hash === '#assets');
 if (dev && params.get('dev') === 'export') {
   import('./dev/export.js').then((m) => m.runExport());
 } else if (dev && params.get('dev') === 'textures') {
