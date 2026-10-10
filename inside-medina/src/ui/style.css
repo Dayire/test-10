@@ -30,6 +30,7 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
 #pause .keys { margin-top: 16px; font-family: Georgia, serif; font-size: 13px; color: rgba(251,239,220,.6); text-align: center; line-height: 1.8; max-width: 90vw; }
 #pause .keys b { color: #f3cf96; font-weight: normal; }
 #end { position: fixed; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: #3a2616; transition: opacity 3s ease; pointer-events: auto; }
+#end.hidden { transition-duration: .7s; } /* it leaves quickly: the title fades in from the same colour */
 #end .e1 { font-size: clamp(40px, 8vw, 110px); letter-spacing: .5em; padding-left: .5em; font-weight: 300; }
 #end .e2 { font-style: italic; letter-spacing: .25em; font-size: clamp(14px, 1.6vw, 19px); margin-bottom: 24px; }
 #end button { color: #5a3a1e; }
