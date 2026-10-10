@@ -7,7 +7,8 @@ const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 *
 // (a) Gameplay: sources with clipByTerminator die while their y ≤ T + 0.3.
 // (b) Visual: an invisible shadow caster (no colour, no depth) parallel to the play plane, placed toward the sun
 //     at 0.4 × the sun shadow camera's distance from the view's focus, its top edge at T + D·sunDir.y: its shadow
-//     edge on the play plane sits at T, level across the view. Zero shader cost: one depth-only draw.
+//     edge on the play plane sits at T, level across the view. It is drawn into the sun's shadow map only: every
+//     camera pass (and any other light's shadow map) skips its draw, so it costs no rasterisation on screen.
 // T follows `keys` ([[x, T], ...], on the boy's x: Chapter IV) unless a SunClock drives it. range [x0, x1]: the view
 // x where its shadow line is drawn (a chapter may have several). Snapshot {T}.
 export class Terminator {
@@ -21,6 +22,12 @@ export class Terminator {
       m.castShadow = true; m.receiveShadow = false; m.frustumCulled = false;
       m.userData.noProxy = true; m.userData.terminator = true;
       m.renderOrder = -10;
+      const geo = m.geometry, all = geo.drawRange.count;
+      // an empty draw range (count -1) makes the renderer return before drawing
+      m.onBeforeRender = () => { geo.drawRange.count = -1; };
+      m.onAfterRender = () => { geo.drawRange.count = all; };
+      m.onBeforeShadow = (r, o, cam, shadowCam) => { geo.drawRange.count = shadowCam === game.world.light?.sun?.shadow?.camera ? all : -1; };
+      m.onAfterShadow = () => { geo.drawRange.count = all; };
       game.add(m);
     }
     this._f = new THREE.Vector3();
