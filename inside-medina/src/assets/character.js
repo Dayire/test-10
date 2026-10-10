@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { lathe, gridGeom } from './geom.js';
 
 // Procedural, jointed characters. Local space: facing +Z, up +Y, left = +X.
@@ -23,7 +24,8 @@ function ellipsoid(rx, ry, rz, w = 24, h = 16) {
 }
 
 export class Rig {
-  constructor(spec, mats) {
+  // merge (default): the rigid parts become one skinned mesh per material (see merge())
+  constructor(spec, mats, { merge = true } = {}) {
     this.spec = spec;
     this.root = new THREE.Group();
     this.root.name = spec.name;
@@ -47,6 +49,53 @@ export class Rig {
     }
     J('skirt', 'pelvis', 0, 0.02, 0);
     this.build(mats);
+    if (merge) this.merge();
+  }
+
+  // Every part is rigid on its joint, so the parts of one material merge into a single skinned
+  // mesh whose vertices each follow one joint with weight 1: the pose is exactly the jointed one, in 5-7 draws per
+  // pass instead of 20 or more (FULL_GAME §8.5). The joints stay plain groups (the skeleton's bones), so the
+  // animator and anything hung on a joint (the guard's lantern) work unchanged; this.meshes lists the merged meshes.
+  merge() {
+    const root = this.root, bones = Object.values(this.j);
+    root.updateMatrixWorld(true);
+    const toRoot = new THREE.Matrix4().copy(root.matrixWorld).invert(), mw = new THREE.Matrix4();
+    const groups = new Map();
+    for (const m of this.meshes) {
+      let g = groups.get(m.material);
+      if (!g) groups.set(m.material, g = { mat: m.material, cast: false, receive: false, parts: [] });
+      g.parts.push(m); g.cast ||= m.castShadow; g.receive ||= m.receiveShadow;
+    }
+    // bind pose in the root's space, wherever the root stands
+    const skeleton = new THREE.Skeleton(bones, bones.map((b) => new THREE.Matrix4().multiplyMatrices(toRoot, b.matrixWorld).invert())), out = [];
+    for (const g of groups.values()) {
+      const geos = g.parts.map((m) => {
+        const src = m.geometry, geo = new THREE.BufferGeometry();
+        for (const k of ['position', 'normal', 'uv']) if (src.attributes[k]) geo.setAttribute(k, src.attributes[k].clone());
+        if (!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(src.attributes.position.count * 2), 2));
+        geo.setIndex(src.index ? src.index.clone() : [...Array(src.attributes.position.count).keys()]);
+        geo.applyMatrix4(mw.multiplyMatrices(toRoot, m.matrixWorld));
+        const n = geo.attributes.position.count, bi = bones.indexOf(m.parent);
+        const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+        for (let i = 0; i < n; i++) { si[i * 4] = bi; sw[i * 4] = 1; }
+        geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+        geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+        return geo;
+      });
+      const merged = mergeGeometries(geos, false);
+      for (const geo of geos) geo.dispose();
+      const sm = new THREE.SkinnedMesh(merged, g.mat);
+      sm.name = `${this.spec.name}:${g.mat.name || 'part'}`;
+      sm.castShadow = g.cast; sm.receiveShadow = g.receive;
+      root.add(sm);
+      sm.bind(skeleton, new THREE.Matrix4());
+      // culling uses the rest pose's sphere: widen it for reaching arms, hanging and crawling
+      sm.computeBoundingSphere(); sm.boundingSphere.radius += 0.6 * this.spec.hipH;
+      out.push(sm);
+    }
+    for (const m of this.meshes) { m.removeFromParent(); m.geometry.dispose(); }
+    this.meshes = out;
+    this.skeleton = skeleton;
   }
 
   add(joint, geo, mat, cast = true) {
@@ -194,7 +243,7 @@ class Scarf {
     const wrap = new THREE.TorusGeometry(S.neckR * 1.9, S.neckR * 0.9, 8, 18);
     wrap.rotateX(Math.PI / 2 - 0.25); wrap.scale(1, 1, S.torsoDepth * 1.1);
     const wm = new THREE.Mesh(wrap, mat); wm.position.set(0, S.neckY * 0.35, 0); wm.castShadow = true;
-    rig.j.chest.add(wm);
+    rig.j.chest.add(wm); rig.meshes.push(wm);
     this.inited = false;
     this._a = new THREE.Vector3(); this._side = new THREE.Vector3();
   }

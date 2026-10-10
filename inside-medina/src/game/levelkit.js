@@ -12,6 +12,13 @@ import { Crate } from './entities.js';
 // random stream: helpers that consume it must be called in a stable order.
 export const FZ = -1.6;
 
+// a prop that only sways (a hanging lantern: ±0.03 rad) casts like the static level: the shadow policy merges it into
+// its static proxies, whose shadow keeps the pose it had when merged (within 2 cm), instead of one draw per pass
+export function staticCaster(obj) {
+  obj.traverse((o) => { if (o.isMesh && o.castShadow) o.userData.staticCaster = true; });
+  return obj;
+}
+
 export function createLevelKit(game, { K, root, L, r = rng(42) }) {
   const phys = game.phys;
   const solid = (x0, y0, x1, y1, o) => phys.addSolid(x0, y0, x1, y1, o);
@@ -40,7 +47,7 @@ export function createLevelKit(game, { K, root, L, r = rng(42) }) {
   const lantern = (x, y, z, { light = false, s = 1, bracketDir = 0, yaw, chain, intensity = 3, lit = true } = {}) => {
     let p = new THREE.Vector3(x, y, z);
     if (bracketDir) p = bracket(K, x, y, z, { len: 0.55, dir: bracketDir, yaw });
-    const m = lanternMesh(game.mats, { s, chain: chain ?? (bracketDir ? 0.06 : 0.3), lit });
+    const m = staticCaster(lanternMesh(game.mats, { s, chain: chain ?? (bracketDir ? 0.06 : 0.3), lit }));
     m.position.copy(p);
     root.add(m);
     const glow = { mesh: m, light: null, phase: r() * 10, lit };
@@ -124,12 +131,17 @@ export function createLevelKit(game, { K, root, L, r = rng(42) }) {
     for (let i = 0; i < 26; i++) {
       const cx = x0 + r() * (x1 - x0), cy = gapY + 0.2 + Math.pow(r(), 1.5) * 3.2, cz = -1.2 + r() * 2.4;
       const s = 0.35 + r() * 0.5;
-      const g = boxMM(cx - s, cy - s * 0.6, cz - s, cx + s, cy + s * 0.6, cz + s, { round: 0.06 });
-      g.applyMatrix4(new THREE.Matrix4().makeRotationZ((r() - 0.5) * 0.5));
+      // each stone tilts about its own centre (it used to turn about the origin, which flung the pile up to 50 m
+      // into the sky and below the street)
+      const g = boxMM(-s, -s * 0.6, -s, s, s * 0.6, s, { round: 0.06 });
+      g.applyMatrix4(new THREE.Matrix4().makeRotationZ((r() - 0.5) * 0.5)); g.translate(cx, cy, cz);
       K.add(g, r() < 0.5 ? 'sandstone' : 'limestone');
     }
     const lintel = boxMM(x0 - 0.1, gapY, -1.3, x1 + 0.2, gapY + 0.3, 1.3); K.add(lintel, 'woodDark');
-    for (let i = 0; i < 5; i++) { const g = boxMM(x0 - 0.3 + i * 0.7, gapY + 0.2, -1.4, x0 + i * 0.7 + 0.1, gapY + 2.6, -1.25); g.applyMatrix4(new THREE.Matrix4().makeRotationZ(0.3 - i * 0.12)); K.add(g, 'woodDark'); }
+    for (let i = 0; i < 5; i++) {
+      const bx = x0 - 0.1 + i * 0.7, by = gapY + 1.4, g = boxMM(-0.2, -1.2, -1.4, 0.2, 1.2, -1.25);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationZ(0.3 - i * 0.12)); g.translate(bx, by, 0); K.add(g, 'woodDark');
+    }
     const back = boxMM(x0, 0, -1.8, x1, gapY + 3.5, -1.5); K.add(back, 'sandstone');
     const dark = boxMM(x0 + 0.1, 0, -1.4, x1 - 0.1, gapY, -1.3); setColor(dark, 0xffffff); K.add(dark, 'darkInterior', null, { cast: false });
   };
@@ -147,5 +159,5 @@ export function createLevelKit(game, { K, root, L, r = rng(42) }) {
   };
   // the boy dies when his feet enter the box
   const killZone = (x0, x1, y0, y1, kind = 'fall') => { const z = { x0, x1, y0, y1, kind }; L.killZones.push(z); return z; };
-  return { FZ, K, root, r, solid, vbox, ground, block, lantern, cp, cam, shaft, facades, farBuilding, skyline, cypress, rubblePile, crateMeshStatic, kerb, killZone };
+  return { FZ, K, root, r, staticCaster, solid, vbox, ground, block, lantern, cp, cam, shaft, facades, farBuilding, skyline, cypress, rubblePile, crateMeshStatic, kerb, killZone };
 }

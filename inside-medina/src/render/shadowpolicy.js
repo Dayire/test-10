@@ -10,7 +10,8 @@ import * as THREE from 'three';
 //    pass a proxy also needs its shadow to land in view (no visible change), and on low / medium to land within
 //    `reach` metres behind the play plane along the current sun;
 //  - small-caster cull (low / medium): other static casters under 0.4 m tall, or more than 30 m behind the play
-//    plane, stop casting, and so do meshes flagged userData.smallCaster (the flock). Moving meshes (characters,
+//    plane, stop casting, and so do meshes flagged userData.smallCaster (the flock); on low (alphaCasters false) so do
+//    the alpha-tested static batches (ivy, lattice), whose cut-out shadows a 1024 map cannot resolve. Moving meshes (characters,
 //    crates, levers) are never culled: a caster must keep the same world matrix over two scans to count as static.
 // The policy only ever restores the castShadow values it changed itself: a flag another package changes is
 // taken as the authored value from then on.
@@ -20,7 +21,7 @@ const TX = 12, BANDS = [-10, -20, -35, -60];
 let _W = new Float32Array(0), _P = _W, _I = new Uint32Array(0), _K = new Int32Array(0), _side = 1;
 const IDENTITY = new THREE.Matrix4();
 const bandOf = (z) => { let i = 0; while (i < BANDS.length && z < BANDS[i]) i++; return i; };
-const _b = new THREE.Box3(), _fr = new THREE.Frustum(), _pm = new THREE.Matrix4();
+const _b = new THREE.Box3(), _sb = new THREE.Box3(), _fr = new THREE.Frustum(), _pm = new THREE.Matrix4();
 const _d = new THREE.Vector3(), _a = new THREE.Vector3(), _v = new THREE.Vector3(), _e = new THREE.Vector3();
 const SPOT_HZ = 15;
 // one material for every proxy: front faces, so the depth pass draws back faces as three does for opaque meshes
@@ -62,7 +63,7 @@ function coneInView(p, a, len, rb) {
 export class ShadowPolicy {
   constructor(renderer) {
     this.r = renderer;
-    this.hz = 60; this.cull = false; this.reach = Infinity; this.proxies = true;
+    this.hz = 60; this.cull = false; this.reach = Infinity; this.proxies = true; this.alphaCast = true;
     this.force = true; this.lastUpdate = -1e9; this.lastSpot = -1e9; this.lastFrame = -1e9;
     this.camPos = new THREE.Vector3(1e9, 0, 0); this.camDir = new THREE.Vector3();
     this.meta = new WeakMap(); // mesh → { cast (authored), set (last value written here), small, fp, stable, proxied }
@@ -85,8 +86,9 @@ export class ShadowPolicy {
     sm.render = function (...a) { SHADOW_PASS.on = true; try { return render.apply(this, a); } finally { SHADOW_PASS.on = false; } };
     this.sm = sm;
   }
-  configure({ shadowHz = 60, smallCull = false, shadowReach = Infinity } = {}) {
+  configure({ shadowHz = 60, smallCull = false, shadowReach = Infinity, alphaCasters = true } = {}) {
     this.hz = shadowHz; this.reach = shadowReach;
+    if (this.alphaCast !== alphaCasters) { this.alphaCast = alphaCasters; this.nextScan = 0; }
     if (this.cull !== smallCull) { this.cull = smallCull; this.apply(); }
     this.force = true;
   }
@@ -132,7 +134,8 @@ export class ShadowPolicy {
       m.stable = fp === m.fp ? m.stable + 1 : 0;
       m.fp = fp;
       _b.copy(g.boundingBox).applyMatrix4(o.matrixWorld);
-      m.small = (m.stable >= 1 || !o.matrixAutoUpdate) && (_b.max.y - _b.min.y < 0.4 || _b.max.z < -30);
+      // static alpha-tested batches (ivy, lattice screens) count as small where the tier drops their cut-out shadows
+      m.small = (m.stable >= 1 || !o.matrixAutoUpdate) && (_b.max.y - _b.min.y < 0.4 || _b.max.z < -30 || (this.alphaCast === false && isStaticBatch(o) && o.material.alphaTest > 0));
       seen.push(o);
     });
     this.tracked = seen; this.lights = lights; this.suns = suns;
@@ -267,7 +270,9 @@ export class ShadowPolicy {
     }
     for (const o of used) { const m = this.meta.get(o); m.proxied = true; this._set(o, m, false); }
     this.force = true;
-    return { sig, sources: used, meshes };
+    // the lowest static geometry: no shadow of this root lands below it
+    let floor = Infinity; for (const T of tiles.values()) floor = Math.min(floor, T.b[1]);
+    return { sig, sources: used, meshes, floor: Number.isFinite(floor) ? floor : -10 };
   }
   // a source's world-space vertices (_P: its own array, or _W), the vertex triple of each triangle (_I) and its tile
   // (_K); _side: 1 front faces as authored, -1 reversed, 2 both. Returns the triangle count.
@@ -302,9 +307,11 @@ export class ShadowPolicy {
     return n;
   }
   // per frame: a proxy casts while its chapter root is shown. Into the sun's map only while its shadow can land in
-  // view: its bounding sphere swept along the light down to below the ground must meet the camera's frustum (no
-  // visible change on any tier), and on low / medium while that shadow can reach within `reach` metres behind the
-  // play plane from the proxy's front top edge
+  // view: its box swept along the light down to the root's lowest geometry (no receiver lies lower), widened by
+  // 1.5 m for the frames a 30 Hz map is reused, must meet the camera's frustum (no visible change on any tier; a
+  // tile far along the light, high on the rooftops, falls inside the sun's frustum without its shadow reaching the
+  // view), and on low / medium while that shadow can reach within `reach` metres behind the play plane from the
+  // proxy's front top edge
   proxyPolicy(scene) {
     const L = this.suns[0];
     SHADOW_PASS.sun = L ? L.shadow.getFrustum() : null;
@@ -322,10 +329,16 @@ export class ShadowPolicy {
         let sun = shown;
         if (sun && this.reach < Infinity && p.userData.front + Math.max(0, p.userData.top) * k < -this.reach) { sun = false; reachCulled++; }
         if (sun && L) {
-          const c = _v.setFromMatrixPosition(p.matrixWorld), r = p.userData.radius + 3;
-          len = _d.y > 0.02 ? Math.min(400, (c.y + r + 20) / _d.y) : 400;
-          _e.copy(c).addScaledVector(_d, -len);
-          for (const pl of _fr.planes) if (pl.distanceToPoint(c) < -r && pl.distanceToPoint(_e) < -r) { sun = false; viewCulled++; break; }
+          const b = p.userData.box;
+          if (_d.y > 0.02) {
+            len = Math.min(400, (b.max.y - R.floor) / _d.y);
+            _sb.copy(b).expandByPoint(_v.copy(b.min).addScaledVector(_d, -len)).expandByPoint(_v.copy(b.max).addScaledVector(_d, -len)).expandByScalar(1.5);
+            if (!_fr.intersectsBox(_sb)) { sun = false; viewCulled++; }
+          } else {
+            const c = _v.setFromMatrixPosition(p.matrixWorld), r = p.userData.radius + 3;
+            _e.copy(c).addScaledVector(_d, -400);
+            for (const pl of _fr.planes) if (pl.distanceToPoint(c) < -r && pl.distanceToPoint(_e) < -r) { sun = false; viewCulled++; break; }
+          }
         }
         if (p.userData.sun !== sun) { p.userData.sun = sun; this.force = true; }
       }

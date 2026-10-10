@@ -5,7 +5,7 @@ import { barrel, pot, rugRoll, hangingRug, sack, basket, cart, awning, drape, la
 import { ivyCurtain, ivyPatch, leafClump, grassTufts } from '../../assets/foliage.js';
 import { Crate, Plate, Lever, Searchlight, Guard, Trigger } from '../../game/entities.js';
 import { Drawbridge, RopeLadder } from '../../game/bridge.js';
-import { FZ } from '../../game/levelkit.js';
+import { FZ, staticCaster } from '../../game/levelkit.js';
 
 const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
 
@@ -373,7 +373,7 @@ function buildHeroAlley(game, K, L) {
   eave(KL, { x0: 1.6, x1: 7.4, y: 6.6, z: 0.1, depth: 0.85, drop: 0.5, soffit: 'wood' });
   awning(KL, { x0: 6.6, x1: 10.6, z0: 0.05, z1: 2.2, y0: 2.9, y1: 2.2, mat: 'fabricTan', sag: 0.14, poles: true });
   const tip = bracket(K, xl + 0.01, 3.7, -9.2, { len: 0.62, yaw: Math.PI / 2 });
-  const lan = lanternMesh(game.mats, { s: 1.25 }); lan.position.copy(tip); game.add(lan);
+  const lan = staticCaster(lanternMesh(game.mats, { s: 1.25 })); lan.position.copy(tip); game.add(lan);
   L.lanterns.push({ mesh: lan, light: null, phase: 1 });
   // right side (faces -x): arcade with red/cream horseshoe arches + stair + striped awning
   const KR = K.with(new THREE.Matrix4().makeRotationY(-Math.PI / 2).premultiply(new THREE.Matrix4().makeTranslation(xr, 0, 0)));

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Batcher, rng } from '../assets/geom.js';
+import { Batcher, rng, setDetail } from '../assets/geom.js';
 import { G } from '../render/atmosphere.js';
 import { Shafts } from '../render/shafts.js';
 import { Dust, Flock } from '../render/fx.js';
@@ -42,10 +42,11 @@ function sessionAssets(game) {
 }
 
 export function disposeTree(root, keep) {
-  const geos = new Set(), mats = new Set(), texs = new Set();
+  const geos = new Set(), mats = new Set(), texs = new Set(), skels = new Set();
   root.traverse((o) => {
     const list = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
     const shared = list.some((m) => m.userData?.medina || m.userData?.shared); // GLB override templates
+    if (o.skeleton && !shared) skels.add(o.skeleton); // a merged character's bone texture
     if (o.geometry && !shared && !o.geometry.userData?.shared) geos.add(o.geometry);
     for (const m of list) {
       if (keep.mats.has(m) || m.userData?.medina || m.userData?.shared) continue;
@@ -57,6 +58,7 @@ export function disposeTree(root, keep) {
   for (const g of geos) g.dispose();
   for (const m of mats) m.dispose();
   for (const t of texs) if (!keep.tex.has(t) && !t.userData?.shared) t.dispose();
+  for (const s of skels) s.dispose();
   return { geometries: geos.size, materials: mats.size, textures: texs.size };
 }
 
@@ -174,16 +176,19 @@ export class ChapterLoader {
     const helpers = createLevelKit(g, { K, root, L, r });
     const kit = { ...helpers, K, root, L, r, batch, mats: g.mats, phys: g.phys, game: g, add: (o) => g.add(o), track: (o) => g.track(o), ...this.scopedKit() };
     prog(0.46, 'raising walls…');
-    let out = def.build(g, kit);
+    // the low tier builds lighter geometry (its triangle budget); set around every slice of a generator's build
+    const lite = !!g.world.rs.q?.lite, step = (f) => { setDetail(lite); try { return f(); } finally { setDetail(false); } };
+    let out = step(() => def.build(g, kit));
     if (out && typeof out.next === 'function') {
-      let s = out.next(), ty = performance.now();
+      const it = out;
+      let s = step(() => it.next()), ty = performance.now();
       while (!s.done) {
         if (typeof s.value === 'number') prog(0.46 + 0.36 * Math.min(1, s.value), 'raising walls…');
         if (performance.now() - ty > 8) { await yieldFrame(); ty = performance.now(); }
-        s = out.next();
+        s = step(() => it.next());
       }
       out = s.value;
-    } else if (out && typeof out.then === 'function') out = await out;
+    } else if (out && typeof out.then === 'function') { setDetail(lite); try { out = await out; } finally { setDetail(false); } }
     if (out && out !== L) Object.assign(L, out);
     mark('build');
     batch.build(root);

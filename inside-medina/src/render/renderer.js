@@ -9,12 +9,13 @@ import { lut } from './lut.js';
 
 // Quality tiers (FULL_GAME §9.2). scale: internal resolution (× min(DPR, scale)); dyn: dynamic
 // resolution range as a fraction of it; shadowHz < 60 refreshes shadow maps at that rate; shadowReach: static
-// casters whose shadow cannot land within that many metres behind the play plane stop casting.
+// casters whose shadow cannot land within that many metres behind the play plane stop casting; lite: chapters
+// loaded on the tier build their geometry with fewer segments (geom.js DETAIL).
 export const QUALITY = {
   ultra: { name: 'ultra', scale: 1.5, msaa: 4, shadow: 4096, dof: true, dofTaps: 48, rays: true, tex: 1, fxaa: false, dyn: [0.75, 1], shadowHz: 60, smallCull: false, shadowReach: Infinity, soft: true, ssao: true, flare: true, particles: 1 },
   high: { name: 'high', scale: 1.25, msaa: 4, shadow: 2048, dof: true, dofTaps: 36, rays: true, tex: 1, fxaa: false, dyn: [0.8, 1], shadowHz: 60, smallCull: false, shadowReach: Infinity, soft: true, ssao: true, flare: true, particles: 1 },
   medium: { name: 'medium', scale: 1.0, msaa: 2, shadow: 2048, dof: true, dofTaps: 16, rays: true, tex: 1, fxaa: true, dyn: [0.7, 1], shadowHz: 30, smallCull: true, shadowReach: 14, soft: true, ssao: false, flare: true, particles: 0.5 },
-  low: { name: 'low', scale: 0.75, msaa: 0, shadow: 1024, dof: false, dofTaps: 16, rays: false, tex: 0.5, fxaa: true, dyn: [0.8, 1], shadowHz: 30, smallCull: true, shadowReach: 8, soft: false, ssao: false, flare: false, particles: 0.25 },
+  low: { name: 'low', scale: 0.75, msaa: 0, shadow: 1024, dof: false, dofTaps: 16, rays: false, tex: 0.5, fxaa: true, dyn: [0.8, 1], shadowHz: 30, smallCull: true, shadowReach: 8, soft: false, ssao: false, flare: false, particles: 0.25, lite: true, alphaCasters: false },
 };
 export const TIERS = ['low', 'medium', 'high', 'ultra'];
 // ?slowgpu: relative fill cost of each tier's passes for the synthetic GPU (medium = 1)

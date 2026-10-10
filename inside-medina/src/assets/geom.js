@@ -77,8 +77,17 @@ export function setSway(geo, fn) {
   return geo;
 }
 
+// Geometric detail of the builders. The chapter loader sets `lite` for the build on the low tier (its triangle
+// budget, FULL_GAME §8.5): curves take about half the segments, bevels under 3 cm become plain edges, tubes and
+// lathes go coarser. Colliders are separate, so nothing about play changes; a tier change mid-chapter keeps the
+// geometry the chapter was built with (like the texture scale).
+export const DETAIL = { lite: false };
+export function setDetail(lite) { DETAIL.lite = !!lite; }
+const lite = (n, min) => (DETAIL.lite ? Math.max(min, Math.round(n / 2)) : n);
+
 export function box(w, h, d, { round = 0, seg = 2 } = {}) {
-  const g = round > 0 ? new RoundedBoxGeometry(w, h, d, seg, round) : new THREE.BoxGeometry(w, h, d);
+  if (DETAIL.lite && round > 0 && round < 0.03) round = 0;
+  const g = round > 0 ? new RoundedBoxGeometry(w, h, d, DETAIL.lite ? 1 : seg, round) : new THREE.BoxGeometry(w, h, d);
   return g;
 }
 
@@ -92,6 +101,7 @@ export function boxMM(x0, y0, z0, x1, y1, z1, opts = {}) {
 // Pointed (two-centred) arch outline: span w, springing height hs, apex at hs+rise.
 // `grow` offsets both arcs concentrically (for frames / mouldings).
 export function pointedArchPoints(w, hs, rise, n = 24, grow = 0) {
+  n = lite(n, 6);
   const c = (rise * rise - (w * w) / 4) / w; // arc centre offset from the middle
   const r = c + w / 2 + grow;
   const apexY = Math.sqrt(Math.max(r * r - c * c, 1e-6));
@@ -111,6 +121,7 @@ export function pointedArchPoints(w, hs, rise, n = 24, grow = 0) {
 
 // Horseshoe arch: circle that continues below its diameter
 export function horseshoePoints(w, hs, n = 32, extra = 0.35) {
+  n = lite(n, 8);
   const r = w / 2;
   const pts = [];
   const a0 = Math.PI + extra, a1 = -extra;
@@ -163,6 +174,7 @@ export function offsetPolyline(pts, d) {
 }
 
 export function extrude(shape, depth, { bevel = 0, bevelSeg = 2, curveSeg = 24 } = {}) {
+  if (DETAIL.lite) { curveSeg = lite(curveSeg, 4); bevelSeg = 1; if (bevel < 0.03) bevel = 0; }
   const g = new THREE.ExtrudeGeometry(shape, {
     depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: bevelSeg, curveSegments: curveSeg, steps: 1,
   });
@@ -171,7 +183,7 @@ export function extrude(shape, depth, { bevel = 0, bevelSeg = 2, curveSeg = 24 }
 
 export function lathe(profile, seg = 32, phiStart = 0, phiLength = Math.PI * 2) {
   const pts = profile.map((p) => (p.isVector2 ? p : new THREE.Vector2(p[0], p[1])));
-  const g = new THREE.LatheGeometry(pts, seg, phiStart, phiLength);
+  const g = new THREE.LatheGeometry(pts, DETAIL.lite ? Math.max(8, Math.round(seg * 0.6)) : seg, phiStart, phiLength);
   return g;
 }
 
@@ -225,12 +237,21 @@ export function catenary(p0, p1, sag, n = 24) {
 
 export function tube(points, radius, seg = 32, radial = 6, closed = false) {
   const c = new THREE.CatmullRomCurve3(points, closed, 'centripetal');
-  return new THREE.TubeGeometry(c, seg, radius, radial, closed);
+  return new THREE.TubeGeometry(c, lite(seg, 3), radius, DETAIL.lite ? Math.min(radial, 4) : radial, closed);
 }
 
 // ---------------------------------------------------------------------------
 // Static batcher: merges geometry per material (and per x-chunk for culling)
 // ---------------------------------------------------------------------------
+// the main pass culls a batch by its world box, not its bounding sphere: a chunk is long, tall and deep, and its
+// sphere would reach far outside the view
+const _bx = new THREE.Box3();
+function batchInFrustum(frustum) { return frustum.intersectsBox(_bx.copy(this.geometry.boundingBox).applyMatrix4(this.matrixWorld)); }
+
+// Merges static geometry by material into chunks along x. The chunk width follows depth: pieces near the play
+// plane (centre z > -4) merge in 0.6 × chunk wide strips, the street behind (to -15) in `chunk`, the far city in
+// 2 × chunk. The view is narrow at the play plane and wide in the distance, so this draws what the camera sees with
+// few extra triangles: about 30 % fewer per frame in Chapter I for some ten more draws.
 export class Batcher {
   constructor(materials, { chunk = 36 } = {}) {
     this.mats = materials;
@@ -254,13 +275,11 @@ export class Batcher {
     if (!needsSway && g.attributes.sway) g.deleteAttribute('sway');
     g.morphAttributes = {};
     g.clearGroups();
-    let cx = chunkX;
-    if (cx === null) {
-      g.computeBoundingBox();
-      cx = (g.boundingBox.min.x + g.boundingBox.max.x) / 2;
-    }
-    const ck = Math.floor(cx / this.chunk);
-    const key = `${mat.uuid}|${cast ? 1 : 0}${receive ? 1 : 0}|${ck}`;
+    g.computeBoundingBox();
+    const cx = chunkX ?? (g.boundingBox.min.x + g.boundingBox.max.x) / 2, cz = (g.boundingBox.min.z + g.boundingBox.max.z) / 2;
+    const band = cz > -4 ? 0 : cz > -15 ? 1 : 2;
+    const ck = Math.floor(cx / (this.chunk * [0.6, 1, 2][band]));
+    const key = `${mat.uuid}|${cast ? 1 : 0}${receive ? 1 : 0}|${band}|${ck}`;
     if (!this.groups.has(key)) this.groups.set(key, { mat, cast, receive, geos: [] });
     this.groups.get(key).geos.push(g);
   }
@@ -288,6 +307,7 @@ export class Batcher {
       const mesh = new THREE.Mesh(merged, grp.mat);
       mesh.castShadow = grp.cast; mesh.receiveShadow = grp.receive;
       mesh.matrixAutoUpdate = false;
+      mesh.intersectsFrustum = batchInFrustum;
       mesh.name = `batch:${grp.mat.name}`;
       parent.add(mesh);
       meshes.push(mesh);
