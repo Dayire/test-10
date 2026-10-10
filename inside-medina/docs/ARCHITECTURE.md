@@ -249,7 +249,7 @@ counts), ext{}`. `window.__info()` adds the state to `info()`.
 |---|---|
 | `node tools/playtest.mjs --chapter souk [--cp N] [--from step] [--to step] [--runs 2]` | the chapter bot (`tools/bots/<chapter>.js` on `tools/bots/lib.js`); exit 0 on pass; several runs must agree on the end-state hash |
 | `node tools/negative.mjs --chapter souk` | `tools/neg/<chapter>.mjs` as assertions; `--selftest-fail` must exit 1 |
-| `node tools/negative.mjs --suite foundation [--artifact]` | chain and Continue, throwing storage, title shadow focus, look round trip, context loss, boot budget; `--artifact` also rebuilds and boots the single-file build |
+| `node tools/negative.mjs --suite foundation [--artifact] [--base-port N]` | chain and Continue, throwing storage, title shadow focus, look round trip, context loss, boot budget; `--artifact` also rebuilds and boots the single-file build; `--base-port` times the boot against a server of the pre-foundation tree under the same load instead of the recorded baseline |
 | `node tools/cycle.mjs [--cycles 3] [--path souk,lab,souk,sundown,souk]` | memory flat, programs stable, light census constant, no page errors |
 | `node tools/probe.mjs "<query>" "<js>"`, `tools/tour.mjs`, `tools/shot.mjs` | ad hoc evaluation and screenshots; all take `--port`, `BASE=` and `--chapter` |
 | `npm test`, `npm run test:souk`, `npm run test:foundation`, `npm run cycle` | the suites above |

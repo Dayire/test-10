@@ -115,7 +115,9 @@ export const scenarios = [
     check: (r) => (r.roundTrip.differing < 1 && r.nightChanged.differing > 20 && r.vsBaseline.differing < 1 ? true : `round trip ${JSON.stringify(r)}`),
   },
   {
-    // §11.2 acceptance 10: boot to __ready within the baseline + 10 %, and the loading bar paints at least 10 values
+    // §11.2 acceptance 10: boot to __ready within the baseline + 10 %, and the loading bar paints at least 10 values.
+    // The machine may be shared: with --base-port N (a server of the pre-foundation tree) the two trees boot
+    // alternately under the same load and the budget is the base median + 10 %; otherwise it is the recorded baseline.
     name: 'boot budget and loading bar', url: false,
     run: async ({ page, o }) => {
       await page.addInitScript(() => {
@@ -124,14 +126,18 @@ export const scenarios = [
         const tick = () => { const i = document.querySelector('#loading .lbar i'); if (i && i.style.width) window.__painted.add(i.style.width); if (!window.__readyAt) requestAnimationFrame(tick); };
         requestAnimationFrame(tick);
       });
-      const runs = [];
-      for (let k = 0; k < 3; k++) {
-        await page.goto(gameUrl({ ...o, chapter: null, cp: undefined }, { hold: null }));
-        await waitReady(page);
-        runs.push(await page.evaluate(() => ({ ms: Math.round(window.__readyAt), painted: [...window.__painted] })));
-      }
-      const ms = runs.map((x) => x.ms).sort((a, b) => a - b);
-      return { readyMs: ms, median: ms[1], budget: Math.round(baseline.boot.readyMs.warm * 1.1), baselineWarm: baseline.boot.readyMs.warm, painted: runs[1].painted.length, values: runs[1].painted.join(' ') };
+      const boot = async (port) => {
+        await page.goto(port ? `http://127.0.0.1:${port}/?autostart=1&tex=0.1&tier=low&noauto=1` : gameUrl({ ...o, chapter: null, cp: undefined }, { hold: null }));
+        await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000, polling: 100 });
+        return page.evaluate(() => ({ ms: Math.round(window.__readyAt), painted: [...window.__painted] }));
+      };
+      const med = (a) => { const v = a.map((x) => x.ms).sort((x, y) => x - y); return v[Math.floor(v.length / 2)]; };
+      const ab = o.basePort ? +o.basePort : 0;
+      if (ab) { await boot(ab); await boot(0); }
+      const cur = [], base = [];
+      for (let k = 0; k < 3; k++) { if (ab) base.push(await boot(ab)); cur.push(await boot(0)); }
+      const budget = Math.round((ab ? med(base) : baseline.boot.readyMs.warm) * 1.1);
+      return { readyMs: cur.map((x) => x.ms), median: med(cur), budget, against: ab ? `base tree on ${ab}: ${base.map((x) => x.ms).join(' ')}` : `recorded warm ${baseline.boot.readyMs.warm}`, painted: cur[1].painted.length, values: cur[1].painted.join(' ') };
     },
     check: (r) => (r.median <= r.budget && r.painted >= 10 ? true : `boot ${r.median} ms (budget ${r.budget}), ${r.painted} painted values`),
   },
