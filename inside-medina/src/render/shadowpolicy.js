@@ -12,7 +12,8 @@ import * as THREE from 'three';
 //  - small-caster cull (low / medium): other static casters under 0.4 m tall, or more than 30 m behind the play
 //    plane, stop casting, and so do meshes flagged userData.smallCaster (the flock); on low (alphaCasters false) so do
 //    the alpha-tested static batches (ivy, lattice), whose cut-out shadows a 1024 map cannot resolve. Moving meshes (characters,
-//    crates, levers) are never culled: a caster must keep the same world matrix over two scans to count as static.
+//    crates, levers) are never culled: a caster must keep its world matrix (within a 2 cm sway) over two scans to count
+//    as static.
 // The policy only ever restores the castShadow values it changed itself: a flag another package changes is
 // taken as the authored value from then on.
 export const SHADOW_PASS = { on: false, sun: null };
@@ -114,7 +115,7 @@ export class ShadowPolicy {
       let m = this.meta.get(o);
       if (!m) {
         if (!o.castShadow) return; // only ever touch meshes that were authored as casters
-        m = { cast: true, set: undefined, small: false, fp: NaN, stable: 0, proxied: false };
+        m = { cast: true, set: undefined, small: false, fp: null, stable: 0, proxied: false };
         this.meta.set(o, m);
       }
       // the flag is authored unless this policy wrote it, and so is any change made since it last wrote it
@@ -130,9 +131,13 @@ export class ShadowPolicy {
       if (o.userData.smallCaster) { m.small = true; seen.push(o); return; }
       const g = o.geometry;
       if (!g.boundingBox) g.computeBoundingBox();
-      const e = o.matrixWorld.elements, fp = e[12] * 1.31 + e[13] * 7.7 + e[14] * 3.3 + e[0] + e[5] * 2 + e[10] * 3 + e[1] * 5 + e[4] * 7;
-      m.stable = fp === m.fp ? m.stable + 1 : 0;
-      m.fp = fp;
+      // static: the world matrix kept since the last scan, within a sway (2 cm, about a degree): a rolled-up rope
+      // ladder that sways a little is as static as a pot for its shadow
+      const e = o.matrixWorld.elements, fp = m.fp;
+      const still = Array.isArray(fp) && Math.abs(e[12] - fp[0]) + Math.abs(e[13] - fp[1]) + Math.abs(e[14] - fp[2]) < 0.02 &&
+        Math.abs(e[0] - fp[3]) + Math.abs(e[1] - fp[4]) + Math.abs(e[4] - fp[5]) + Math.abs(e[5] - fp[6]) + Math.abs(e[10] - fp[7]) < 0.02;
+      m.stable = still ? m.stable + 1 : 0;
+      m.fp = [e[12], e[13], e[14], e[0], e[1], e[4], e[5], e[10]];
       _b.copy(g.boundingBox).applyMatrix4(o.matrixWorld);
       // static alpha-tested batches (ivy, lattice screens) count as small where the tier drops their cut-out shadows
       m.small = (m.stable >= 1 || !o.matrixAutoUpdate) && (_b.max.y - _b.min.y < 0.4 || _b.max.z < -30 || (this.alphaCast === false && isStaticBatch(o) && o.material.alphaTest > 0));

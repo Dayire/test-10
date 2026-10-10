@@ -411,6 +411,10 @@ async function capLoop() {
     rs.applySettings({ fpsCap: 60 });
     S.t = performance.now(); S.on = true;
     await new Promise((res) => setTimeout(res, 500));
+    // a real requestAnimationFrame still pending when the stub took over (a slow frame on a loaded machine) may have
+    // set the cap's phase from the real clock, ahead of the stub's: restart the phase on the stub's clock
+    await new Promise((res) => { const c = S.calls; const f = () => (S.calls > c + 1 ? res() : setTimeout(f, 10)); f(); });
+    rs.cap.set(60);
     const f0 = window.__frames, c0 = S.calls, b0 = begins, t0 = S.t;
     await new Promise((res) => { const f = () => (S.calls - c0 >= 120 ? res() : setTimeout(f, 20)); f(); });
     const frames = window.__frames - f0, sec = (S.t - t0) / 1000, wired = begins - b0 > 0;
