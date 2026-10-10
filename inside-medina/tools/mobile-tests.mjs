@@ -105,8 +105,9 @@ async function device(dev) {
   // ------------------------------------------------------------------ gameplay (deterministic: the sim reads the live touch input)
   if (want('stick') || want('jump') || want('grab') || want('lens')) {
     await page.goto(`${BASE}?${Q}&autostart=1&hold=1&chapter=souk&cp=0`); await ready(page); await frames(page, 3);
-    // the sim reads the live input: poll() each step, with the previous state kept for the sim's own press edges
-    const run = (sec) => page.evaluate((sec) => { const G = __medina.game; let vmax = 0, ymax = 0; const n = Math.round(sec * 120); for (let i = 0; i < n; i++) { __medina.sim(1 / 120, () => { const prev = G.input.state; const s = G.input.poll(); G.input.state = prev; return s; }); vmax = Math.max(vmax, Math.abs(G.player.body.vx)); ymax = Math.max(ymax, G.player.y); } return { vx: +G.player.body.vx.toFixed(2), vmax: +vmax.toFixed(2), ymax: +ymax.toFixed(2), x: +G.player.x.toFixed(2), st: G.player.state, inX: +G.input.state.x.toFixed(2) }; }, sec);
+    // the sim reads the live input: poll() each step; the sim's own press edges compare with the state of its
+    // previous step (the page's frames poll too under ?hold=1, which must not swallow a press)
+    const run = (sec) => page.evaluate((sec) => { const G = __medina.game; let vmax = 0, ymax = 0; const n = Math.round(sec * 120); for (let i = 0; i < n; i++) { __medina.sim(1 / 120, () => { const s = G.input.poll(); G.input.state = window.__simPrev || { ...s, jump: false, grab: false, y: 0 }; window.__simPrev = s; return s; }); vmax = Math.max(vmax, Math.abs(G.player.body.vx)); ymax = Math.max(ymax, G.player.y); } return { vx: +G.player.body.vx.toFixed(2), vmax: +vmax.toFixed(2), ymax: +ymax.toFixed(2), x: +G.player.x.toFixed(2), st: G.player.state, inX: +G.input.state.x.toFixed(2) }; }, sec);
     const R = await page.evaluate(() => __ui.touch.radius());
     // jump: a tap on the button, standing in the open street
     await page.evaluate(() => { __medina.teleport(3, 0, 1); }); await run(0.3);
@@ -182,8 +183,8 @@ async function device(dev) {
       res = [got.active && got.kind === 'touch' && err < 0.05 && pt.hit === 'CANVAS', { stub: true, hit: pt.hit, ...got, err: +err.toFixed(4), note: 'lab stub: no mirror on this branch; aimTarget checked' }];
     } else {
       // the Sunwork lab: grip M2 (room "tilt", checkpoint 3), touch the lock L4: the mirror settles on −45°
-      await page.evaluate(() => { __medina.checkpoint(3); __medina.teleport(54.3, 0, 1); });
-      const step = (n) => page.evaluate((n) => { const G = __medina.game; for (let i = 0; i < n; i++) __medina.sim(1 / 120, () => { const prev = G.input.state; const s = G.input.poll(); G.input.state = prev; return s; }); }, n);
+      await page.evaluate(() => { __medina.checkpoint(3); const m = __medina.game.level.light.get('M2'); __medina.teleport(m.body.x - (m.body.w / 2 + 0.17 + 0.03), 0, 1); });
+      const step = (n) => page.evaluate((n) => { const G = __medina.game; for (let i = 0; i < n; i++) __medina.sim(1 / 120, () => { const s = G.input.poll(); G.input.state = window.__simPrev || { ...s, jump: false, grab: false, y: 0 }; window.__simPrev = s; return s; }); }, n);
       await step(60);
       const gr = await page.evaluate(() => __ui.touch.rects().grab);
       await touch('start', 3, ...centre(gr)); await frames(page, 1); await step(6); await touch('end'); await frames(page, 1); await step(30);
