@@ -68,6 +68,27 @@ Everything U ships works without these (fallbacks noted). Each entry: file, chan
   a chapter has been played once on this device.
 - **Test.** `__ui.chapters.render()` with an empty `medina.v1.ui`: the sundown card has 11 pips.
 
+## 7. C2: the souk's own hint zones (`src/chapters/souk/level.js`)
+
+- **Change.** Declare `L.hints` (FULL_GAME §7.6) at the souk's first uses of each verb:
+  ```js
+  L.hints = [
+    { x0: 6.4, x1: 8.15, after: 0.6, glyph: 'jump', unless: (g) => g.player.x > 8.9 || g.player.y > 0.3 },           // the sack pile
+    { x0: 35.4, x1: 37.0, after: 1.5, glyph: 'grab', unless: (g) => L.crateA.body.x > 38.5 || !!g.player.grip },     // crate A
+    { x0: 40.2, x1: 41.0, y1: 0.2, after: 0.8, glyph: 'jump', unless: (g) => L.crateA.body.x < 40.9 },                // onto the crate at the terrace
+    { x0: 109.6, x1: 111.4, after: 1.0, glyph: 'grab', unless: () => L.lever.pulled },                               // the lever
+    { x0: 121.2, x1: 124.0, y1: 0.5, after: 0.8, glyph: 'up', unless: (g) => g.player.state === 'climb' },          // the ivy wall
+    { x0: 181.2, x1: 182.6, after: 1.0, glyph: 'crawl', unless: (g) => g.player.crawling },                          // the rubble tunnel
+  ];
+  ```
+- **Reason.** The chapter knows where each verb is first needed; the zones are puzzle-honest (no grab glyph once the
+  crate has moved, no jump glyph at the terrace until the crate is at its foot). Until they exist the shell teaches
+  the same verbs from context in every chapter (`src/ui/hints.js` `CONTEXT`: a vine's foot, a ledge he hangs from, a
+  crate or lever at hand, an obstacle a jump clears — never a wall too high), and the pause screen lists the play
+  controls for the device in hand. A chapter's zones take precedence over the context hints.
+- **Test.** `node tools/ux-tests.mjs --only hints` (already passes with the context hints); with the zones, the same
+  scenario with `__ui.save.data.seenHints = {}` shows `souk:0` (jump) at x 7.4 and `souk:1` (grab) at x 36.
+
 ## Notes (no change requested)
 
 - A pad alone cannot start the audio: browsers do not count gamepad buttons as a user activation, so the music

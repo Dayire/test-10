@@ -2,8 +2,9 @@
 // Devices: iPhone 13 portrait and landscape (safe areas of the notch and the home bar), Pixel 7 (a punch-hole
 // inset). Touches are real CDP touch events (Input.dispatchTouchEvent), so pointer and touch events, multi-touch
 // identifiers and the browser's own hit testing are all exercised. Checks per device:
-//   menus      the touch layer is hidden under the menus; every menu target is ≥ 44 px and inside the safe area;
-//              a tap acts (new journey starts play)
+//   menus      the touch layer is hidden under the menus; every menu target is ≥ 44 px and inside the safe area
+//              (the chapter select's checkpoint stepper included: a tap opens it, its arrows step); a tap acts
+//              (new journey starts play)
 //   controls   jump, grab and ⏸ are ≥ 44 px and inside the safe area; ⏸ opens the pause menu (layer hidden)
 //   stick      floating stick: 0.5 of its radius walks, 1.0 runs (the boy's speed); it spawns under the thumb
 //   jump       a tap on jump leaves the ground
@@ -79,6 +80,20 @@ async function device(dev) {
     await page.evaluate(() => __ui.focus.close(__ui.settings.screen));
     await page.evaluate(() => __ui.focus.open(__ui.chapters.screen)); await frames(page, 3); await page.waitForTimeout(600);
     const chBad = judge(await targets('#chapters .ccard'));
+    // a card with reached checkpoints: a tap opens its stepper, whose arrows are 44 px targets in the safe area and
+    // step the checkpoint; the small pips are no touch targets (the card itself starts)
+    await page.evaluate(() => { __ui.save.data.cps = { souk: 3 }; __ui.chapters.render(); }); await frames(page, 2); await page.waitForTimeout(500);
+    const arch = await page.evaluate(() => { const b = document.querySelector('#chapters .ccard[data-id="souk"] .arch').getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
+    await tap(arch.x + arch.w / 2, arch.y + arch.h * 0.35); await page.waitForTimeout(500);
+    const stepBad = judge(await targets('#chapters .ccard.picking .cstep .st'));
+    const fwd = await page.evaluate(() => { const b = document.querySelector('#chapters .ccard.picking .cstep .st.fwd')?.getBoundingClientRect(); return b && { x: b.x, y: b.y, w: b.width, h: b.height }; });
+    if (fwd) await tap(...centre(fwd));
+    const step = await page.evaluate(() => {
+      const p = document.querySelector('#chapters .ccard.picking .pips i.ok'), b = p?.getBoundingClientRect();
+      return { picking: __ui.chapters.pickId, cp: __ui.chapters.pickCp, n: document.querySelectorAll('#chapters .ccard.picking .cstep .st').length, pipInert: !!b && document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2) !== p };
+    });
+    if (step.n === 2 && (stepBad.length || step.cp !== 1 || !step.pipInert)) chBad.push(`stepper ${JSON.stringify({ stepBad, step })}`);
+    else if (step.n !== 2) chBad.push('no checkpoint stepper');
     await page.evaluate(() => __ui.focus.close(__ui.chapters.screen));
     await page.evaluate(() => __ui.confirm({ text: 'begin a new journey?', yes: () => {} })); await frames(page, 2); await page.waitForTimeout(500);
     const cfBad = judge(await targets('#confirm .item'));

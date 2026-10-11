@@ -1,5 +1,5 @@
 import { Screen, item } from './focus.js';
-import { timeGlyph, icon, STAR } from './glyphs.js';
+import { timeGlyph, icon, key, stick, STAR } from './glyphs.js';
 import { PLAYABLE } from '../chapters/index.js';
 
 // Chapter select (FULL_GAME §7.2): four arched cards with the numeral, the time-of-day glyph, a thumbnail
@@ -64,16 +64,24 @@ export class ChaptersScreen {
       b.dataset.id = m.id; b.style.setProperty('--tone', m.tone); b.style.setProperty('--exit', m.exit); b.style.setProperty('--i', i);
       const th = open ? ui.thumb(m.id) : null;
       b.innerHTML = `
-        <span class="arch">${th ? `<span class="thumb" style="background-image:url(${th})"></span>` : '<span class="thumb pal"></span>'}${timeGlyph(m.glyph, 'cgl')}${open ? '' : `<span class="lock">${icon('lock')}</span>`}<svg class="frame" viewBox="0 0 1 1" preserveAspectRatio="none"><path d="${ARCH}"/></svg></span>
+        <span class="arch">${th ? `<span class="thumb" style="background-image:url(${th})"></span>` : '<span class="thumb pal"></span>'}${timeGlyph(m.glyph, 'cgl')}${open ? '' : `<span class="lock">${icon('lock')}</span>`}<svg class="frame" viewBox="0 0 1 1" preserveAspectRatio="none"><path d="${ARCH}"/></svg>${open && max > 0 ? `<span class="cstep"><b class="st" data-step="-1" role="button" aria-label="earlier checkpoint">${icon('back')}</b><span class="cpn"><b></b><small>/${n}</small></span><b class="st fwd" data-step="1" role="button" aria-label="later checkpoint">${icon('back')}</b></span>` : ''}</span>
         <span class="num">${m.numeral}</span>
         <span class="lab">${open ? m.label : ''}</span>
-        <span class="pips">${open ? Array.from({ length: n }, (_, k) => `<i data-cp="${k}" class="${k <= max ? 'ok' : ''}${k === 0 ? ' sel' : ''}"></i>`).join('') : ''}</span>`;
+        <span class="pips${n > 8 ? ' many' : ''}">${open ? Array.from({ length: n }, (_, k) => `<i data-cp="${k}" class="${k <= max ? 'ok' : ''}${k === 0 ? ' sel' : ''}"></i>`).join('') : ''}</span>`;
       item(b, { act: () => this.choose(b, m, max), label: open ? `chapter ${m.n}, ${m.label}` : `chapter ${m.n}, not reached yet` });
       if (!open) { b.classList.add('off'); b.setAttribute('aria-disabled', 'true'); }
+      // a reached pip starts there (a mouse's shortcut; on touch the 44 px stepper picks, the card starts)
       b.querySelectorAll('.pips i.ok').forEach((p) => p.addEventListener('click', (e) => { e.stopPropagation(); this.start(m.id, +p.dataset.cp); }));
+      b.querySelectorAll('.cstep .st').forEach((s) => s.addEventListener('click', (e) => { e.stopPropagation(); if (this.picking === b) this.pickStep(+s.dataset.step); }));
       cards.appendChild(b);
     });
-    this.el.querySelector('.legend').innerHTML = this.ui.mainEl.querySelector('.legend')?.innerHTML || '';
+    this.legend();
+  }
+  // enter / esc, and while a checkpoint is being picked ← → (a d-pad on a pad)
+  legend() {
+    const ui = this.ui, d = ui.input?.lastDevice || 'keyboard';
+    const pick = !this.picking || d === 'touch' ? '' : d === 'gamepad' ? `<span>${stick('lr')}<em>checkpoint</em></span>` : `<span>${key('←')}${key('→')}<em>checkpoint</em></span>`;
+    this.el.querySelector('.legend').innerHTML = pick + (ui.mainEl.querySelector('.legend')?.innerHTML || '');
   }
   choose(b, m, max) {
     if (this.picking === b) { this.start(m.id, this.pickCp); return; }
@@ -82,14 +90,19 @@ export class ChaptersScreen {
     this.picking = b; this.pickMax = max; this.pickId = m.id;
     this.pickCp = this.ui.save?.data?.chapter === m.id ? Math.min(max, this.ui.save.data.cp) : 0;
     b.classList.add('picking');
-    this.paintPick();
+    this.paintPick(); this.legend();
     this.ui.sound('open');
   }
   pickStep(d) {
     const v = Math.max(0, Math.min(this.pickMax, this.pickCp + d));
     if (v !== this.pickCp) { this.pickCp = v; this.paintPick(); this.ui.sound('slider', { value: v / Math.max(1, this.pickMax) }); }
   }
-  paintPick() { this.picking?.querySelectorAll('.pips i').forEach((p) => p.classList.toggle('sel', +p.dataset.cp === this.pickCp)); }
-  unpick() { if (this.picking) { this.picking.classList.remove('picking'); this.picking = null; } }
+  paintPick() {
+    const b = this.picking; if (!b) return;
+    b.querySelectorAll('.pips i').forEach((p) => p.classList.toggle('sel', +p.dataset.cp === this.pickCp));
+    const n = b.querySelector('.cpn b'); if (n) n.textContent = String(this.pickCp + 1);
+    b.querySelectorAll('.cstep .st').forEach((s) => s.classList.toggle('end', +s.dataset.step < 0 ? this.pickCp <= 0 : this.pickCp >= this.pickMax));
+  }
+  unpick() { if (this.picking) { this.picking.classList.remove('picking'); this.picking = null; this.legend(); } }
   start(id, cp) { this.unpick(); this.ui.sound('confirm'); this.ui.startChapter(id, cp); }
 }

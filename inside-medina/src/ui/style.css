@@ -105,6 +105,12 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #pause .pips i.past { background: var(--brass-lo); border-color: var(--brass-lo); }
 #pause .pips i.here { background: var(--brass-hi); border-color: var(--brass-hi); box-shadow: 0 0 10px rgba(243, 215, 158, .6); }
 #pause .entries { top: calc(14vh + var(--st) + 130px); }
+/* the play controls, quiet in the corner opposite the entries */
+#pause .ctl { position: absolute; right: calc(7.5vw + var(--sr)); bottom: calc(5vh + var(--sb)); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px 24px; max-width: 46vw; font-size: calc(14px * var(--ms)); letter-spacing: .14em; color: var(--faint); opacity: 0; transition: opacity .8s ease .6s; }
+#pause.in .ctl { opacity: 1; }
+#pause .ctl span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+#pause .ctl em { font-style: italic; }
+#pause .ctl .pad svg { stroke-width: 8; }
 
 /* ------------------------------------------------------------ panels (settings, chapters) */
 .panel-screen .eyebrow { display: flex; align-items: center; gap: 10px; font-size: calc(12px * var(--ms)); letter-spacing: .42em; text-transform: uppercase; color: var(--brass); font-weight: 500; }
@@ -193,12 +199,28 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 .ccard.focused .num { color: var(--ivory-hi); }
 .ccard .lab { margin-top: 4px; min-height: 1.3em; font-style: italic; font-size: calc(16px * var(--ms)); letter-spacing: .1em; color: var(--faint); text-align: center; white-space: nowrap; transition: color .3s ease; }
 .ccard.focused .lab { color: var(--dim); }
-.ccard .pips { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 12px; min-height: 22px; max-width: 100%; }
-.ccard .pips i { position: relative; width: 22px; height: 22px; display: grid; place-items: center; }
+.ccard .pips { display: flex; flex-wrap: nowrap; justify-content: center; gap: 4px; margin-top: 12px; min-height: 22px; width: 100%; }
+.ccard .pips i { position: relative; flex: 0 1 22px; min-width: 9px; height: 22px; display: grid; place-items: center; }
+.ccard .pips.many { gap: 2px; }
 .ccard .pips i::before { content: ''; width: 6px; height: 6px; transform: rotate(45deg); border: 1px solid var(--faint); transition: transform .35s var(--ease), background .2s ease; }
 .ccard .pips i.ok::before { background: var(--brass-lo); border-color: var(--brass); }
 .ccard.picking .pips i.sel::before { background: var(--brass-hi); border-color: var(--brass-hi); transform: rotate(45deg) scale(1.7); box-shadow: 0 0 10px rgba(243, 215, 158, .7); }
 .ccard.picking .pips i.ok { cursor: pointer; }
+@media (pointer: coarse) { .ccard .pips i { pointer-events: none; } }
+/* picking a checkpoint: a stepper over the foot of the arch (44 px targets), the time glyph steps aside */
+.ccard .cstep { position: absolute; left: 0; right: 0; bottom: 5%; height: 44px; display: flex; align-items: center; justify-content: space-between; opacity: 0; transform: translate3d(0, 6px, 0); pointer-events: none; transition: opacity .35s var(--ease), transform .5s var(--ease); }
+.ccard .cgl { transition: opacity .35s ease, transform .5s var(--ease); }
+.ccard.picking .cgl { opacity: 0; transform: translate3d(0, -10px, 0) scale(.85); }
+.ccard.picking .cstep { opacity: 1; transform: none; pointer-events: auto; }
+.ccard .cstep .st { position: relative; display: grid; place-items: center; width: 44px; height: 44px; color: var(--ivory-hi); cursor: pointer; transition: opacity .25s ease, color .2s ease; }
+.ccard .cstep .st::before { content: ''; position: absolute; inset: 9px; border-radius: 50%; border: 1px solid rgba(251, 239, 220, .32); background: rgba(11, 8, 6, .28); transition: border-color .2s ease, background .2s ease; }
+.ccard .cstep .st:hover::before, .ccard .cstep .st:active::before { border-color: var(--brass-hi); background: rgba(220, 180, 111, .2); }
+.ccard .cstep .st svg { position: relative; width: 38%; height: 38%; fill: none; stroke: currentColor; stroke-width: 9; stroke-linecap: round; stroke-linejoin: round; }
+.ccard .cstep .st.fwd svg { transform: rotate(180deg); }
+.ccard .cstep .st.end { opacity: .28; cursor: default; }
+.ccard .cpn { display: flex; align-items: baseline; gap: 2px; font-weight: 300; text-shadow: 0 1px 8px rgba(0, 0, 0, .6); }
+.ccard .cpn b { font-weight: 400; font-size: calc(26px * var(--ms)); color: var(--brass-hi); font-variant-numeric: lining-nums; }
+.ccard .cpn small { font-size: calc(14px * var(--ms)); letter-spacing: .06em; color: var(--dim); }
 .ccard.off .thumb { background: linear-gradient(180deg, #1b120c, #0d0907); }
 .ccard.off .thumb::after { display: none; }
 .ccard.off .cgl { stroke: rgba(243, 230, 210, .12); }
@@ -223,22 +245,23 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #confirm .item.yes.focused svg { stroke: var(--brass-hi); }
 
 /* ------------------------------------------------------------ the chapter card */
-#card { position: fixed; inset: 0; z-index: 40; display: grid; place-content: center; justify-items: center; color: var(--ivory-hi); pointer-events: auto; transition: opacity .6s var(--ease-io); overflow: hidden; }
+#card { position: fixed; inset: 0; z-index: 40; display: grid; place-content: center; justify-items: center; box-sizing: border-box; padding: var(--st) var(--sr) var(--sb) var(--sl); color: var(--ivory-hi); pointer-events: auto; transition: opacity .6s var(--ease-io); overflow: hidden; }
 #card.out { transition: opacity .9s var(--ease-io); }
 #card .cbg { position: absolute; inset: 0; background: var(--tone, #20140c); background: radial-gradient(ellipse 70% 62% at 50% 42%, color-mix(in srgb, var(--tone, #20140c) 74%, #fff3dc) 0%, var(--tone, #20140c) 52%, color-mix(in srgb, var(--tone, #20140c) 52%, #000) 100%); }
 /* a fine static grain over large gradients (no banding, a plaster feel) */
 #card .cbg::after, #loading::after { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .06; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 #card .cpat { position: absolute; inset: -96px; opacity: .55; background-size: 96px 96px; -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 45%, #000 10%, transparent 75%); mask-image: radial-gradient(ellipse 60% 55% at 50% 45%, #000 10%, transparent 75%); animation: drift 60s linear infinite; will-change: transform; }
 @keyframes drift { to { transform: translate3d(96px, 96px, 0); } }
-#card > :not(.cbg):not(.cpat):not(.cwait) { position: relative; }
-#card .cglyph { position: relative; width: min(26vw, 138px); height: min(26vw, 138px); }
+#card > :not(.cbg):not(.cpat) { position: relative; }
+#card .cglyph { position: relative; width: min(26vw, 138px, 24vh); height: min(26vw, 138px, 24vh); }
 #card .cglyph .l { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; stroke: var(--ivory-hi); stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
-#card .cn { margin-top: 18px; font-size: clamp(44px, 8vw, 96px); font-weight: 300; letter-spacing: .08em; padding-left: .08em; line-height: 1; opacity: 0; }
+#card .cn { margin-top: 18px; font-size: clamp(40px, min(8vw, 13vh), 96px); font-weight: 300; letter-spacing: .08em; padding-left: .08em; line-height: 1; opacity: 0; }
 #card .crule { display: flex; align-items: center; gap: 12px; margin-top: 18px; opacity: 0; }
 #card .crule i { width: 64px; height: 1px; background: rgba(251, 239, 220, .55); }
 #card .crule svg { width: 10px; height: 10px; fill: var(--ivory-hi); }
 #card .cl { margin-top: 14px; font-size: clamp(15px, 1.8vw, 21px); letter-spacing: .3em; padding-left: .3em; font-style: italic; color: rgba(251, 239, 220, .84); opacity: 0; }
-#card .cwait { position: absolute; left: 50%; bottom: calc(7vh + var(--sb)); width: 18px; height: 18px; margin-left: -9px; opacity: 0; transition: opacity .6s ease; }
+/* the waiting rosette sits in the card's own column, under the label, on every screen shape */
+#card .cwait { width: 18px; height: 18px; margin-top: clamp(20px, 6vh, 44px); opacity: 0; transition: opacity .6s ease; }
 #card .cwait svg { width: 100%; height: 100%; fill: none; stroke: rgba(251, 239, 220, .7); stroke-width: 5; animation: spin 3s linear infinite; }
 #card.waiting .cwait { opacity: 1; }
 #card.draw .l.ground { animation: cground 1.3s var(--ease) .2s forwards; transform-origin: 50% 80%; }
@@ -383,6 +406,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   .menu .legend { display: none; }
   #pause .where { left: 0; right: 0; top: calc(12vh + var(--st)); justify-content: center; }
   #pause .entries { top: auto; }
+  #pause .ctl { left: calc(20px + var(--sl)); right: calc(20px + var(--sr)); bottom: auto; top: calc(12vh + var(--st) + 104px); max-width: none; justify-content: center; gap: 10px 18px; }
   #settings .sheet { width: 100%; padding: calc(4vh + var(--st) + 44px) calc(20px + var(--sr)) calc(2vh + var(--sb)) calc(20px + var(--sl)); background: rgba(14, 9, 6, .94); }
   #settings .tabs { gap: 2px 18px; }
   #settings .tab { font-size: calc(17px * var(--ms)); }
@@ -397,7 +421,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   .ccard .arch { aspect-ratio: 1 / 1.2; }
   .ccard .num { margin-top: 8px; font-size: calc(28px * var(--ms)); }
   .ccard .pips { margin-top: 6px; gap: 2px; }
-  .ccard .pips i { width: 14px; height: 14px; }
+  .ccard .pips i { flex-basis: 16px; height: 16px; }
   .ccard .pips i::before { width: 5px; height: 5px; }
   #chapters header { left: 0; right: 0; display: flex; justify-content: center; top: calc(6vh + var(--st)); }
   #end .roll { right: 0; left: 0; width: auto; padding: 0 28px; }
@@ -418,6 +442,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   #pause.in .where { transform: translateY(-50%); }
   #pause .pg { width: 48px; height: 48px; }
   #pause .entries { top: 50%; }
+  #pause .ctl { right: auto; left: var(--gut); bottom: auto; top: calc(50% + 52px); max-width: 44vw; justify-content: flex-start; gap: 8px 18px; }
   #settings .sheet { padding-top: calc(4vh + var(--st)); width: min(640px, 66vw); }
   #settings .tabs { margin-top: 10px; }
   #settings .tab { min-height: 44px; }
@@ -429,7 +454,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   .ccard .num { margin-top: 6px; font-size: 24px; }
   .ccard .lab { font-size: 14px; }
   .ccard .pips { margin-top: 4px; gap: 2px; }
-  .ccard .pips i { width: 15px; height: 15px; }
+  .ccard .pips i { flex-basis: 16px; height: 16px; }
   .ccard .pips i::before { width: 5px; height: 5px; }
 }
 /* on a software rasteriser (SwiftShader, llvmpipe) every composited frame competes with the WebGL work in the same

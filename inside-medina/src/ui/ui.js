@@ -1,5 +1,5 @@
 import { FocusManager, Screen, item } from './focus.js';
-import { ICONS, icon, timeGlyph, TIME_GLYPHS, ROSETTE, STAR, zelligeTile } from './glyphs.js';
+import { ICONS, icon, timeGlyph, TIME_GLYPHS, ROSETTE, STAR, zelligeTile, key, stick, padButton } from './glyphs.js';
 import { SettingsScreen, defaultSettings, resolveSettings } from './settings.js';
 import { ChaptersScreen, captureThumb } from './chapters.js';
 import { HintDirector } from './hints.js';
@@ -324,11 +324,18 @@ export class UI {
     window.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' && this.focus.has(this.main)) this.mouse = { x: e.clientX / innerWidth * 2 - 1, y: -(e.clientY / innerHeight * 2 - 1) }; }, { passive: true });
     this.fillMain();
   }
+  // a journey to continue (§7.1: continue only with a save): a checkpoint passed, a later chapter or time in play;
+  // a save that holds only settings (or progress just reset) is not one
+  hasJourney() {
+    const d = this.save?.data;
+    return !!(this.save?.exists && d && (d.cp > 0 || d.chapter !== 'souk' || d.stats?.playSec > 0));
+  }
   fillMain() {
     const el = this.mainEl; if (!el) return;
-    const d = this.save?.data, has = !!this.save?.exists && !!d;
+    const d = this.save?.data, has = this.hasJourney();
     const c = el.querySelector('[data-k="continue"]');
     c.hidden = !has;
+    if (!has && this.focus?.current === c) this.focus.set(this.main.initial());
     if (has) {
       const m = meta(d.chapter);
       c.querySelector('.sub').innerHTML = m ? `${timeGlyph(m.glyph, 'sg')}<span>${esc(m.numeral)}</span><em>${esc(m.label)}</em>` : '';
@@ -344,6 +351,17 @@ export class UI {
       ? `<span>${padBtn(kind, 'bottom')}<em>select</em></span><span>${padBtn(kind, 'right')}<em>back</em></span>`
       : '<span><kbd class="key wide">enter</kbd><em>select</em></span><span><kbd class="key wide">esc</kbd><em>back</em></span>';
     for (const f of this.root.querySelectorAll('.legend')) f.innerHTML = html;
+    this.chapters?.legend();
+    this.fillControls(d, kind);
+  }
+  // the pause screen keeps the play controls in view (the verbs the hints teach), for the hands in use
+  fillControls(d = this.input?.lastDevice || 'keyboard', kind = this.input?.pad?.kind || 'xbox') {
+    const el = this.pause?.el.querySelector('.ctl'); if (!el) return;
+    const kl = this.input?.keyLabels, pad = (name) => `<span class="pad">${icon(name)}</span>`;
+    const G = d === 'touch' ? { move: stick('lr'), jump: pad('jump'), grab: pad('hand'), climb: stick('up'), crawl: stick('down') }
+      : d === 'gamepad' ? { move: stick('lr'), jump: padButton(kind, 'bottom'), grab: padButton(kind, 'left'), climb: stick('up'), crawl: stick('down') }
+        : { move: `${key(kl?.left || 'a')}${key(kl?.right || 'd')}`, jump: key('space', true), grab: key('shift', true), climb: key(kl?.up || 'w'), crawl: key(kl?.down || 's') };
+    el.innerHTML = Object.entries(G).map(([k, g]) => `<span>${g}<em>${k}</em></span>`).join('');
   }
   openMain() {
     if (this.autostart) return;
@@ -399,7 +417,7 @@ export class UI {
   buildPause() {
     const el = document.createElement('section');
     el.id = 'pause'; el.className = 'menu'; el.setAttribute('role', 'menu'); el.setAttribute('aria-label', 'paused');
-    el.innerHTML = `<header class="where"><div class="pg"></div><div class="pt"><span class="pn"></span><em class="pl"></em></div><div class="pips"></div></header><nav class="entries"></nav><footer class="legend"></footer>`;
+    el.innerHTML = `<header class="where"><div class="pg"></div><div class="pt"><span class="pn"></span><em class="pl"></em></div><div class="pips"></div></header><nav class="entries"></nav><aside class="ctl" aria-label="controls"></aside><footer class="legend"></footer>`;
     this.menus.appendChild(el);
     const nav = el.querySelector('.entries');
     const acts = [

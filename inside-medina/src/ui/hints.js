@@ -17,6 +17,30 @@ const DONE = {
   crank: (g) => Math.abs(g.input.state.y) > 0.6 || !!g.input.pointer?.active,
   aim: (g) => !!g.input.pointer?.active,
 };
+// the verbs every chapter leans on, taught where the boy meets them (any chapter; a chapter's own L.hints come
+// first): a vine's foot, a ledge he hangs from, a crate or a lever at hand, something he walks into that a jump
+// clears. `when` must hold for `after` seconds; the glyph stays while it holds (a short grace) and fades once the
+// action happens. Puzzle-honest: a wall too high for a jump never shows the jump.
+const P_W = 0.34, STEP = 0.26, HOP = 0.92, REACH = 2.54; // width; kerb step; a jump's rise; a ledge a jump reaches
+function jumpable(p) {
+  const b = p.body, dir = p.facing || 1, front = b.x + dir * P_W / 2;
+  if (!p.phys?.colliders) return false;
+  for (const c of p.phys.colliders(b)) {
+    if (c.oneWay) continue;
+    const near = dir > 0 ? c.x0 - front : front - c.x1;
+    if (near < -0.06 || near > 0.3 || c.y0 > b.y + 0.5 || c.y1 <= b.y + STEP) continue;
+    const rel = c.y1 - b.y;
+    if (rel <= HOP || ((dir > 0 ? c.ledgeL : c.ledgeR) && rel <= REACH)) return true;
+  }
+  return false;
+}
+const free = (g, p) => p.state === 'ground' && !p.grip && !p.lever && !p.dead;
+const CONTEXT = [
+  { id: 'ctx:climb', glyph: 'up', after: 0.8, when: (g, p) => free(g, p) && !!p.nearVine?.() },
+  { id: 'ctx:ledge', glyph: 'up', after: 1.2, when: (g, p) => p.state === 'hang' },
+  { id: 'ctx:grab', glyph: 'grab', after: 1.4, when: (g, p) => free(g, p) && !p.crawling && !!(p.crateAdjacent?.(p.facing) || p.crateAdjacent?.(-p.facing) || g.interactNear?.(p.x, p.y, p.facing)) },
+  { id: 'ctx:jump', glyph: 'jump', after: 0.7, when: (g, p) => free(g, p) && !p.crawling && Math.abs(g.input.state.x) > 0.5 && Math.sign(g.input.state.x) === p.facing && (Math.abs(p.body.vx) < 0.05 || p.pushing === 0.01) && jumpable(p) }, // 0.01: a crate that will not move
+];
 const CUES = { alarm: 'horn', horn: 'horn', shout: 'shout', guardFrustrated: 'shout', dart: 'dart', turret: 'dart', dartGuard: 'dart', drum: 'drum' };
 
 export class HintDirector {
@@ -24,12 +48,12 @@ export class HintDirector {
     this.ui = ui; this.game = null;
     this.mode = 'first'; this.soundCues = false;
     this.el = ui.root.querySelector('#hints');
-    this.zoneT = new Map(); this.active = null; this.cueT = { l: 0, r: 0 };
+    this.zoneT = new Map(); this.ctxT = new Map(); this.active = null; this.cueT = { l: 0, r: 0 };
     this._v = new THREE.Vector3();
   }
   attach(game) {
     this.game = game;
-    game.events.on('chapterStart', () => { this.zoneT.clear(); this.hide(); });
+    game.events.on('chapterStart', () => { this.zoneT.clear(); this.ctxT.clear(); this.hide(); });
     game.events.on('death', () => this.hide());
   }
   seen(id) { return !!this.ui.save?.data?.seenHints?.[id]; }
@@ -81,6 +105,8 @@ export class HintDirector {
     this.hide();
     const g = this.game;
     if (h.id) g.save?.seenHint?.(h.id);
+    // a verb learnt from a chapter's zone is not taught again from context
+    for (const c of CONTEXT) if (c.glyph === h.glyph && c.id !== h.id) g.save?.seenHint?.(c.id);
   }
 
   update(dt) {
@@ -90,10 +116,15 @@ export class HintDirector {
     const playing = g.mode === 'play' && !g.paused && !g.menuOpen;
     const h = this.active;
     if (h) {
+      if (!playing) {
+        // a pause or a menu holds the glyph out of sight; leaving play ends it
+        if (g.mode !== 'play') this.hide(); else if (this.el.firstChild) this.el.firstChild.style.opacity = '0';
+        return;
+      }
       h.t += dt;
-      const zoneOK = h.glyph === 'move' || (this.inZone(h) && !h.unless?.(g));
-      if (!playing && g.mode !== 'play') { this.hide(); return; }
       if (DONE[h.glyph]?.(g, h)) { this.done(h); return; }
+      if (h.when) h.off = h.when(g, g.player) ? 0 : (h.off || 0) + dt;
+      const zoneOK = h.glyph === 'move' || (h.when ? h.off < 0.6 : this.inZone(h) && !h.unless?.(g));
       if (!zoneOK || h.t > 14) { this.hide(); return; }
       this.place(h);
       return;
@@ -106,7 +137,14 @@ export class HintDirector {
       if (!this.inZone(z)) { this.zoneT.delete(i); continue; }
       const t = (this.zoneT.get(i) || 0) + dt;
       this.zoneT.set(i, t);
-      if (t >= (z.after ?? 0) && !z.unless?.(g)) { this.show({ ...z, id }); this.zoneT.delete(i); break; }
+      if (t >= (z.after ?? 0) && !z.unless?.(g)) { this.show({ ...z, id }); this.zoneT.delete(i); return; }
+    }
+    for (const c of CONTEXT) {
+      if (this.mode === 'first' && this.seen(c.id)) continue;
+      if (!c.when(g, g.player)) { this.ctxT.delete(c.id); continue; }
+      const t = (this.ctxT.get(c.id) || 0) + dt;
+      this.ctxT.set(c.id, t);
+      if (t >= c.after) { this.show({ ...c, x0: g.player.x }); this.ctxT.delete(c.id); return; }
     }
   }
   inZone(z) {

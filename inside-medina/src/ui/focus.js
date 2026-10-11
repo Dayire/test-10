@@ -80,7 +80,7 @@ export class FocusManager {
     const t = this.top;
     if (t) {
       if (!t.isOpen) t.show(); else t.el.inert = false;
-      this.set(t.last && t.el.contains(t.last) ? t.last : t.initial?.() || t.list()[0], { scroll: true });
+      this.set(t.last && t.list().includes(t.last) ? t.last : t.initial?.() || t.list()[0], { scroll: true }); // the last item may have gone (continue after a reset)
     } else { this.current = null; if (document.activeElement && this.ui.root.contains(document.activeElement)) document.activeElement.blur(); }
     if (sound) this.ui.sound('close');
     this.ui.menuChanged();

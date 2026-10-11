@@ -2,10 +2,12 @@
 //   keyboard   boot → settings → music 4 → back → new journey → play 2 s → Esc → title → continue resumes
 //   gamepad    the same with a stubbed standard pad (d-pad, A, B, RB, Start) and its rumble
 //   storage    localStorage throwing: playable, settings in memory, the save code round-trips
-//   persist    settings survive a reload (and apply)
+//   persist    settings survive a reload (and apply); a save of settings alone shows no continue
 //   autostart  ?autostart=1 skips every menu
 //   menubg     the live title renders at 30 fps and half resolution under the menus (requests/P.md #8)
 //   chapters   chapter select by keyboard: the card covers the load, the chapter starts at the picked checkpoint
+//   hints      wordless first steps: the jump glyph at the sack pile (none at a wall too high), grab by the crate;
+//              a pause holds the glyph out of sight and lists the play controls
 //   crawl      crawl set to toggle: menu navigation never latches it, holding a crate (or a lab mirror) never does,
 //              a down-press in play does
 //   artifact   npm run build:artifact: one page ≤ 3 MB, run in test.html inside a sandboxed iframe, no console
@@ -216,10 +218,19 @@ await scenario('persist', async () => {
   await page.reload(); await ready(page); await frames(page, 2);
   const after = await page.evaluate(() => ({ S: { grain: __ui.S.grain, menuScale: __ui.S.menuScale, crawlMode: __ui.S.crawlMode, sfx: __ui.S.volumes.sfx },
     applied: { grain: __medina.game.settings.grain, crawl: __ui.input.settings.crawlMode, scale: getComputedStyle(document.getElementById('ui')).getPropertyValue('--menu-scale').trim(), sfx: __medina.game.settings.volumes?.sfx } }));
+  // a save holding only settings is no journey: continue stays hidden and new journey has the focus; a checkpoint
+  // shows it, reset progress hides it again
+  after.cont = await page.evaluate(() => {
+    const c = document.querySelector('#title .entry[data-k="continue"]'), r = { exists: __ui.save.exists, hidden: c.hidden, focus: __ui.focus.current?.dataset.k };
+    __ui.save.data.cp = 2; __ui.save.write(); __ui.fillMain(); r.withCp = !c.hidden;
+    __ui.settings.resetProgress(); r.afterReset = c.hidden; r.focusAfter = __ui.focus.current?.dataset.k;
+    return r;
+  });
   await page.evaluate(() => localStorage.clear());
   await ctx.close();
   const ok = after.S.grain === 40 && after.S.menuScale === 125 && after.S.crawlMode === 'toggle' && after.S.sfx === 7
-    && after.applied.grain === 40 && after.applied.crawl === 'toggle' && after.applied.scale === '1.25' && after.applied.sfx === 7 && !errors.length;
+    && after.applied.grain === 40 && after.applied.crawl === 'toggle' && after.applied.scale === '1.25' && after.applied.sfx === 7
+    && after.cont.exists && after.cont.hidden && after.cont.focus === 'new' && after.cont.withCp && after.cont.afterReset && after.cont.focusAfter === 'new' && !errors.length;
   return [ok || `persist ${JSON.stringify({ before, after })} ${errors.slice(0, 2).join(' | ')}`, { before, after }];
 });
 
@@ -320,6 +331,50 @@ await scenario('crawl', async () => {
     && out.crate.grip && !out.crate.latch && !out.crate.crawling && !out.crateLet.latch && !out.crateLet.crawling
     && (!lab || (Math.abs(out.mirror.n1 - out.mirror.n0) === 1 && !out.mirror.latch && !out.mirrorLet.crawling)) && !errors.length;
   return [ok || `crawl ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
+});
+
+await scenario('hints', async () => {
+  // a first journey in the souk: walking into the sack pile shows the jump glyph, a jump ends it and the save keeps
+  // it; idling by the crate shows grab; a pause hides the glyph and lists the controls; a wall too high for a jump
+  // shows nothing
+  const { page, ctx, errors } = await open({ url: `${BASE}?${Q}&autostart=1&nosave=1&chapter=souk&cp=0` });
+  await ready(page); await waitFor(page, () => __medina.game.mode === 'play');
+  const hint = () => page.evaluate(() => { const h = document.querySelector('#hints .hint:not(.out)'); return h ? { glyph: h.dataset.glyph, opacity: +h.style.opacity, html: h.innerHTML.length } : null; });
+  const out = {};
+  await page.evaluate(() => __medina.teleport(7.2, 0, 1)); await frames(page, 4);
+  await page.keyboard.down('ArrowRight');
+  await waitFor(page, () => document.querySelector('#hints .hint:not(.out)')?.dataset.glyph === 'jump', null, 20000).catch(() => {});
+  await page.waitForTimeout(700); await frames(page, 3); // it fades in
+  out.jump = await hint();
+  // a pause holds it out of sight and shows the controls
+  await page.keyboard.up('ArrowRight');
+  await key(page, 'Escape'); await waitFor(page, () => __ui.focus.top?.el.id === 'pause', null, 30000); await frames(page, 3);
+  out.paused = { hint: await hint(), ctl: await page.evaluate(() => [...document.querySelectorAll('#pause .ctl em')].map((e) => e.textContent).join(' ')) };
+  await key(page, 'Escape'); await waitFor(page, () => !__medina.game.paused && !__ui.focus.top, null, 30000);
+  await page.keyboard.down('ArrowRight'); await frames(page, 4);
+  out.resumed = await hint();
+  await key(page, 'Space'); await page.keyboard.up('ArrowRight'); await frames(page, 6);
+  out.afterJump = { hint: await hint(), seen: await page.evaluate(() => !!__ui.save.data.seenHints['ctx:jump']) };
+  // the crate at his side
+  await page.evaluate(() => __medina.teleport(36.45, 0, 1)); await frames(page, 2);
+  await waitFor(page, () => document.querySelector('#hints .hint:not(.out)')?.dataset.glyph === 'grab', null, 20000).catch(() => {});
+  await page.waitForTimeout(700); await frames(page, 3);
+  out.grab = await hint();
+  // the terrace wall (3.1 m) with no crate: no jump glyph
+  await page.evaluate(() => { __medina.game.level.crateA.setState({ x: 30, y: 0 }); __ui.save.data.seenHints['ctx:grab'] = true; delete __ui.save.data.seenHints['ctx:jump']; __ui.hints.hide(); __medina.teleport(41.7, 0, 1); });
+  await page.keyboard.down('ArrowRight'); await page.waitForTimeout(2500); await frames(page, 2);
+  out.wall = await hint();
+  await page.keyboard.up('ArrowRight');
+  // the crate pushed to its foot: now a jump reaches the crate's top, and the glyph shows
+  await page.evaluate(() => { __medina.game.level.crateA.setState({ x: 41.5, y: 0 }); __medina.teleport(40.3, 0, 1); });
+  await page.keyboard.down('ArrowRight');
+  await waitFor(page, () => document.querySelector('#hints .hint:not(.out)')?.dataset.glyph === 'jump', null, 15000).catch(() => {});
+  out.crateStep = await hint();
+  await page.keyboard.up('ArrowRight');
+  await ctx.close();
+  const ok = out.jump?.glyph === 'jump' && out.jump.opacity > 0.5 && out.jump.html > 20 && out.paused.hint?.opacity === 0 && out.paused.ctl === 'move jump grab climb crawl'
+    && out.resumed?.glyph === 'jump' && out.resumed.opacity > 0 && !out.afterJump.hint && out.afterJump.seen && out.grab?.glyph === 'grab' && out.grab.opacity > 0.5 && !out.wall && out.crateStep?.glyph === 'jump' && !errors.length;
+  return [ok || `hints ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
 });
 
 // ------------------------------------------------------------------ builds served from disk
