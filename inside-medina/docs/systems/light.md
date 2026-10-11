@@ -217,8 +217,13 @@ the descending terminator, IV-C sun shafts on a captain, IV-E the heliostat and 
 the day (sunset → dusk → night → dawn → sunrise); `?look=<preset>` holds one preset for every room. Each puzzle room
 holds its frame while the boy is in it (`frame(x0, x1, cx)`: keys at both ends and the middle with focusBias cx − x
 and no look-ahead), so the source, the tool and the target share one frame, and `distPortrait` fits the room's span
-inside a phone's 52° field; the compact rooms (tilt, the bolt's work zone) follow him closer on a phone. A won sunset
-clock sets the sun over 6 s (the last ray is gone in the night rooms). In the lamp square the gate stands at the
+inside a phone's 52° field; the compact rooms (tilt, the bolt's work zone) follow him closer on a phone. On the clock tower the frame stays down on the
+ray's whole path (yBias keys undo his height: the camera follows the ground he stands on), so F3 and L8 share it
+while he cranks; the crank room's frame keeps M7 on the floor above the legend while he cranks on the gallery; the
+dawn ray enters from beyond the frame's edge; the night rooms come closer on a phone. A won sunset
+clock sets the sun over 6 s (the last ray is gone in the night rooms). The burn room's rope is tied to a wall ring
+and runs up through the burn point, over two pulleys under the beam, down to the counterweight; the window
+apertures glow with the live sky (the sun's colour and strength, plus the sky's light). In the lamp square the gate stands at the
 front of a wall that parts the square into two courts, LL1 on an iron arm from it. Checkpoints
 start each room with the earlier ones solved. The lamp room is an open square (no facades in front of the
 lamp-keepers' wall), so the cones fall whole from the lamps to the street. Tripwires hum (`tripHum`) within 3 m.
@@ -231,17 +236,18 @@ node tools/playtest.mjs --chapter lab --port N  # the lab bot, all twelve rooms
 node tools/negative.mjs --chapter lab --port N  # the lab negatives
 ```
 
-Measured on the dev server (headless Chromium, SwiftShader), on the branch head after the fix round:
+Measured on the dev server (headless Chromium, SwiftShader), on the branch head after the second fix round:
 
 | Check | Result |
 |---|---|
 | `light-unit.mjs` | 30 / 30: maths, primitives, 100 random traces against brute force (worst error 2.8e-14 m), finger aim inside a tray's travel (28 aims from the ends and the middle), every traced hit of §3–5 |
-| lab bot | all twelve rooms, 0 deaths, 287.42 s of game time, 0 jumps while gripping, trace p95 0.200 ms, end hash `0f3383bb` |
-| lab negatives | 20 / 20 in 628 s: up never jumps (100 trials), a second tap lets a latched grip go (touch M2 and K2, toggle CR3; taps of 2, 12 and 60 steps), the jump button, wrong notch (×12 in six rooms, never latched, level ≤ 0.02), one beam never burns, bolt dash, tripwires, the darted guard, dazzle crossing, the dazzle's end, the idle sunset clock (dims to `#0b1026`), a won clock sets the sun, lost mirror, death restores, finger aim, lit = seen, sun shafts, p95, the beam's point light in view, census |
+| lab bot | all twelve rooms, 0 deaths, 287.39 s of game time, 0 jumps while gripping, trace p95 0.200 ms, end hash `75367c06` (the crank and capstan stand points moved) |
+| lab negatives | 21 / 21: up never jumps (100 trials), a second tap lets a latched grip go (touch M2 and K2, toggle CR3; taps of 2, 12 and 60 steps), the jump button, wrong notch (×12 in six rooms, never latched, level ≤ 0.02), one beam never burns, bolt dash, tripwires, the darted guard, dazzle crossing, the dazzle's end, the idle sunset clock (the screen reads (11, 15, 37) at the end of the fade: `#0b1026`), a won clock sets the sun, lost mirror, death restores, finger aim, lit = seen, sun shafts, p95, the beam's point light in view, a photocell on a lift and a hatch to its lock (new), census |
+| hands on props | wrist-to-hold distance after render frames, 37 cases (M2 every notch from −90 to +90 from the left, every other from the right; K2 and K1 at every 30°; the capstan idle and turning either way for 0.6 to 3.6 s): every wrist a palm (0.05 m) from its hold, 0.066 m at most while the capstan turns (the summed miss of both wrists was up to 0.89 m on a tray stood on end, 0.47 m on a crank and 0.57 m on the capstan turning right) |
 | trace cost | p95 0.20 ms, median 0.10 ms over 600 passes with 22 sources (budget 0.35 ms) |
 | Chapter I | souk bot hash unchanged (`7bd4df65`, 85.37 s, 0 deaths), souk negatives 13 / 13 under the one searchlight rule |
 | census | `{dir 1, hemi 1, point 7, spot 2}` in the lab, the souk and the lab again (lab negative) |
-| props | lab-wide 115 meshes / 67 shadow casters for 62 light entities (152 / 93 before the merge); a wheeled mirror 3 draws (6 before) |
+| props | lab-wide 115 meshes / 67 shadow casters for 62 light entities (152 / 93 before the merge); a wheeled mirror 3 draws (6 before); the burn room's pulley rig adds two rope meshes (no shadow), its wheels and straps go into the static batch |
 | draw calls (medium, frames with a shadow update) | 0@4 175, 1@19 203, 3@53 200 (207 before), 4@70 204, 5@98 185, 6@114 187, 7@131 184, 9@190 245, 10@216 189, 11@330 147, 12@350 175, 12@475 137; frames without one about 100. The rest above §8.5's 180 is the lab's scenery (facades and far city), which the chapters budget themselves |
 | LDR cone (P.md #9) | `?ldr=1&tier=low` courtyard cone matches the float path (mean luma 83.0 vs 85.8); `perf.mjs --check ldr` passes (measured on the previous round; the cone's code is unchanged) |
 | foundation | 15 / 17 (boot budget passes, median 22132 ms against 23893; context loss passes): the two failures assume the one-preset lab stub (requests/L.md #6, patch included; with it applied both pass: the dev end at the heliostat reloads x 1.5 and keeps the save, and the lab holds 5 maps for its 5 presets) |
