@@ -5,7 +5,6 @@ import { PLAYABLE } from '../chapters/index.js';
 // Chapter select (FULL_GAME §7.2): four arched cards with the numeral, the time-of-day glyph, a thumbnail
 // (320 × 180 JPEG captured on first reaching the chapter, or the chapter's palette) and checkpoint pips:
 // any reached checkpoint can be picked. Locked chapters are dark arches.
-const CP_COUNT = { souk: 7, sundown: 11, night: 8, dawn: 7 }; // FULL_GAME §2–5; learned counts win
 const ARCH = 'M0 1V0.42C0 0.2 0.22 0.05 0.5 0C0.78 0.05 1 0.2 1 0.42V1Z';
 
 export function captureThumb(canvas) {
@@ -55,7 +54,7 @@ export class ChaptersScreen {
   }
   render() {
     const ui = this.ui, d = ui.save?.data || {}, cards = this.el.querySelector('.cards');
-    const counts = { ...CP_COUNT, ...(ui.local.cps || {}) };
+    const counts = { ...Object.fromEntries(PLAYABLE.map((m) => [m.id, m.cps])), ...(ui.local.cps || {}) }; // the registry's; learned counts win
     cards.innerHTML = '';
     PLAYABLE.forEach((m, i) => {
       const open = this.reached(m.id), max = open ? Math.max(0, d.cps?.[m.id] ?? 0) : -1;
