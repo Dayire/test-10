@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Body } from '../physics.js';
 import { DEG, NOTCH, angleOf, alphaFor, notchOf } from './trace.js';
 import { magnet } from './logic.js';
-import { trayMesh, mirrorStand, axleMesh, crankBracket, crankHandle, capstanMesh } from '../../assets/lightprops.js';
+import { trayMesh, mirrorStand, crankBracket, crankHandle, capstanMesh } from '../../assets/lightprops.js';
 import { setColor } from '../../assets/geom.js';
 
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3();
@@ -64,8 +64,7 @@ export class Mirror {
     const tilt = new THREE.Group(); tilt.rotation.x = TILT;
     this.tray = trayMesh(M, { r: this.r });
     tilt.add(this.tray);
-    pivot.add(tilt);
-    if (this.kind !== 'continuous') pivot.add(axleMesh(M, { r: this.r }));
+    pivot.add(tilt); // (the axle is the stand's or the bracket's: a cylinder about z needs no turning)
     root.position.set(this.bx, this.by, this.z);
     pivot.rotation.z = this.alpha * DEG;
     g.add(root);
@@ -214,7 +213,7 @@ export class Crank {
       const geo = new THREE.CylinderGeometry(0.008, 0.008, len, 5); geo.translate(0, len / 2, 0);
       const rm = new THREE.Mesh(setColor(geo, 0xffffff), game.mats.get('ropeMat'));
       rm.position.copy(a); rm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
-      rm.castShadow = true;
+      rm.castShadow = false; // a hairline: its shadow would be a flickering thread
       game.add(rm);
     }
   }

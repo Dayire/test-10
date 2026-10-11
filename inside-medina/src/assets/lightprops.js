@@ -6,7 +6,9 @@ import { patchMaterial } from '../render/atmosphere.js';
 // Sunwork props: the polished brass tray (the game's bookend object), mirror stands, crank brackets and
 // handles, the 12-petal rosette lock, the iron sun-bolt, tripwire lamps and sensor turrets, the hemp rope,
 // the brass star inlay at a kerb stop, and the sprite textures of glints and sunspots. Builders return groups
-// (entities move them); everything is procedural.
+// (entities move them); everything is procedural. Draw calls are kept low (chapters fill rooms with these): the
+// parts that move together share one mesh, a second metal is a vertex tint on the first, and small parts cast no
+// shadow (a wheeled mirror is 3 draws, 2 shadow casters).
 
 // mirror and lock materials (registered once on the session's material library)
 export const LIGHT_MATERIALS = {
@@ -28,6 +30,9 @@ const prep = (g) => {
   return n;
 };
 const merged = (list) => mergeGeometries(list.map(prep));
+// a part drawn in another part's material, told apart by a vertex tint (iron on wood, engraving on the dish)
+const tint = (g, hex) => setColor(prep(g), hex);
+const IRON = 0x3b3632, AGED = 0xb08c58;
 const mesh = (geos, mat, { cast = true, receive = true } = {}) => {
   const m = new THREE.Mesh(Array.isArray(geos) ? merged(geos) : prep(geos), mat);
   m.castShadow = cast; m.receiveShadow = receive;
@@ -51,22 +56,24 @@ export function trayMesh(mats, { r = 0.4 } = {}) {
     if (y > -0.002 * r && rr < 0.84 * r) pos.setY(i, y + 0.0035 * r * Math.sin(x * 61 / r) * Math.sin(z * 57 / r));
   }
   dish.computeVertexNormals();
-  grp.add(mesh(dish, mats.get('mirrorBrass')));
-  // engraved rings and an eight-point star around the boss (aged brass, barely raised)
-  const deco = [];
+  // engraved rings and an eight-point star around the boss (aged brass, barely raised): a darker tint on the dish
+  const deco = [dish];
   for (const k of [0.36, 0.64]) { const t = new THREE.TorusGeometry(k * r, 0.006 * r, 4, 48); t.rotateX(Math.PI / 2); t.translate(0, 0.004 * r, 0); deco.push(t); }
   const star = new THREE.Shape();
   for (let i = 0; i <= 16; i++) { const a = (i / 16) * Math.PI * 2, rr = (i % 2 ? 0.13 : 0.26) * r; i ? star.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : star.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); }
   const hole = new THREE.Path(); hole.absarc(0, 0, 0.09 * r, 0, Math.PI * 2, true); star.holes.push(hole);
   const sg = extrude(star, 0.004 * r, { curveSeg: 12 }); sg.rotateX(-Math.PI / 2); sg.translate(0, 0.008 * r, 0); deco.push(sg);
-  grp.add(mesh(deco, mats.get('brassAged'), { cast: false }));
+  for (let i = 1; i < deco.length; i++) deco[i] = tint(deco[i], AGED);
+  grp.add(mesh(deco, mats.get('mirrorBrass')));
   grp.userData.r = r;
   return grp;
 }
 
 // ---------------------------------------------------------------- mirror stands
 // The 0.7 × 0.8 stand of a wheeled mirror (a wooden cart with iron-tyred wheels and brass corner plates) or of
-// an anchored one (a moulded stone plinth), with the brass yoke that holds the tray's axle at pivotH.
+// an anchored one (a moulded stone plinth), with the brass yoke and the tray's axle at pivotH (a cylinder about z
+// looks the same whatever the tray's angle, so it stays on the stand). Two draws: wood or stone with its iron
+// tinted in, and the brass (no shadow: the cart's own shadow covers it).
 export function mirrorStand(mats, { kind = 'wheeled', pivotH = 1.2, r = 0.4 } = {}) {
   lightMaterials(mats);
   const grp = new THREE.Group();
@@ -96,14 +103,15 @@ export function mirrorStand(mats, { kind = 'wheeled', pivotH = 1.2, r = 0.4 } = 
     brass.push(tube([new THREE.Vector3(0, 0.82, sz * (zy - 0.06)), new THREE.Vector3(0, 0.98, sz * zy), new THREE.Vector3(0, pivotH - 0.02, sz * zy)], 0.022, 10, 6));
     const cap = new THREE.SphereGeometry(0.038, 10, 8); cap.translate(0, pivotH, sz * zy); brass.push(cap);
   }
-  if (wood.length) grp.add(mesh(wood, mats.get('wood')));
-  if (stone.length) grp.add(mesh(stone, mats.get('limestone')));
-  grp.add(mesh(brass, mats.get('brassAged')));
-  if (iron.length) grp.add(mesh(iron, mats.get('iron')));
+  const ax = new THREE.CylinderGeometry(0.018, 0.018, 2 * zy, 8); ax.rotateX(Math.PI / 2); ax.translate(0, pivotH, 0); brass.push(ax);
+  const ironT = iron.map((g) => tint(g, IRON));
+  if (wood.length) grp.add(mesh([...wood, ...ironT], mats.get('wood')));
+  if (stone.length) grp.add(mesh([...stone, ...ironT], mats.get('limestone')));
+  grp.add(mesh(brass, mats.get('brassAged'), { cast: false }));
   return grp;
 }
 
-// the axle across the yoke (turns with the tray)
+// the axle across the yoke (stands carry their own; kept for chapters that hang a tray elsewhere)
 export function axleMesh(mats, { r = 0.4 } = {}) {
   lightMaterials(mats);
   const g = new THREE.CylinderGeometry(0.018, 0.018, 2 * (r + 0.07), 8); g.rotateX(Math.PI / 2);
@@ -125,7 +133,7 @@ export function crankBracket(mats, { len = 1.6, r = 0.4 } = {}) {
   const groove = new THREE.TorusGeometry(0.075, 0.012, 5, 18); groove.translate(0, 0, zb); iron.push(groove);
   const ax = new THREE.CylinderGeometry(0.02, 0.02, r + 0.12, 8); ax.rotateX(Math.PI / 2); ax.translate(0, 0, zb / 2); brass.push(ax);
   const grp = new THREE.Group();
-  grp.add(mesh(iron, mats.get('iron')), mesh(brass, mats.get('brassAged')));
+  grp.add(mesh([...brass, ...iron.map((g) => tint(g, IRON))], mats.get('brassAged')));
   return grp;
 }
 
@@ -158,7 +166,7 @@ export function capstanMesh(mats, { h = 0.8, bar = 0.62 } = {}) {
   wood.push(lathe(smoothProfile([[0.001, 0.07], [0.17, 0.07], [0.15, 0.3], [0.13, 0.55], [0.15, h - 0.12], [0.18, h - 0.06], [0.18, h], [0.001, h]], 2), 16));
   for (const y of [0.12, h - 0.1]) { const b = new THREE.TorusGeometry(0.165, 0.014, 6, 24); b.rotateX(Math.PI / 2); b.translate(0, y, 0); brass.push(b); }
   const cap = new THREE.CylinderGeometry(0.09, 0.19, 0.08, 16); cap.translate(0, h + 0.04, 0); brass.push(cap);
-  grp.add(mesh(iron, mats.get('iron')), mesh(brass, mats.get('brassAged')));
+  grp.add(mesh([...brass, ...iron.map((g) => tint(g, IRON))], mats.get('brassAged')));
   const wheel = new THREE.Group();
   const bars = [wood[0]];
   const bw = [];
@@ -166,7 +174,7 @@ export function capstanMesh(mats, { h = 0.8, bar = 0.62 } = {}) {
     const b = new THREE.CylinderGeometry(0.026, 0.032, bar, 6); b.rotateZ(Math.PI / 2); b.translate(0.17 + bar / 2, h - 0.08, 0); b.rotateY((i / 4) * Math.PI * 2); bw.push(b);
     const k = new THREE.SphereGeometry(0.04, 8, 6); k.translate(0.17 + bar, h - 0.08, 0); k.rotateY((i / 4) * Math.PI * 2); bw.push(k);
   }
-  wheel.add(mesh(bars, mats.get('wood')), mesh(bw, mats.get('woodDark')));
+  wheel.add(mesh([...bars, ...bw.map((g) => tint(g, 0x6a5038))], mats.get('wood')));
   grp.add(wheel);
   grp.userData.wheel = wheel; grp.userData.axis = 'y';
   return grp;
@@ -270,7 +278,7 @@ export function sensorMesh(mats) {
   const ball = [];
   ball.push(new THREE.SphereGeometry(0.055, 14, 10));
   const brow = new THREE.TorusGeometry(0.058, 0.009, 5, 16, Math.PI); brow.rotateY(Math.PI / 2); ball.push(brow);
-  eye.add(mesh(ball, mats.get('mirrorBrass')));
+  eye.add(mesh(ball, mats.get('mirrorBrass'), { cast: false }));
   const irisMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.05, 0.03, 0.02) });
   const iris = new THREE.Mesh(new THREE.CircleGeometry(0.026, 12), irisMat);
   iris.position.x = 0.056; iris.rotation.y = Math.PI / 2; eye.add(iris);
@@ -290,9 +298,8 @@ export function ropeMesh(mats, { len = 1.2, r = 0.035 } = {}) {
     for (let i = 0; i <= 24; i++) { const t = i / 24, a = t * len * 18 + (k / 3) * Math.PI * 2; pts.push(new THREE.Vector3(Math.cos(a) * r * 0.45, -t * len, Math.sin(a) * r * 0.45)); }
     strands.push(tube(pts, r * 0.55, 48, 5));
   }
-  grp.add(mesh(strands, mats.get('hemp')));
   const hook = new THREE.TorusGeometry(0.05, 0.012, 6, 14, Math.PI * 1.4); hook.rotateZ(-Math.PI * 0.2); hook.translate(0, 0.04, 0);
-  grp.add(mesh([hook], mats.get('iron')));
+  grp.add(mesh([...strands, tint(hook, 0x2c2826)], mats.get('hemp')));
   return grp;
 }
 
