@@ -185,10 +185,12 @@ export class ChapterLoader {
       const K = batch.kit();
       const r = rng(def.seed ?? 42);
       const helpers = createLevelKit(g, { K, root, L, r });
-      const kit = { ...helpers, K, root, L, r, batch, mats: g.mats, phys: g.phys, game: g, add: (o) => g.add(o), track: (o) => g.track(o), ...this.scopedKit() };
-      prog(0.06, 'raising walls…');
-      // DETAIL.lite is set around every slice of a generator's build
+      // DETAIL.lite is set around every synchronous slice of the build (the call, each generator step), never across
+      // an await: whatever else runs meanwhile builds at full detail. An async build wraps its later slices in
+      // kit.detail(fn) (kit.lite says which detail the chapter is built at); a generator needs nothing
       const step = (f) => { setDetail(lite); try { return f(); } finally { setDetail(false); } };
+      const kit = { ...helpers, K, root, L, r, batch, mats: g.mats, phys: g.phys, game: g, add: (o) => g.add(o), track: (o) => g.track(o), lite, detail: step, ...this.scopedKit() };
+      prog(0.06, 'raising walls…');
       let out = step(() => def.build(g, kit));
       if (out && typeof out.next === 'function') {
         const it = out;
@@ -199,7 +201,7 @@ export class ChapterLoader {
           s = step(() => it.next());
         }
         out = s.value;
-      } else if (out && typeof out.then === 'function') { setDetail(lite); try { out = await out; } finally { setDetail(false); } }
+      } else if (out && typeof out.then === 'function') out = await out;
       if (out && out !== L) Object.assign(L, out);
       mark('build');
       batch.build(root);

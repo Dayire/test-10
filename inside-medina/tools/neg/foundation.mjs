@@ -429,13 +429,48 @@ export const scenarios = [
     },
   },
   {
+    // the low tier's lighter geometry (DETAIL.lite) is set for the build's synchronous slices only: an async build's
+    // call and its kit.detail(fn) slices build lite, while anything else that runs during its awaits (a timer, another
+    // system) and its own code after an await build at full detail; nothing is left lite once the load is done
+    name: 'lite detail stays inside the build', cp: 0,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game;
+      const appModule = (p) => performance.getEntriesByType('resource').map((e) => e.name).find((n) => new URL(n).pathname === p) || p;
+      const { pointedArchPoints, DETAIL } = await import(appModule('/src/assets/geom.js'));
+      const n = () => pointedArchPoints(2, 1, 1.2, 24).length;
+      const out = { tier: G.world.rs.tier, lite: G.world.rs.q.lite };
+      const base = { id: 'liteProbe', n: 9, numeral: 'L', glyph: 'rosette', label: 'lite', next: null, dev: true, exit: '#000000', tone: '#000000' };
+      M.registry.push({ ...base, load: async () => ({ default: { ...base, look: 'goldenHour', needs: ['cobbles'], build: async (g, kit) => {
+        out.kitLite = kit.lite; out.call = n();
+        setTimeout(() => { out.timer = n(); }, 0);
+        await new Promise((r) => setTimeout(r, 30));
+        out.afterAwait = n(); out.inDetail = kit.detail(() => n());
+        kit.ground(-20, 40); kit.cp(-100, 1.5, 0, 1);
+        kit.L.dustRegions.push({ x0: -3, x1: 20, y0: 0.2, y1: 4, z0: -1, z1: 1 });
+        return kit.L;
+      } } }) });
+      await G.loadChapter('liteProbe', 0, { reason: 'select' });
+      out.after = { lite: DETAIL.lite, n: n() };
+      await G.loadChapter('souk', 0, { reason: 'select' });
+      return out;
+    }),
+    check: (r) => {
+      const full = 49, lite = 25;
+      if (!r.lite || !r.kitLite) return `the probe needs the low tier's lite build: ${JSON.stringify(r)}`;
+      return r.call === lite && r.inDetail === lite && r.timer === full && r.afterAwait === full && !r.after.lite && r.after.n === full ? true : `lite detail leaked or missing: ${JSON.stringify(r)}`;
+    },
+  },
+  {
     // restart chapter is a fresh start: prepare(0) runs again over the initial snapshot (it used to be skipped,
     // so a chapter whose prepare(0) moves anything restarted, and then respawned, in the built state)
     name: 'restart chapter equals a fresh start', chapter: 'lab', cp: 0,
     run: ({ page }) => page.evaluate(async () => {
       const M = __medina, G = M.game;
       const CHAPTERS = M.registry;
-      const { Crate } = await import('/src/game/entities.js');
+      // the app's own module instance: a module the dev server updated since it started is imported with ?t=, and a bare
+      // path would load a second copy with its own state
+      const appModule = (p) => performance.getEntriesByType('resource').map((e) => e.name).find((n) => new URL(n).pathname === p) || p;
+      const { Crate } = await import(appModule('/src/game/entities.js'));
       const base = { id: 'prepared', n: 9, numeral: 'P', glyph: 'rosette', label: 'prepared', next: null, dev: true, exit: '#000000', tone: '#000000' };
       CHAPTERS.push({ ...base, load: async () => ({ default: { ...base, look: 'goldenHour', needs: ['cobbles', 'wood'], build: (g, kit) => {
         kit.ground(-20, 40); kit.cp(-100, 1.5, 0, 1); kit.cp(10, 10.5, 0, 1);
@@ -517,7 +552,10 @@ export const scenarios = [
       G.director.restore(); await frames(2);
       out.glow = { tinted, back: lan.sprite.material.color.getHexString(), preset: G.director.glowColor.getHexString() };
       // environment handover
-      const { Overrides } = await import('/src/assets/library.js');
+      // the app's own module instance: a module the dev server updated since it started is imported with ?t=, and a bare
+      // path would load a second copy with its own state
+      const appModule = (p) => performance.getEntriesByType('resource').map((e) => e.name).find((n) => new URL(n).pathname === p) || p;
+      const { Overrides } = await import(appModule('/src/assets/library.js'));
       const old = G.world.env;
       const tplMat = G.mats.get('brass').clone(); tplMat.envMap = old; tplMat.userData.medina = true;
       const sceneMat = G.mats.get('brass').clone(); sceneMat.envMap = old;
