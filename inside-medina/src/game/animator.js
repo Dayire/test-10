@@ -187,10 +187,21 @@ export class Animator {
   }
 
   // hands on a prop (ctx.hands {a, b}: world points, the player gives them for a mirror's rim, a crank, the
-  // capstan's bar): two-bone IK over the pose, eased in and out; each hand takes the nearer point
+  // capstan's bar): two-bone IK over the pose, eased in and out; each hand takes the nearer point. A hold that
+  // moves with its prop is followed exactly; a new hold (a re-grip, the next capstan bar) is glided to
   reach2(H, dt) {
+    const fresh = (this.ikW || 0) < 0.05;
     this.ikW = (this.ikW || 0) + ((H ? 1 : 0) - (this.ikW || 0)) * (1 - Math.exp(-12 * dt));
-    if (H) { (this.ikA || (this.ikA = new THREE.Vector3())).copy(H.a); (this.ikB || (this.ikB = new THREE.Vector3())).copy(H.b); }
+    if (H) {
+      if (!this.ikA) { this.ikA = H.a.clone(); this.ikB = H.b.clone(); this.ikPa = H.a.clone(); this.ikPb = H.b.clone(); }
+      const k = 1 - Math.exp(-18 * dt), carry = Math.max(0.05, 2.5 * dt);
+      const follow = (ik, h, pv) => {
+        if (fresh) ik.copy(h);
+        else { _t.subVectors(h, pv); if (_t.length() < carry) ik.add(_t); ik.lerp(h, k); }
+        pv.copy(h);
+      };
+      follow(this.ikA, H.a, this.ikPa); follow(this.ikB, H.b, this.ikPb);
+    }
     if (this.ikW < 0.01 || !this.ikA) return;
     const R = this.rig, J = R.j;
     R.root.updateMatrixWorld(true);
@@ -346,6 +357,7 @@ export class Animator {
 
   // ---- Sunwork poses (FULL_GAME §6.3) ------------------------------------
   // hands up on a mirror's rim while gripping it: the arms reach the rim's height, and each notch is a small shove
+  // a rim above his shoulders: he stands tall on his toes, chest up, to reach it
   tiltArms(P, ctx) {
     const J = P.joints, T = ctx.tilt;
     const rim = THREE.MathUtils.clamp(T.rim ?? 0.9, 0.55, 1.7);
@@ -356,6 +368,14 @@ export class Animator {
     J.elbowL[0] = -0.35 + lift * 0.15 - shove * 0.2; J.elbowR[0] = -0.3 + lift * 0.15 - shove * 0.2;
     J.spine[0] = Math.min(J.spine[0], 0.35 - lift * 0.12); J.chest[0] = -0.05 * lift;
     J.neck[0] = -0.25 - lift * 0.12; J.head[0] = -0.1 - lift * 0.1;
+    const up = smooth((rim - 1.1) / 0.3);
+    if (up > 0) {
+      for (const k of ['hipL', 'hipR']) J[k][0] = lerp(J[k][0], k === 'hipL' ? -0.12 : 0.08, up);
+      J.kneeL[0] = lerp(J.kneeL[0], 0.05, up); J.kneeR[0] = lerp(J.kneeR[0], 0.03, up);
+      J.ankleL[0] = lerp(J.ankleL[0], 0.42, up); J.ankleR[0] = lerp(J.ankleR[0], 0.38, up);
+      J.spine[0] = lerp(J.spine[0], 0.1, up); J.chest[0] -= 0.08 * up;
+      P.pelvisY = lerp(P.pelvisY, 0.045, up); P.pelvisZ = lerp(P.pelvisZ, 0.03, up);
+    }
   }
 
   // two hands on a crank's wheel, following its knob; the torso twists into each turn

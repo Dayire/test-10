@@ -156,9 +156,10 @@ export function crankHandle(mats, { h = 0.92, wr = 0.24 } = {}) {
   return grp;
 }
 
-// the heliostat's capstan: a banded wooden drum on an iron foot, four bars at hand height (userData.wheel turns
-// about y). The boy leans into the bar that crosses in front of him.
-export function capstanMesh(mats, { h = 0.8, bar = 0.62 } = {}) {
+// the heliostat's capstan: a banded wooden drum on an iron foot, eight bars at hand height (userData.wheel turns
+// about y; userData.bars, barH, bar0, bar1: the bars' count, height and span from the axis). The boy leans into
+// the bar that crosses in front of him, hand over hand.
+export function capstanMesh(mats, { h = 0.8, bar = 0.62, n = 8 } = {}) {
   lightMaterials(mats);
   const grp = new THREE.Group();
   const iron = [], wood = [], brass = [];
@@ -170,13 +171,13 @@ export function capstanMesh(mats, { h = 0.8, bar = 0.62 } = {}) {
   const wheel = new THREE.Group();
   const bars = [wood[0]];
   const bw = [];
-  for (let i = 0; i < 4; i++) {
-    const b = new THREE.CylinderGeometry(0.026, 0.032, bar, 6); b.rotateZ(Math.PI / 2); b.translate(0.17 + bar / 2, h - 0.08, 0); b.rotateY((i / 4) * Math.PI * 2); bw.push(b);
-    const k = new THREE.SphereGeometry(0.04, 8, 6); k.translate(0.17 + bar, h - 0.08, 0); k.rotateY((i / 4) * Math.PI * 2); bw.push(k);
+  for (let i = 0; i < n; i++) {
+    const b = new THREE.CylinderGeometry(0.024, 0.03, bar, 6); b.rotateZ(Math.PI / 2); b.translate(0.17 + bar / 2, h - 0.08, 0); b.rotateY((i / n) * Math.PI * 2); bw.push(b);
+    const k = new THREE.SphereGeometry(0.036, 8, 6); k.translate(0.17 + bar, h - 0.08, 0); k.rotateY((i / n) * Math.PI * 2); bw.push(k);
   }
   wheel.add(mesh([...bars, ...bw.map((g) => tint(g, 0x6a5038))], mats.get('wood')));
   grp.add(wheel);
-  grp.userData.wheel = wheel; grp.userData.axis = 'y';
+  Object.assign(grp.userData, { wheel, axis: 'y', bars: n, barH: h - 0.08, bar0: 0.17, bar1: 0.17 + bar });
   return grp;
 }
 

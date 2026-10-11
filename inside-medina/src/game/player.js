@@ -537,6 +537,7 @@ export class Player {
     const b = this.body;
     const speed = this.scripted ? b.vx : (this.state === 'climb' ? 0 : b.vx);
     const m = this.grip?.mirror, lv = this.lever;
+    const hands = this.handTargets();
     return {
       speed: Math.abs(speed), vx: b.vx, vy: b.vy, grounded: this.state === 'ground', facing: this.facing,
       climbT: this.climbT, hangSwing: this.state === 'hang' ? Math.sin(this.hangT * 3) * Math.exp(-this.hangT * 2) : 0,
@@ -547,9 +548,9 @@ export class Player {
       // Sunwork: hands on a mirror's rim (tilt: seconds since the last notch, the rim height to reach), a crank
       // wheel's angle, the capstan's turning speed
       tilt: m ? { age: this.tilt.age, dir: this.tilt.dir, rim: m.rimHeight?.(this) ?? 0.5 } : null,
-      crankA: this.state === 'crank' ? (lv?.wheel ?? 0) : 0, capstanV: this.state === 'capstan' ? (lv?.speed ?? 0) : 0,
+      crankA: this.state === 'crank' ? (lv?.turn ?? 0) : 0, capstanV: this.state === 'capstan' ? (lv?.speed ?? 0) : 0,
       // where the hands hold the prop (world points; the animator reaches them with two-bone IK)
-      hands: this.handTargets(),
+      hands,
     };
   }
   handTargets() {
@@ -557,6 +558,15 @@ export class Player {
     const it = this.grip?.mirror || ((this.state === 'crank' || this.state === 'capstan') ? this.lever : null);
     return it?.handHolds?.(this, H.a, H.b) && !this.dead ? H : null;
   }
+  // his shoulders as last drawn (world) and how far a hand reaches from one (arm and palm): props pick holds he
+  // can reach
+  shoulders() {
+    const J = this.game.rig?.j; if (!J?.shoulderL) return null;
+    const S = this._sh || (this._sh = [new THREE.Vector3(), new THREE.Vector3()]);
+    J.shoulderL.getWorldPosition(S[0]); J.shoulderR.getWorldPosition(S[1]);
+    return S;
+  }
+  armReach() { const S = this.game.rig?.spec; return S ? S.upperArm + S.foreArm + 0.05 : 0.43; }
 
   targetYaw() {
     const side = Math.PI / 2;
@@ -564,7 +574,9 @@ export class Player {
       case 'hang': case 'climbUp': return this.facing * side;
       case 'climb': return Math.PI * Math.sign(this.yaw || 1);
       case 'lever': return this.lever ? this.lever.dir * side : this.facing * side;
-      case 'crank': case 'capstan': return (this.lever?.faceDir ?? this.facing) * (side - 0.35);
+      // working a crank or the capstan he turns a little into the prop (both stand behind the play plane)
+      case 'crank': return (this.lever?.faceDir ?? this.facing) * (side + 0.1);
+      case 'capstan': return (this.lever?.faceDir ?? this.facing) * (side + 0.3);
       default: return this.facing * (side - 0.2);
     }
   }
