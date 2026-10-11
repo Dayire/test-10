@@ -4,7 +4,8 @@
 //   storage    localStorage throwing: playable, settings in memory, the save code round-trips
 //   persist    settings survive a reload (and apply); a save of settings alone shows no continue
 //   autostart  ?autostart=1 skips every menu
-//   menubg     the live title renders at 30 fps and half resolution under the menus (requests/P.md #8)
+//   menubg     the live title renders at 30 fps and half resolution under the menus (requests/P.md #8), its vignette
+//              deepened once (a resting title's redraws never deepen it again)
 //   chapters   chapter select by keyboard: the card covers the load, the chapter starts at the picked checkpoint
 //   hints      wordless first steps: the jump glyph at the sack pile (none at a wall too high), grab by the crate;
 //              a pause holds the glyph out of sight and lists the play controls
@@ -14,6 +15,7 @@
 //              errors, no service worker
 //   hosted     vite build: an installable manifest (Chrome's own installability check), the service worker
 //              takes control, the game reloads offline, and after a deploy the open tab still loads its chunks
+//              while an unhashed file the deploy changed (the manifest) comes from the new version
 // One headless Chromium at a time; every scenario opens its own context. Exit code 1 when any fails.
 import fs from 'fs';
 import http from 'http';
@@ -247,13 +249,18 @@ await scenario('menubg', async () => {
   const { page, ctx, errors } = await open({ url: `${BASE}?${Q}` });
   await ready(page); await frames(page, 4);
   const menu = await page.evaluate(() => { const rs = __medina.game.world.rs; return { cap: Math.round(rs.stats.cap), internal: [...rs.post.stats.internal], full: [rs.w, rs.h], vignette: +rs.post.params.vignette.toFixed(2) }; });
+  // Esc rests the title (the scene pauses under the menu): its freeze-frame redraws (resizes) keep the same depth
+  await key(page, 'Escape'); await frames(page, 3);
+  const rest = [await page.evaluate(() => (__medina.game.paused ? +__medina.game.world.rs.post.params.vignette.toFixed(2) : 'not paused'))];
+  for (const w of [940, 960]) { await page.setViewportSize({ width: w, height: 540 }); await frames(page, 3); rest.push(await page.evaluate(() => +__medina.game.world.rs.post.params.vignette.toFixed(2))); }
+  menu.rest = rest;
   await page.evaluate(() => __ui.mainAction('new'));
   await waitFor(page, () => __medina.game.mode === 'play');
   await frames(page, 4);
   const play = await page.evaluate(() => { const rs = __medina.game.world.rs; return { cap: Math.round(rs.stats.cap), internal: [...rs.post.stats.internal], full: [rs.w, rs.h], vignette: +rs.post.params.vignette.toFixed(2) }; });
   await ctx.close();
   const half = Math.abs(menu.internal[0] - menu.full[0] / 2) <= 2 && Math.abs(menu.internal[1] - menu.full[1] / 2) <= 2;
-  const ok = menu.cap === 30 && half && play.cap !== 30 && play.internal[0] > menu.internal[0] && menu.vignette > play.vignette && !errors.length;
+  const ok = menu.cap === 30 && half && play.cap !== 30 && play.internal[0] > menu.internal[0] && menu.vignette > play.vignette && menu.rest.every((v) => v === menu.vignette) && !errors.length;
   return [ok || `menu background ${JSON.stringify({ menu, play })}`, { menu, play }];
 });
 
@@ -453,6 +460,9 @@ await scenario('hosted', async () => {
     fs.renameSync(path.join(next, 'assets', chunk), path.join(next, 'assets', chunk.replace(/-[^-]+\.js$/, '-n3xtbuild.js')));
     const sw = fs.readFileSync(path.join(next, 'sw.js'), 'utf8');
     fs.writeFileSync(path.join(next, 'sw.js'), sw.replace(/medina-[0-9a-f]{12}/, 'medina-0nextbuild00').replace(chunk, chunk.replace(/-[^-]+\.js$/, '-n3xtbuild.js')));
+    // …and changes an unhashed file (the manifest): the new version serves the new one, not the previous cache's
+    const mf = JSON.parse(fs.readFileSync(path.join(next, 'manifest.webmanifest'), 'utf8'));
+    fs.writeFileSync(path.join(next, 'manifest.webmanifest'), JSON.stringify({ ...mf, x_build: 'next' }));
     srv.root.dir = next;
     const deploy = await page.evaluate(async (chunk) => {
       const reg = await navigator.serviceWorker.getRegistration();
@@ -463,12 +473,13 @@ await scenario('hosted', async () => {
       const w = navigator.serviceWorker.controller;
       if (w && w.state !== 'activated') await new Promise((r) => { w.addEventListener('statechange', () => w.state === 'activated' && r()); setTimeout(r, 30000); });
       const res = await fetch(`./assets/${chunk}`);
-      return { took, caches: (await caches.keys()).filter((k) => k.startsWith('medina-')).length, oldChunk: res.status };
+      const mf = await (await fetch('./manifest.webmanifest')).json();
+      return { took, caches: (await caches.keys()).filter((k) => k.startsWith('medina-')).length, oldChunk: res.status, manifest: mf.x_build || 'previous' };
     }, chunk);
     srv.root.dir = dir; fs.rmSync(next, { recursive: true, force: true });
     const out = { manifest, installable, iconsOk, controlled, offline, deploy, errors: errors.filter((e) => !/net::ERR_INTERNET_DISCONNECTED/.test(e)).slice(0, 3) };
     const ok = manifest.display === 'standalone' && manifest.icons.includes('512x512:maskable') && iconsOk && !installable.length && controlled && offline.online === false && offline.chapter === 'souk' && offline.font
-      && deploy.took && deploy.caches === 2 && deploy.oldChunk === 200 && !out.errors.length;
+      && deploy.took && deploy.caches === 2 && deploy.oldChunk === 200 && deploy.manifest === 'next' && !out.errors.length;
     return [ok || `hosted ${JSON.stringify(out)}`, out];
   } finally { await ctx.close(); await srv.close(); }
 });

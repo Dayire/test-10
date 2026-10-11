@@ -176,8 +176,14 @@ export class UI {
     this._dim = on;
   }
   // a deeper post vignette behind the menus over the title (never a backdrop filter): applied to the post
-  // parameters after the look director has written them, so the look itself carries no override
-  beforeRender(P) { if (this._dim && P) P.vignette = Math.max(0.62, P.vignette + 0.2); }
+  // parameters after the look director has written them, so the look itself carries no override. The base is the
+  // look's last written value: a paused frame (the director rests) or a redraw never deepens it twice.
+  beforeRender(P) {
+    if (!P) return;
+    if (P.vignette !== this._vigOut) this._vigBase = P.vignette;
+    P.vignette = this._dim ? Math.max(0.62, this._vigBase + 0.2) : this._vigBase;
+    this._vigOut = P.vignette;
+  }
 
   deviceChanged(d) {
     this.root.dataset.device = d;
