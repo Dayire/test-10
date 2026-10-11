@@ -40,7 +40,8 @@ boot: the UI and Input first, the main menu interactive at once (continue / new 
       turning rosette, until the chapter is built: a choice made meanwhile is taken when it is ready)
       → world, session bake, Game → the loop starts → the save's chapter loads under the title → splash fades
 main menu over the live shot of the save's place (souk for a new player):
-  continue      only with a save: play begins in place (the camera blends to the rail), or loads the save's place
+  continue      only with a journey (a checkpoint passed, a later chapter or time in play; a save of settings alone,
+                or progress just reset, shows none): play begins in place (the camera blends to the rail), or loads the save's place
   new journey   glyph confirm ✓/✕ when there is progress; in place when the title already shows the souk at 0
   chapters      four arches → checkpoint pips → start (behind the card)
   settings      graphics | audio | controls | accessibility | data
@@ -78,15 +79,18 @@ is open never turns a held key into a new press (a Start held through "resume" u
 standard mapping, and for raw HID pads the face buttons at 0–3 with the d-pad on axes 6/7 or a hat on axis 9.
 `padKind(id)` picks glyphs from the vendor id (054c PlayStation, 045e Xbox, 057e Nintendo). `lastDevice` is
 `keyboard | gamepad | touch` (`input.on('device', fn)`); L's player reads it for the sticky touch grab. Crawl
-toggle lives here: a down-press on the ground latches the crouch until up, a jump, another down-press or leaving the
-ground. Keys typed into a text field (the save code) never reach the game. Everything held lets go on blur and when
+toggle lives here: a down-press where the boy could crouch latches it until up, a jump, another down-press, leaving
+the ground or taking hold of something. The game's `input.context()` reports `{grounded, holding}` (`boot.js`: in play,
+on the ground, not at the title; holding a crate or mirror grip, a lever, crank or capstan), so a gripped mirror's tilt
+steps one notch per press and never crouches. An open menu drops the latch and its navigation never reaches it; a down
+held across a menu closing is no new press. Keys typed into a text field (the save code) never reach the game. Everything held lets go on blur and when
 the page hides.
 
 ## Touch (`touch.js`, FULL_GAME §8.1)
 
 | Control | Spec as built |
 |---|---|
-| Stick | floating: a touch in the left 45 % (not the top 18 %, not ⏸) puts the base under the thumb; radius 56 px × size; dead zone 12 %; `x` is the horizontal share, so 75 % runs; vertical at 0.55 (0.40 to release) and only on the dominant axis, which may change at most every 200 ms; near a vine a diagonal ≥ 35° counts as up. Fixed: the base rests bottom left. A faint ghost base shows where the thumb goes. |
+| Stick | floating: a touch in the left 45 % (not the top 18 %, not ⏸) puts the base under the thumb, kept whole inside the safe area; radius 56 px × size; dead zone 12 %; `x` is the horizontal share, so 75 % runs; vertical at 0.55 (0.40 to release) and only on the dominant axis, which may change at most every 200 ms; near a vine a diagonal ≥ 35° counts as up. Fixed: the base rests bottom left. A faint ghost base shows where the thumb goes. |
 | Jump | 84 px × size, bottom right, hit zone 1.4× (a pseudo-element) |
 | Grab | 72 px × size, up-left of jump; icon ✋ (crate, lever) or ☼ (mirror, crank, capstan) from `player.reachable()` (L; a fallback reads grips and interactables); the latch on mirrors is L's (`player.sticky`) |
 | ⏸ | 44 px, top left in the safe area (top right left-handed) |
@@ -131,14 +135,20 @@ applies (`1 + 0.08·b`, `1 − 0.04·b`).
 - **Main** (`#title`, the title screen the engine's tests read): left column at 7.5 vw (landscape), a bottom sheet
   (portrait), two columns on phones in landscape; the continue entry names the save's
   chapter with its glyph; a broken-link glyph bottom right when progress cannot be kept.
-- **Pause**: the same column over the dimmed freeze-frame, with the chapter's glyph, numeral, label and checkpoint pips.
+- **Pause**: the same column over the dimmed freeze-frame, with the chapter's glyph, numeral, label and checkpoint pips,
+  and the play controls for the hands in use (move, jump, grab, climb, crawl: keycaps with the player's layout letters,
+  pad buttons, or the touch glyphs), bottom right on a desktop, under the chapter on phones.
 - **Chapters**: four arches (an SVG clip path), each with a 320 × 180 JPEG (q 0.7) captured from the canvas ~1.6 s
   after a chapter first starts (`medina.v1.thumb.<id>`), else the chapter's palette; the glyph; checkpoint pips (the
   counts of FULL_GAME §2–5, replaced by the counts seen when a chapter loads). Locked chapters are dark arches with a
-  closed door. Confirm on a chapter with reached checkpoints opens its pips (← → choose, confirm starts).
+  closed door. Confirm (or a tap) on a chapter with reached checkpoints opens a stepper over the foot of its arch
+  (‹ n/total ›, 44 px arrows; ← → or the d-pad on keys and pads, the legend says so); confirm or a tap on the card
+  starts there. The pips stay on one row (they shrink for long chapters); a mouse may click a reached pip, on touch
+  they are no targets.
 - **Card** (`game.hooks.card`): the chapter's tone, a drifting zellige lattice, the glyph assembled layer by layer
   (ground, body, rays or stars), numeral, rule and label; resolves once it covers the screen, `hide()` keeps it at least
-  2.5 s; after 2.5 s a small rosette turns while the chapter is still building.
+  2.5 s; after 2.5 s a small rosette turns under the label while the chapter is still building (in the card's own
+  column, inside the safe area, so it never meets the label on a short landscape phone).
 - **Credits** (`#end`, `game.hooks.credits(lines)`): a slow roll on the right (centred in portrait): MEDINA, a rosette, the
   lines (strings, or `{role, name}`), and "thank you for walking with us". Ink follows what is behind (dark on a pale
   exit colour). Skippable after the first completion, and always from the main menu.
@@ -151,7 +161,11 @@ applies (`1 + 0.08·b`, `1 − 0.04·b`).
 
 The save rosette (top right, while a write happens), hint glyphs, sound cues, the rotate glyph. **HintDirector**
 (`hints.js`): `L.hints = [{x0, x1, y0?, y1?, after, glyph, unless(game)}]` with glyphs `jump grab up down tilt crank aim
-crawl`; the first steps of a journey get `move` (`game.hooks.hint('controls')`). The glyph follows the device in hand
+crawl`; the first steps of a journey get `move` (`game.hooks.hint('controls')`). Every chapter also teaches from
+context (`CONTEXT`): up at a vine's foot or when hanging from a ledge, grab beside a crate or a lever, jump when the
+boy walks into something a jump clears (a hop ≤ 0.92 m, or a ledge ≤ 2.54 m; never a wall too high: puzzle-honest).
+A chapter's zones come first, and a verb learnt from a zone is not taught again from context. A pause or a menu
+holds the glyph out of sight; it comes back on resume. The glyph follows the device in hand
 (keycaps with the player's own layout letters, pad buttons of the pad's family, a ghost thumb on touch that also
 pulses the control) above the boy's projected head, and fades when the action happens; done hints are written to
 `save.seenHints` (`<chapter>:<index>`, `move`). **Visual sound cues**: the horn (`alarm`), shouts, darts and the drum
@@ -188,7 +202,8 @@ camera; `webglcontextlost` / `restored` → the lantern card, then the engine's 
 `manifest.webmanifest` (standalone, landscape, `#0b0806`, icons 192 / 512 / maskable 512 and an Apple touch icon
 from `tools/make-icons.mjs`: the brass tray with its engraved rosette, rendered in Chromium); `sw.js` generated at the
 end of the build from what was written: precache everything, cache-first for assets, network-first for the page
-(falling back to the cached page offline). It registers only in a production build, outside the artifact, in a top
+(falling back to the cached page offline). A new version takes over at once and keeps the previous version's cache
+(older ones go), so a tab opened before a deploy still finds the hashed chapter chunks it imports later. It registers only in a production build, outside the artifact, in a top
 window, in a secure context, and not with `?nosw=1`.
 
 **Artifact** (`npm run build:artifact` → `dist-artifact/medina.html`): `import.meta.env.VITE_ARTIFACT` strips the dev
@@ -204,7 +219,7 @@ fullscreen row unless the frame allows it, no pointer lock, `alert`, `print` or 
 ## Tests
 
 ```
-node tools/ux-tests.mjs --port 5176 [--only keyboard,gamepad,storage,persist,autostart,menubg,chapters,artifact,hosted]
+node tools/ux-tests.mjs --port 5176 [--only keyboard,gamepad,storage,persist,autostart,menubg,chapters,hints,crawl,artifact,hosted]
 node tools/mobile-tests.mjs --port 5176 [--device iphone|pixel] [--only menus,controls,stick,jump,grab,lens,aim]
 ```
 

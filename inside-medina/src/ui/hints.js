@@ -19,8 +19,8 @@ const DONE = {
 };
 // the verbs every chapter leans on, taught where the boy meets them (any chapter; a chapter's own L.hints come
 // first): a vine's foot, a ledge he hangs from, a crate or a lever at hand, something he walks into that a jump
-// clears. `when` must hold for `after` seconds; the glyph stays while it holds (a short grace) and fades once the
-// action happens. Puzzle-honest: a wall too high for a jump never shows the jump.
+// clears. `when` must hold for `after` seconds; the glyph stays while `keep` (else `when`) holds, with a second's
+// grace, and fades once the action happens. Puzzle-honest: a wall too high for a jump never shows the jump.
 const P_W = 0.34, STEP = 0.26, HOP = 0.92, REACH = 2.54; // width; kerb step; a jump's rise; a ledge a jump reaches
 function jumpable(p) {
   const b = p.body, dir = p.facing || 1, front = b.x + dir * P_W / 2;
@@ -39,7 +39,8 @@ const CONTEXT = [
   { id: 'ctx:climb', glyph: 'up', after: 0.8, when: (g, p) => free(g, p) && !!p.nearVine?.() },
   { id: 'ctx:ledge', glyph: 'up', after: 1.2, when: (g, p) => p.state === 'hang' },
   { id: 'ctx:grab', glyph: 'grab', after: 1.4, when: (g, p) => free(g, p) && !p.crawling && !!(p.crateAdjacent?.(p.facing) || p.crateAdjacent?.(-p.facing) || g.interactNear?.(p.x, p.y, p.facing)) },
-  { id: 'ctx:jump', glyph: 'jump', after: 0.7, when: (g, p) => free(g, p) && !p.crawling && Math.abs(g.input.state.x) > 0.5 && Math.sign(g.input.state.x) === p.facing && (Math.abs(p.body.vx) < 0.05 || p.pushing === 0.01) && jumpable(p) }, // 0.01: a crate that will not move
+  // shown once he has pushed against it a moment (0.01: a crate that will not move); it stays while he faces it
+  { id: 'ctx:jump', glyph: 'jump', after: 0.7, when: (g, p) => free(g, p) && !p.crawling && Math.abs(g.input.state.x) > 0.5 && Math.sign(g.input.state.x) === p.facing && (Math.abs(p.body.vx) < 0.05 || p.pushing === 0.01) && jumpable(p), keep: (g, p) => free(g, p) && !p.crawling && jumpable(p) },
 ];
 const CUES = { alarm: 'horn', horn: 'horn', shout: 'shout', guardFrustrated: 'shout', dart: 'dart', turret: 'dart', dartGuard: 'dart', drum: 'drum' };
 
@@ -123,8 +124,9 @@ export class HintDirector {
       }
       h.t += dt;
       if (DONE[h.glyph]?.(g, h)) { this.done(h); return; }
-      if (h.when) h.off = h.when(g, g.player) ? 0 : (h.off || 0) + dt;
-      const zoneOK = h.glyph === 'move' || (h.when ? h.off < 0.6 : this.inZone(h) && !h.unless?.(g));
+      const keep = h.keep || h.when;
+      if (keep) h.off = keep(g, g.player) ? 0 : (h.off || 0) + dt;
+      const zoneOK = h.glyph === 'move' || (keep ? h.off < 1 : this.inZone(h) && !h.unless?.(g));
       if (!zoneOK || h.t > 14) { this.hide(); return; }
       this.place(h);
       return;
