@@ -299,6 +299,27 @@ export const scenarios = [
     check: (r) => (r.started && r.kind === 'sunset' && near(r.clockT, 48.1, 0.3) && r.after.t === 0 && !r.after.running && near(r.after.T, 4) && r.after.keys && r.after.mode === 'play' ? true : `clock ${JSON.stringify(r)}`),
   },
   {
+    // II-E2 success: once L8 latches the sun sets over 6 s (the terminator climbs past the last ray), the clock never
+    // kills, and later rooms start with the ray gone (no sunbeam across the night sky)
+    name: 'a won clock sets the sun', cp: 9,
+    run: async ({ page }) => { await prep(page); return page.evaluate(() => {
+      const { M, G, get, until } = __neg;
+      const ray = () => M.ext.light().beams.find((b) => b.src === 'lastRay').on;
+      M.teleport(176.5, 0, 1); M.sim(0.2, { x: 0 });
+      const started = get('clock').running;
+      get('F3').setState({ ...get('F3').getState(), alpha: 60 }); M.teleport(193.5, 10.6, 1);
+      const tLatch = until(() => get('L8').done, { x: 0 }, 5);
+      const at = { ray: ray(), T: +get('T').T.toFixed(2) };
+      M.sim(3, { x: 0 }); const mid = { ray: ray(), T: +get('T').T.toFixed(2) };
+      M.sim(3.2, { x: 0 }); const set = { ray: ray(), T: +get('T').T.toFixed(2) };
+      M.sim(45, { x: 0 });
+      const later = { dead: G.player.dead, kind: G.player.deathKind, expired: get('clock').expired, ray: ray() };
+      M.checkpoint(10); M.sim(0.2, { x: 0 });
+      return { started, tLatch, at, mid, set, later, cp10: { ray: ray(), T: +get('T').T.toFixed(2) } };
+    }); },
+    check: (r) => (r.started && r.tLatch < 2 && r.at.ray && r.mid.T > r.at.T && !r.set.ray && r.set.T >= 12.3 && !r.later.dead && !r.later.expired && !r.later.ray && !r.cp10.ray ? true : `won clock ${JSON.stringify(r)}`),
+  },
+  {
     // §6.6: a wheeled mirror pushed out of its zone fades and is home again within 3 s
     name: 'a lost mirror comes home in 3 s', cp: 2,
     run: async ({ page }) => { await prep(page); return page.evaluate(() => {

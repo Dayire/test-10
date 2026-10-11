@@ -9,8 +9,10 @@ const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 *
 //     at 0.4 × the sun shadow camera's distance from the view's focus, its top edge at T + D·sunDir.y: its shadow
 //     edge on the play plane sits at T, level across the view. It is drawn into the sun's shadow map only: every
 //     camera pass (and any other light's shadow map) skips its draw, so it costs no rasterisation on screen.
-// T follows `keys` ([[x, T], ...], on the boy's x: Chapter IV) unless a SunClock drives it. range [x0, x1]: the view
-// x where its shadow line is drawn (a chapter may have several). Snapshot {T}.
+// T follows `keys` ([[x, T], ...], on the boy's x: Chapter IV) unless a SunClock drives it. range [x0, x1]: the stretch
+// of the play plane it shades (a chapter may have several): the slab is cut to it in light space, so its ends are
+// fixed in the world (a shadow edge on the facades, never a pop as the view moves); without a range it follows the
+// view. Snapshot {T}.
 export class Terminator {
   constructor(game, { id, T = 0, keys = null, visual = true, range = null } = {}) {
     this.game = game; if (id !== undefined) this.id = id;
@@ -40,10 +42,13 @@ export class Terminator {
     const D = 0.4 * 80; // Lighting puts the sun 80 m from the focus along sunDir
     const fz = -2;
     // a sun under the horizon or straight above has no terminator line to draw
-    m.visible = d.y > -0.2 && Math.abs(d.z) > 0.15 && (!this.range || (lk.x > this.range[0] && lk.x < this.range[1]));
+    const R = this.range, half = (g.viewHalfW || 12) + 30;
+    m.visible = d.y > -0.2 && Math.abs(d.z) > 0.15 && (!R || (lk.x + half > R[0] && lk.x - half < R[1]));
     const zs = fz + D * d.z, s = (zs - fz) / d.z;
     const top = this.T + s * d.y;
-    m.position.set(lk.x, top - 40, zs);
+    // a play-plane point (x, y, fz) meets the slab at x + s·d.x
+    if (R) { m.scale.x = (R[1] - R[0]) / 140; m.position.set((R[0] + R[1]) / 2 + s * d.x, top - 40, zs); }
+    else { m.scale.x = 1; m.position.set(lk.x, top - 40, zs); }
     m.updateMatrixWorld();
   }
   getState() { return { T: this.T }; }
@@ -53,29 +58,46 @@ export class Terminator {
 // The sunset clock (FULL_GAME §3.2 II-E2): once started, the terminator rises from T0 at `rate` m/s (assist:
 // +50 % time) and the look blends `from` → `to` over the first `sec` seconds (the sun swings to the horizon, so
 // shadows lengthen diegetically). When T + 0.3 reaches `y` (the last ray's height) the light is gone: onExpire,
-// or the boy kneels into the dark (death 'sunset'). A respawn restores {t, running}: the clock resets.
+// or the boy kneels into the dark (death 'sunset'). finish(sec): the race is won and the sun sets over `sec` (the
+// terminator climbs past the last ray; nobody dies). A respawn restores {t, running, expired, setT}.
 export class SunClock {
   constructor(game, { id, T0 = 4, rate = 0.16, y = 12, terminator = null, look = null, onExpire = null, onReset = null } = {}) {
     this.game = game; if (id !== undefined) this.id = id;
     this.T0 = T0; this.rate = rate; this.y = y; this.terminator = terminator; this.look = look; this.onExpire = onExpire; this.onReset = onReset;
     this.t = 0; this.running = false; this.expired = false; this.tickT = 0;
+    this.setT = -1; this.setSec = 6; // the sunset after a win: seconds into it (-1: not set)
   }
   get speed() { return this.rate / (this.game.assist ? 1.5 : 1); }
   get duration() { return (this.y - 0.3 - this.T0) / this.speed; }
   get T() { return this.T0 + this.speed * this.t; }
   get left() { return Math.max(0, this.duration - this.t); }
   start() {
-    if (this.running || this.expired) return;
+    if (this.running || this.expired || this.setT >= 0) return;
     this.running = true; this.t = 0;
     if (this.terminator) this.terminator.driven = true;
     this.game.emit('clock', { id: this.id, on: true, duration: this.duration });
   }
   stop() { this.running = false; this.game.emit('clock', { id: this.id, on: false }); }
+  // won: the sun sets over sec seconds from wherever the clock stands
+  finish(sec = 6) {
+    if (this.setT >= 0) return;
+    const was = this.running;
+    this.running = false; this.setT = 0; this.setSec = sec;
+    if (was) this.game.emit('clock', { id: this.id, on: false, won: true });
+    this.applySet();
+  }
+  // the terminator from the clock's height up past the ray (+0.6 m) as the sun sets
+  applySet() {
+    const tm = this.terminator; if (!tm) return;
+    tm.driven = true;
+    tm.T = this.T + (this.y + 0.6 - this.T) * smooth(this.setT / this.setSec);
+  }
   apply() {
     if (this.terminator && (this.running || this.t > 0)) { this.terminator.T = this.T; this.terminator.driven = true; }
     if (this.look) this.game.director.blendAt(this.look.from, this.look.to, smooth(this.t / (this.look.sec ?? 8)));
   }
   step(dt) {
+    if (this.setT >= 0) { if (this.setT < this.setSec) { this.setT = Math.min(this.setSec, this.setT + dt); this.applySet(); } return; }
     if (!this.running) return;
     this.t += dt;
     this.apply();
@@ -89,12 +111,13 @@ export class SunClock {
       if (this.onExpire) this.onExpire(this); else this.game.player.die('sunset');
     }
   }
-  getState() { return { t: this.t, running: this.running, expired: this.expired }; }
+  getState() { return { t: this.t, running: this.running, expired: this.expired, setT: this.setT }; }
   setState(s) {
-    this.t = s.t; this.running = s.running; this.expired = s.expired;
+    this.t = s.t; this.running = s.running; this.expired = s.expired; this.setT = s.setT ?? -1;
     if (this.terminator) { this.terminator.driven = this.running || this.t > 0; if (this.terminator.driven) this.terminator.T = this.T; else this.terminator.T = this.T0; }
     if (this.running || this.t > 0) this.apply();
     else this.onReset?.(this);
+    if (this.setT >= 0) { this.setT = Math.min(this.setT, this.setSec); this.applySet(); }
   }
 }
 

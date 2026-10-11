@@ -204,7 +204,8 @@ export function* buildLab(game, kit) {
   cam(150, { dist: 14, height: 2.0, lookY: 2.4, fov: 37, ahead: 1.6 });
   for (const x of [156, 164, 172]) lantern(x, 3.0, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.2 });
   cp(175.5, 175.8, 0, 1);
-  const term = add(new Terminator(game, { id: 'T', T: 4.0, range: [168, 214] }));
+  // the shadow line shades the corridor and the clock tower (x 146 to the square's edge), never the night square
+  const term = add(new Terminator(game, { id: 'T', T: 4.0, range: [146, SQ0] }));
   const restoreLook = () => { if (!game.held && game.def) game.director.look(game.def.look, 'lab'); };
   const clock = add(new SunClock(game, { id: 'clock', T0: 4.0, rate: 0.16, y: 12, terminator: term, look: { from: 'sunset', to: 'dusk', sec: 8 }, onReset: restoreLook }));
   L.triggers.push(new Trigger({ id: 'clock', x0: 176, x1: 186, fn: () => clock.start() }));
@@ -221,7 +222,8 @@ export function* buildLab(game, kit) {
   const downVine = { x0: 194.5, x1: 195.3, y0: 0, y1: 10.6, exit: null, enabled: false };
   game.vines.push(downVine);
   const ladder9 = E(new RopeLadder(game, { x: 194.9, y0: 0, y1: 10.6, z: 0.15, vine: downVine }));
-  const L8 = lock('L8', 199.2, 4.0, { degree: 7, onOpen: () => { ladder9.release(); clock.stop(); } });
+  // the catch: the ladder unrolls and the sun sets over 6 s (the terminator climbs past the last ray)
+  const L8 = lock('L8', 199.2, 4.0, { degree: 7, onOpen: () => { ladder9.release(); clock.finish(6); } });
   block(199.5, 203.5, 5.0, 11.0, { mat: 'plasterOchre', coping: 'limestone' });
   merlons(K, { x0: 199.6, x1: 203.4, y: 11, z: -0.4, h: 0.5, mat: 'plasterCream' });
   const G9 = gate('G9', 201.5, 5.0, 4.6, () => (L8.done ? 1 : 0), { w: 3.4, thick: 0.6 });
@@ -229,7 +231,7 @@ export function* buildLab(game, kit) {
   L.triggers.push(new Trigger({ id: 'dusk', x0: 205.5, x1: 212, fn: () => restoreLook() }));
   cam(176, { dist: 19, height: 4.8, lookY: 6.4, fov: 40, ahead: 1.0, focusBias: 4 });
   cam(196, { dist: 19, height: 4.8, lookY: 5.6, fov: 40, ahead: 0.6, focusBias: 1 });
-  room('clock', () => { L8.setState({ level: 1, done: true }); ladder9.setState({ t: 1, target: 1 }); G9.setState({ open: 1 }); clock.setState({ t: 0, running: false, expired: false }); });
+  room('clock', () => { L8.setState({ level: 1, done: true }); ladder9.setState({ t: 1, target: 1 }); G9.setState({ open: 1 }); clock.setState({ t: 0, running: false, expired: false, setT: 6 }); });
   yield 0.7;
 
   // ================================================================ 10 LAMP: bounce the lamp's own light, then dazzle it (III-B1, B2; +176)
