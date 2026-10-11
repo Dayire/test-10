@@ -499,6 +499,27 @@ export const scenarios = [
     check: (r) => (r.lite.on && !r.full.on && r.lite.tris > 0 && r.lite.area < 0.005 && r.full.area < 0.005 ? true : `geometry wound inward: ${JSON.stringify(r)}`),
   },
   {
+    // the library's materials multiply their albedo by the vertex colour: a raw geometry without one renders black
+    // whatever the material says (the searchlight's brass housing, the lever's knob, the plate's rim once did)
+    name: 'every vertex-coloured mesh has colours', cp: 0,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game;
+      const census = () => {
+        const out = [];
+        G.scene.traverse((o) => {
+          if (!o.isMesh) return;
+          for (const m of Array.isArray(o.material) ? o.material : [o.material]) if (m.vertexColors && !o.geometry.attributes.color) out.push(`${o.name || o.parent?.name || o.type}:${m.name || m.type}:${o.geometry.type}`);
+        });
+        return out;
+      };
+      const souk = census();
+      await G.loadChapter('lab', 0, { reason: 'select' });
+      const lab = census();
+      return { souk, lab, chapter: M.chapter() };
+    }),
+    check: (r) => (r.chapter === 'lab' && !r.souk.length && !r.lab.length ? true : `meshes without vertex colours: ${JSON.stringify(r)}`),
+  },
+  {
     // restart chapter is a fresh start: prepare(0) runs again over the initial snapshot (it used to be skipped,
     // so a chapter whose prepare(0) moves anything restarted, and then respawned, in the built state)
     name: 'restart chapter equals a fresh start', chapter: 'lab', cp: 0,

@@ -201,7 +201,7 @@ export function* buildLab(game, kit) {
   killZone(140.5, 144, -30, -0.35, 'drown');
   const ROPE = { x0: 134.85, y0: 6.8, x1: 135.15, y1: 8.0 };
   const cw = new THREE.Group();
-  { const b = new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.7, 0.8, 0.7)), game.mats.get('sandstone')); setColor(b.geometry, 0xd8d0c0); b.castShadow = true; cw.add(b); const ring = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.02, 6, 12), game.mats.get('iron')); ring.position.y = 0.45; cw.add(ring); }
+  { const b = new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.7, 0.8, 0.7)), game.mats.get('sandstone')); setColor(b.geometry, 0xd8d0c0); b.castShadow = true; cw.add(b); const ring = new THREE.Mesh(setColor(new THREE.TorusGeometry(0.1, 0.02, 6, 12), 0xffffff), game.mats.get('iron')); ring.position.y = 0.45; cw.add(ring); }
   cw.position.set(136.6, 6.2, -0.2); game.add(cw);
   K.add(boxMM(133.8, 8.3, FZ, 137.4, 8.55, 0.3), 'woodDark'); // the beam the pulleys hang from
   // the rig: the rope is tied to a ring on the wall (x 135, y 6.45), runs up through the burn point, over two

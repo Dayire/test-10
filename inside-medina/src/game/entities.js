@@ -55,7 +55,7 @@ export class Plate {
     this.mesh.position.set((x0 + x1) / 2, y - 0.06, 0.2);
     game.add(this.mesh);
     // brass rim so the plate reads as a mechanism
-    const rim = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0 + 0.06, 0.03, 1.46), game.mats.get('brass'));
+    const rim = new THREE.Mesh(setColor(new THREE.BoxGeometry(x1 - x0 + 0.06, 0.03, 1.46), 0xffffff), game.mats.get('brass'));
     rim.position.set((x0 + x1) / 2, y - 0.09, 0.2); game.add(rim);
     this.wasPressed = false;
   }
@@ -142,8 +142,8 @@ export class Lever {
     const grp = new THREE.Group();
     const base = new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.34, 0.22, 0.34)), game.mats.get('iron')); base.position.y = 0.11; grp.add(base);
     const arm = new THREE.Group(); arm.position.y = 0.2;
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.05, 8), game.mats.get('iron')); shaft.position.y = 0.52; arm.add(shaft);
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 8), game.mats.get('brass')); knob.position.y = 1.06; arm.add(knob);
+    const shaft = new THREE.Mesh(setColor(new THREE.CylinderGeometry(0.025, 0.03, 1.05, 8), 0xffffff), game.mats.get('iron')); shaft.position.y = 0.52; arm.add(shaft);
+    const knob = new THREE.Mesh(setColor(new THREE.SphereGeometry(0.055, 12, 8), 0xffffff), game.mats.get('brass')); knob.position.y = 1.06; arm.add(knob);
     grp.add(arm);
     grp.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (!o.geometry.attributes.color) setColor(o.geometry, 0xffffff); } });
     grp.position.set(x, y, 0.25);
@@ -252,9 +252,9 @@ export class Searchlight {
     this.beam.frustumCulled = false;
     this.beam.layers.set(LAYERS.BEAMS);
     game.add(this.beam);
-    // lamp housing
+    // lamp housing (a white vertex colour: the library's materials multiply by it, and without one brass renders black)
     const lamp = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 0.8, 16), game.mats.get('brass'));
+    const body = new THREE.Mesh(setColor(new THREE.CylinderGeometry(0.35, 0.45, 0.8, 16), 0xffffff), game.mats.get('brass'));
     body.rotation.x = Math.PI / 2; lamp.add(body);
     this.lensMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(8, 7, 5) });
     const lens = new THREE.Mesh(new THREE.CircleGeometry(0.4, 20), this.lensMat);
