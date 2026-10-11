@@ -86,7 +86,9 @@ export const DETAIL = { lite: false };
 export function setDetail(lite) { DETAIL.lite = !!lite; }
 const lite = (n, min) => (DETAIL.lite ? Math.max(min, Math.round(n / 2)) : n);
 
+// Sizes are taken as magnitudes: a reversed extent (boxMM with x1 < x0) would mirror the box and wind every face inward.
 export function box(w, h, d, { round = 0, seg = 2 } = {}) {
+  w = Math.abs(w); h = Math.abs(h); d = Math.abs(d);
   if (DETAIL.lite && round > 0 && round < 0.03) round = 0;
   const g = round > 0 ? new RoundedBoxGeometry(w, h, d, DETAIL.lite ? 1 : seg, round) : new THREE.BoxGeometry(w, h, d);
   return g;
