@@ -478,6 +478,65 @@ export const scenarios = [
     },
   },
   {
+    // the pieces Chapter IV builds on (FULL_GAME §5.2 IV-B, IV-D), built in the engine on the dawn plaza: a
+    // photocell riding a lift that rises 1.2 m/s while the cell is dark and clamps (liftClamp) where a beam would
+    // cross it, then rises on once the beam is gone; a hatch shut over a vertical ray until its lock latches, then
+    // open (the ray passes, the solid is off), and shut again by restoring the snapshot taken before
+    name: 'a photocell rides a lift; a hatch opens to its lock', cp: 12,
+    run: async ({ page }) => { await prep(page); return page.evaluate(async () => {
+      const { M, G } = __neg, sys = G.level.light;
+      const Lm = await import('/src/game/light/index.js'), Pm = await import('/src/game/physics.js');
+      const out = { sameModule: Lm.LightSystem === sys.constructor };
+      const lift = new Pm.Body(445, 0, 2, 0.3, { kind: 'lift', solid: true, pushable: false });
+      lift.kinematic = true; G.phys.addBody(lift);
+      const OY = 0.8, pc = sys.add(new Lm.Photocell(G, { id: 'PCx', x: 0, y: 0, rides: { body: lift, ox: -0.05, oy: OY } }));
+      const ray = sys.add(new Lm.SunRay({ id: 'liftRay', x: 452, y: 4.0, angle: 180 }));
+      // IV-B's rule: where any beam crosses the cell's x, the lift stops with the cell's centre on it
+      // (a leg that ends on the cell itself is followed on to the cell's x)
+      const crossings = () => { const ys = []; for (const b of M.ext.light().beams) { if (!b.on) continue; for (let i = 0; i + 3 < b.pts.length; i += 2) { const [ax, ay, bx, by] = b.pts.slice(i, i + 4); if (ax !== bx && ((ax - pc.x) * (bx - pc.x) <= 0 || b.ends[i / 2] === 'target:PCx')) ys.push(ay + (pc.x - ax) * (by - ay) / (bx - ax)); } } return ys; };
+      let atClamp = false;
+      const run = (sec) => { let dark = null; for (let t = 0; t < sec; t += 1 / 120) {
+        if (!(atClamp && pc.lit)) {
+          const c = Lm.liftClamp(crossings(), OY, 0, 9, lift.y - 1e-6), up = Math.min(9, lift.y + 1.2 / 120);
+          atClamp = c !== null && up >= c; lift.y = atClamp ? c : up;
+        }
+        M.sim(1 / 120, { x: 0 });
+        if (dark === null && pc.y < 3.8 && pc.lit) dark = pc.y;
+      } return dark; };
+      out.litEarly = run(4);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      out.clamped = { liftY: +lift.y.toFixed(4), pcY: +pc.y.toFixed(4), lit: pc.lit, level: +pc.level.toFixed(2), value: pc.value, meshY: +pc.mesh.position.y.toFixed(3) };
+      ray.on = false; run(0.6);
+      out.after = { liftY: +lift.y.toFixed(3), lit: pc.lit, level: +pc.level.toFixed(2) };
+      // the hatch
+      const lk = sys.add(new Lm.SunLock(G, { id: 'LHx', x: 447.5, y: 6.5, degree: 2 }));
+      const hatch = new Lm.Hatch(G, { id: 'HX', x0: 449, x1: 451, y0: 8.0, y1: 8.3, source: () => (lk.done ? 1 : 0) });
+      G.entities.push(hatch);
+      sys.add(new Lm.SunRay({ id: 'upRay', x: 450.4, y: 6, angle: 90 }));
+      const toLock = sys.add(new Lm.SunRay({ id: 'lockRay', x: 452, y: 6.5, angle: 180 })); toLock.on = false;
+      const up = () => { const b = M.ext.light().beams.find((q) => q.src === 'upRay'); return { end: b.ends[b.ends.length - 1], y: +b.pts[b.pts.length - 1].toFixed(2) }; };
+      M.sim(0.1, { x: 0 });
+      const snap = G.snapshot();
+      out.shut = { ...up(), open: hatch.open, solid: hatch.solid.enabled, lock: lk.done };
+      toLock.on = true; M.sim(2.0, { x: 0 });
+      out.open = { ...up(), open: hatch.open, solid: hatch.solid.enabled, lock: lk.done };
+      G.restore(snap); toLock.on = false; M.sim(0.1, { x: 0 });
+      out.restored = { ...up(), open: hatch.open, solid: hatch.solid.enabled, lock: lk.done };
+      return out;
+    }); },
+    check: (r) => {
+      const c = r.clamped;
+      if (!r.sameModule) return 'the lab and the test see different light modules';
+      if (r.litEarly !== null) return `lit before the beam: ${JSON.stringify(r)}`;
+      if (!near(c.liftY, 3.2, 0.011) || !near(c.pcY, 4.0, 0.011) || !c.lit || c.level < 0.99 || c.value !== 1 || !near(c.meshY, c.pcY, 0.01)) return `photocell clamp ${JSON.stringify(c)}`;
+      if (r.after.lit || r.after.level > 0.01 || !(r.after.liftY > 3.6)) return `photocell after the beam: ${JSON.stringify(r.after)}`;
+      if (r.shut.open !== 0 || !r.shut.solid || r.shut.lock || !r.shut.end.startsWith('solid') || !near(r.shut.y, 8.0, 0.02)) return `hatch shut ${JSON.stringify(r.shut)}`;
+      if (r.open.open !== 1 || r.open.solid || !r.open.lock || !(r.open.y > 8.4)) return `hatch open ${JSON.stringify(r.open)}`;
+      if (r.restored.open !== 0 || !r.restored.solid || r.restored.lock || !r.restored.end.startsWith('solid') || !near(r.restored.y, 8.0, 0.02)) return `hatch restored ${JSON.stringify(r.restored)}`;
+      return true;
+    },
+  },
+  {
     // the light census is the fixed rig's, here as in the souk (FULL_GAME §9.1)
     name: 'light census unchanged', cp: 0,
     run: async ({ page }) => page.evaluate(async () => { const lab = __medina.lights(); await __medina.loadChapter('souk', 0); const souk = __medina.lights(); await __medina.loadChapter('lab', 10); return { lab, souk, again: __medina.lights() }; }),
