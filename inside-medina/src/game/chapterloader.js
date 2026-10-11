@@ -181,7 +181,7 @@ export class ChapterLoader {
       // the low tier builds lighter geometry (its draw and triangle budgets): fewer segments, and the far city in one
       // palette material per chunk (geom.js DETAIL, Batcher far)
       const lite = !!g.world.rs.q?.lite;
-      const batch = new Batcher(g.mats, { chunk: def.chunk ?? 40, far: lite, bands: lite ? LITE_BANDS : undefined });
+      const batch = new Batcher(g.mats, { chunk: def.chunk ?? 40, far: lite, bands: lite ? LITE_BANDS : undefined, castMerge: lite });
       const K = batch.kit();
       const r = rng(def.seed ?? 42);
       const helpers = createLevelKit(g, { K, root, L, r });

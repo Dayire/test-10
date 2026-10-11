@@ -1,13 +1,15 @@
 // Render budget table at the Chapter I tour spots (shadow vs main draw calls, triangles, post passes,
 // programs, the flock's share) plus the presentation acceptance checks (FULL_GAME §11.4 P).
 // Usage: node tools/perf.mjs [--port 5174 | BASE=url] [--tiers low,medium,high] [--frames 6]
-//          [--out file.json] [--compare before.json] [--checks | --only checks] [--shots dir] [--w 640 --h 360]
+//          [--out file.json] [--compare before.json] [--checks | --only checks | --only path] [--path 0] [--shots dir] [--w 640 --h 360]
 // The table runs on any build (also the pre-presentation tree, for the "before" column); the checks
 // use the new RenderSystem API and are skipped on builds without it.
 // The §8.5 gate takes the heaviest frame at every spot: every shadow map refreshed (as on a 30 fps frame or after
 // a camera snap), over a full sweep of the courtyard lamp wherever its spot is lit, plus every frame of the
-// chapter's finale (the DepthWalk). Low and medium run at 640 × 360 and again as a phone in landscape (844 × 390,
-// the widest view); an explicit --w / --h runs that viewport alone.
+// chapter's finale (the DepthWalk), and along the chapter's real path: its bot from the first step to the last,
+// a frame with every map refreshed every 0.5 s of game time, so the states a player goes through (the rope ladder
+// unrolled, the drawbridge lowered, the guard chasing) are gated too (--path 0 skips it). Low and medium run at
+// 640 × 360 and again as a phone in landscape (844 × 390, the widest view); an explicit --w / --h runs that viewport alone.
 import { chromium } from 'playwright';
 import fs from 'fs';
 
@@ -19,6 +21,8 @@ const tiers = String(arg('tiers', 'low,medium,high')).split(',');
 const frames = +arg('frames', 6);
 const out = arg('out', null), compare = arg('compare', null), checks = arg('checks', false), only = arg('only', null);
 const shots = arg('shots', null);
+const pathGate = String(arg('path', '1')) !== '0', PATH_EVERY = 0.5, CHAPTER = 'souk';
+const BOTS = ['lib', CHAPTER].map((f) => new URL(`bots/${f}.js`, import.meta.url));
 const pick = arg('check', null) ? String(arg('check')).split(',') : null; // run only these checks
 const want = (k) => !pick || pick.includes(k);
 const W = +arg('w', 640), H = +arg('h', 360), PHONE = [844, 390];
@@ -37,7 +41,7 @@ const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader', '-
 const errors = [];
 const result = { base: BASE, viewport: [W, H], tiers: {}, checks: {} };
 
-async function open(query, { w = W, h = H } = {}) {
+async function open(query, { w = W, h = H, bots = false } = {}) {
   const page = await (await browser.newContext({ viewport: { width: w, height: h } })).newPage();
   page.setDefaultTimeout(600000);
   page.on('pageerror', (e) => errors.push(e.message));
@@ -47,6 +51,7 @@ async function open(query, { w = W, h = H } = {}) {
   // merged shadow casters are built a few milliseconds per frame: measure once they are in
   await page.waitForFunction(() => !window.__medina.game.world.rs.shadows?.building, null, { timeout: 300000 });
   await page.evaluate(installHooks);
+  if (bots) for (const f of BOTS) await page.addScriptTag({ content: fs.readFileSync(f, 'utf8') });
   return page;
 }
 
@@ -130,6 +135,28 @@ function installHooks() {
     }
     return list;
   };
+  // the chapter's bot from its first step to its last. The game renders at 30 fps on the game's own clock without
+  // drawing (the camera, entities, director and the shadow policy's schedule, scans and merges run as in play), and
+  // every `every` s of game time draws a frame with every shadow map refreshed
+  P.path = (chapter, every) => {
+    const lib = window.__botlib, B = lib.create();
+    window.__bots[chapter](B);
+    let step = null;
+    for (const st of B.steps) { const u = st.until; st.until = (s, g) => { step = st.name; return u(s, g); }; }
+    const real = rs.render, clock = performance.now, list = [];
+    let t = clock.call(performance), k = 0, acc = 0;
+    const quiet = (sc, cam) => { sc.updateMatrixWorld(); cam.updateMatrixWorld(); rs.shadows?.update?.(sc, cam, t); };
+    B.tick((s, g) => {
+      if (++k % 4) return;
+      t += 1000 / 30; acc += 1 / 30;
+      if (acc + 1e-6 < every) { rs.render = quiet; try { g.render(1 / 30, 1); } finally { rs.render = real; } return; }
+      acc = 0;
+      const f = P.forced(1 / 30);
+      list.push({ calls: f.shadowCalls + f.mainCalls, tris: f.shadowTris + f.mainTris, shadowCalls: f.shadowCalls, mainCalls: f.mainCalls, shadowTris: f.shadowTris, mainTris: f.mainTris, x: +s.x.toFixed(1), y: +s.y.toFixed(1), step, guard: g.level?.guard?.state ?? null });
+    });
+    performance.now = () => t;
+    try { const r = lib.runAll(B, {}); return { ok: r.ok, step: r.ok ? null : r.step, time: r.time, list }; } finally { performance.now = clock; rs.render = real; }
+  };
   // worst case: every bird of the level standing in view (and inside the sun's shadow frustum)
   P.flockGather = () => {
     const F = G.flock; if (!F) return 0;
@@ -197,31 +224,44 @@ async function flockStress(page) {
 if (only !== 'checks') {
   for (const tier of tiers) for (const [w, h] of views(tier)) {
     const key = w === W && h === H ? tier : `${tier}@${w}x${h}`;
+    const B = BUDGET[tier], budget = {}, spots = {};
+    let p1 = null, p2 = null, flock = null, info = null, finale = null;
+    if (only !== 'path') {
     const page = await open(`tier=${tier}`, { w, h });
-    const spots = {};
     for (const s of SPOTS) { spots[s.name] = await measureSpot(page, s); process.stdout.write(`${key} ${s.name} ${JSON.stringify(spots[s.name])}\n`); }
     // programs after a second pass over every spot (warm-up stability)
-    const p1 = await page.evaluate(() => window.__medina.game.world.rs.renderer.info.programs.length);
+    p1 = await page.evaluate(() => window.__medina.game.world.rs.renderer.info.programs.length);
     for (const s of SPOTS) { await page.evaluate(({ x, y }) => window.__medina.photo(x, y, 1, 0.2), s); await collect(page, 2); }
-    const p2 = await page.evaluate(() => window.__medina.game.world.rs.renderer.info.programs.length);
-    const flock = await flockStress(page);
+    p2 = await page.evaluate(() => window.__medina.game.world.rs.renderer.info.programs.length);
+    flock = await flockStress(page);
     process.stdout.write(`${key} flock-all-in-view ${JSON.stringify(flock)}\n`);
-    const info = await page.evaluate(() => { const rs = window.__medina.game.world.rs; return { fxaa: !!(rs.post.fxaaActive ?? rs.post.q?.fxaa), aa: rs.post.stats?.aa ?? null, msaa: rs.q.msaa, scale: rs.scale ?? rs.q.scale, w: rs.w, h: rs.h }; });
+    info = await page.evaluate(() => { const rs = window.__medina.game.world.rs; return { fxaa: !!(rs.post.fxaaActive ?? rs.post.q?.fxaa), aa: rs.post.stats?.aa ?? null, msaa: rs.q.msaa, scale: rs.scale ?? rs.q.scale, w: rs.w, h: rs.h }; });
     // the finale last: the chapter ends with it
     const fin = await page.evaluate(() => { const G = window.__medina.game; return G.level?.finale ? window.__perf.finale(G.checkpoints.length - 1) : []; });
-    const finale = fin.length ? { ...heaviest(fin), list: fin.map((f) => `${f.shadowCalls + f.mainCalls}/${Math.round((f.shadowTris + f.mainTris) / 1000)}k@z${f.z}`).join(' ') } : null;
+    finale = fin.length ? { ...heaviest(fin), list: fin.map((f) => `${f.shadowCalls + f.mainCalls}/${Math.round((f.shadowTris + f.mainTris) / 1000)}k@z${f.z}`).join(' ') } : null;
     if (finale) process.stdout.write(`${key} finale ${JSON.stringify(finale)}\n`);
     // §8.5 budget per frame, gated on the heaviest frame (every shadow map refreshed, over the lamp's sweep where it
     // is lit, and through the finale). The 60 fps average (shadow-pass calls over the frames that refresh them or
     // not, on the policy's own schedule) is reported beside it
-    const B = BUDGET[tier], budget = {};
     for (const [k, v] of Object.entries(spots)) {
       const avgCalls = round(v.shadowCalls60 + v.mainCalls), avgTris = Math.round(v.shadowTris60 + v.mainTris);
       budget[k] = { calls: v.worst.calls, tris: v.worst.tris, avgCalls, avgTris, ok: !B || (v.worst.calls <= B.calls && v.worst.tris <= B.tris) };
     }
     if (finale) budget.finale = { calls: finale.calls, tris: finale.tris, avgCalls: null, avgTris: null, ok: !B || (finale.calls <= B.calls && finale.tris <= B.tris) };
-    result.tiers[key] = { tier, viewport: [w, h], spots, finale, programsFirstPass: p1, programsSecondPass: p2, flockAllInView: flock, info, budget };
     await page.context().close();
+    }
+    // the real path, on a page of its own (the bot starts the chapter from its first checkpoint)
+    let path = null;
+    if (pathGate) {
+      const pp = await open(`tier=${tier}&hold=1&chapter=${CHAPTER}`, { w, h, bots: true });
+      const r = await pp.evaluate(([c, e]) => window.__perf.path(c, e), [CHAPTER, PATH_EVERY]);
+      await pp.context().close();
+      const over = B ? r.list.filter((f) => f.calls > B.calls || f.tris > B.tris) : [];
+      path = { ok: r.ok, failedStep: r.step, time: r.time, samples: r.list.length, ...heaviest(r.list), over: over.length, worst: [...r.list].sort((a, b) => b.calls - a.calls).slice(0, 6), worstTris: [...r.list].sort((a, b) => b.tris - a.tris).slice(0, 3) };
+      process.stdout.write(`${key} path ${JSON.stringify(path)}\n`);
+      budget.path = { calls: path.calls, tris: path.tris, avgCalls: null, avgTris: null, ok: r.ok && r.list.length > 0 && (!B || !over.length) };
+    }
+    result.tiers[key] = { tier, viewport: [w, h], spots, finale, path, programsFirstPass: p1, programsSecondPass: p2, flockAllInView: flock, info, budget };
   }
 }
 
@@ -320,6 +360,9 @@ if (checks || only === 'checks') {
     });
     // LUT crossfade: identity changes nothing, a look changes the frame, toggling compiles nothing
     if (want('lut')) result.checks.lut = await lutCheck(page);
+    // lean shadow maps: an R8 colour attachment beside the depth texture three samples; the same frame with three's
+    // own RGBA8 maps is identical
+    if (want('leanMaps')) result.checks.leanMaps = await leanMapsCheck(page);
     // the shared soft layer, particles, shafts.setSun and the dispose() contracts
     if (want('contracts')) result.checks.contracts = await page.evaluate(async () => {
       const M = window.__medina, G = M.game, rs = G.world.rs, r = rs.renderer;
@@ -393,13 +436,15 @@ if (checks || only === 'checks') {
       const lan = G.level.lanterns.find((l) => { let f = false; l.mesh.traverse((o) => { f ||= !!o.userData.staticCaster; }); return f; });
       const parts = []; lan.mesh.traverse((o) => { if (o.isMesh && o.userData.staticCaster) parts.push(o); });
       const until = async (f) => { for (let i = 0; i < 200 && !f(); i++) await frame(); };
-      const before = { proxied: S.stats.proxied, cast: parts.filter((o) => o.castShadow).length };
+      // the static proxies' sources (settled casters, which come and go as props rest, apart)
+      const statics = () => S.stats.proxied - (S.stats.settled || 0), inProxies = () => parts.filter((o) => S.meta.get(o)?.proxied).length;
+      const before = { proxied: statics(), merged: inProxies(), cast: parts.filter((o) => o.castShadow).length };
       lan.mesh.position.x += 1;
       // a scan reads the world matrices the last frame rendered: scan every frame until it has seen the move
       await until(() => { S.nextScan = 0; return parts.every((o) => o.castShadow) && !S.building; });
-      const after = { proxied: S.stats.proxied, cast: parts.filter((o) => o.castShadow).length };
+      const after = { proxied: statics(), merged: inProxies(), cast: parts.filter((o) => o.castShadow).length };
       lan.mesh.position.x -= 1;
-      const lantern = { parts: parts.length, before, after, ok: parts.length > 0 && before.cast === 0 && after.cast === parts.length && after.proxied === before.proxied - parts.length };
+      const lantern = { parts: parts.length, before, after, ok: parts.length > 0 && before.cast === 0 && before.merged === parts.length && after.cast === parts.length && after.merged === 0 && after.proxied === before.proxied - parts.length };
       return { boy, lantern, ok: boy.ok && lantern.ok };
     });
     await page.context().close();
@@ -733,6 +778,39 @@ async function moonFlare(page) {
   return { moon, sun, ok: moon.sunVisible > 0.5 && moon.flareSun !== null && moon.flareSun < 0.02 && sun.sunVisible > 0.5 && sun.flareSun > 0.5 };
 }
 
+async function leanMapsCheck(page) {
+  await page.evaluate(() => { window.__medina.game.world.rs.setTier('medium'); window.__medina.photo(97, 0, 1, 0.4); });
+  const n = await page.evaluate(() => window.__frames);
+  await page.waitForFunction((k) => window.__frames >= k, n + 3);
+  const r = await page.evaluate(() => {
+    const M = window.__medina, G = M.game, rs = G.world.rs, gl = rs.renderer.getContext(), P = rs.post.params;
+    const grain = P.grain; P.grain = 0;
+    const lights = []; G.scene.traverse((o) => { if (o.isLight && o.castShadow && o.shadow?.map) lights.push(o); });
+    const shot = () => {
+      rs.shadows.invalidate(); rs.render(G.scene, G.camera, 12.5);
+      const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      return px;
+    };
+    const mad = (X, Y) => { let s = 0, k = 0; for (let i = 0; i < X.length; i += 4) { s += Math.abs(X[i] - Y[i]) + Math.abs(X[i + 1] - Y[i + 1]) + Math.abs(X[i + 2] - Y[i + 2]); k += 3; } return +(s / k).toFixed(3); };
+    const bytes = () => lights.reduce((b, l) => b + l.shadow.map.width * l.shadow.map.height * ((l.shadow.map.texture.format === 1028 ? 1 : 4) + 4), 0);
+    const formats = lights.map((l) => `${l.type}:${l.shadow.map.width}:${l.shadow.map.texture.format === 1028 ? 'R8' : 'RGBA8'}`);
+    const lean = bytes(), A = shot(), A2 = shot();
+    // three's own maps: an RGBA8 target with the same depth texture settings
+    for (const l of lights) {
+      const old = l.shadow.map, od = old.depthTexture, rt = new old.constructor(old.width, old.height);
+      const d = rt.depthTexture = new od.constructor(old.width, old.height, od.type);
+      d.format = od.format; d.compareFunction = od.compareFunction; d.minFilter = od.minFilter; d.magFilter = od.magFilter; d.name = od.name;
+      l.shadow.map = rt; od.dispose(); old.dispose(); l.shadow.needsUpdate = true; // a map never drawn is never sampled
+    }
+    const full = bytes(), B = shot();
+    for (const l of lights) { l.shadow.map.depthTexture.dispose(); l.shadow.map.dispose(); l.shadow.map = null; } // lean ones again next frame
+    P.grain = grain; rs.setTier('low');
+    return { formats, mb: { lean: +(lean / 1048576).toFixed(1), threes: +(full / 1048576).toFixed(1) }, mad: { repeat: mad(A, A2), threes: mad(A, B) } };
+  });
+  return { ...r, ok: r.formats.length >= 3 && r.formats.every((f) => f.endsWith('R8')) && r.mad.repeat === 0 && r.mad.threes === 0 && r.mb.lean < r.mb.threes };
+}
+
 async function lutCheck(page) {
   await page.evaluate(() => { window.__medina.photo(9, 0, 1, 0.4); });
   const n = await page.evaluate(() => window.__frames);
@@ -856,7 +934,7 @@ if (compare && fs.existsSync(compare) && Object.keys(result.tiers).length) {
   }
 }
 if (Object.keys(result.tiers).length) {
-  console.log('\n§8.5 budget (calls shadow + main, triangles; the heaviest frame: every shadow map refreshed, over the lamp\'s sweep and the finale; [60 fps average]):');
+  console.log('\n§8.5 budget (calls shadow + main, triangles; the heaviest frame: every shadow map refreshed, over the lamp\'s sweep, the finale and the bot\'s path; [60 fps average]):');
   for (const [key, T] of Object.entries(result.tiers)) {
     const B = BUDGET[T.tier ?? key], over = Object.entries(T.budget || {}).filter(([, v]) => !v.ok);
     console.log(` ${key.padEnd(16)} budget ${B ? `${B.calls} calls / ${B.tris / 1000}k tris` : 'n/a'}: ` + Object.entries(T.budget || {}).map(([k, v]) => `${k} ${v.calls}/${Math.round(v.tris / 1000)}k${v.avgCalls === null ? '' : ` [${v.avgCalls}/${Math.round(v.avgTris / 1000)}k]`}${v.ok ? '' : ' OVER'}`).join(', ') + (over.length ? `  (FAIL ${over.length} spot${over.length > 1 ? 's' : ''} over)` : ''));

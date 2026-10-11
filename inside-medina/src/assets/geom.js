@@ -250,9 +250,12 @@ export function tube(points, radius, seg = 32, radial = 6, closed = false) {
 // sphere would reach far outside the view
 const _bx = new THREE.Box3();
 function batchInFrustum(frustum) { return frustum.intersectsBox(_bx.copy(this.geometry.boundingBox).applyMatrix4(this.matrixWorld)); }
+function castersOnly(r, o, c, sc, geo) { geo.drawRange.count = o.userData.castCount; }
+function allPieces(r, o, c, sc, geo) { geo.drawRange.count = Infinity; }
 
 export const BANDS = [[-4, 0.6], [-15, 1], [-Infinity, 2]];
-// the low tier spends triangles to save draws: the street and the play plane share 1 × chunk wide batches
+// the low tier spends triangles to save draws: the street and the play plane share 1 × chunk wide batches (and a
+// material's casting and non-casting pieces share one: Batcher castMerge)
 export const LITE_BANDS = [[-15, 1], [-Infinity, 2]];
 // Merges static geometry by material into chunks along x. The chunk width follows depth: pieces near the play
 // plane (centre z > -4) merge in 0.6 × chunk wide strips, the street behind (to -15) in `chunk`, the far city in
@@ -263,10 +266,12 @@ export const LITE_BANDS = [[-15, 1], [-Infinity, 2]];
 export class Batcher {
   // bands: [z limit, chunk width factor] from the play plane back (a piece's band is the first whose limit its
   // centre lies in front of)
-  constructor(materials, { chunk = 36, far = false, bands = BANDS } = {}) {
+  // castMerge: casting and non-casting pieces of a material share a batch (low: fewer draws for a few more triangles)
+  constructor(materials, { chunk = 36, far = false, bands = BANDS, castMerge = false } = {}) {
     this.mats = materials;
     this.chunk = chunk;
     this.bands = bands;
+    this.castMerge = castMerge;
     this.far = far && typeof materials.farSet === 'function';
     this.groups = new Map();
   }
@@ -297,9 +302,11 @@ export class Batcher {
     let band = 0;
     while (band < this.bands.length - 1 && cz <= this.bands[band][0]) band++;
     const ck = Math.floor(cx / (this.chunk * this.bands[band][1]));
-    const key = `${mat.uuid}|${cast ? 1 : 0}${receive ? 1 : 0}|${band}|${ck}`;
-    if (!this.groups.has(key)) this.groups.set(key, { mat, cast, receive, band, geos: [] });
-    this.groups.get(key).geos.push(g);
+    // with castMerge, casting and non-casting pieces share a batch (casters first; see build)
+    const key = `${mat.uuid}|${this.castMerge ? '' : cast ? 1 : 0}${receive ? 1 : 0}|${band}|${ck}`;
+    if (!this.groups.has(key)) this.groups.set(key, { mat, receive, band, geos: [], cast: [] });
+    const grp = this.groups.get(key);
+    grp.geos.push(g); grp.cast.push(!!cast);
   }
 
   // a kit wrapper that pre-transforms everything added through it
@@ -319,11 +326,18 @@ export class Batcher {
   build(parent) {
     const meshes = [];
     for (const [, grp] of this.groups) {
-      const merged = mergeGeometries(grp.geos, false);
+      // the casting pieces first: a batch with both (castMerge) casts only its first castCount vertices (its own
+      // shadow draws and the merged shadow proxies), one draw in the main pass instead of two
+      const casters = grp.geos.filter((_, i) => grp.cast[i]), others = grp.geos.filter((_, i) => !grp.cast[i]);
+      const merged = mergeGeometries([...casters, ...others], false);
       if (!merged) { console.warn('merge failed', grp.mat.name); continue; }
       merged.computeBoundingSphere(); merged.computeBoundingBox();
       const mesh = new THREE.Mesh(merged, grp.mat);
-      mesh.castShadow = grp.cast; mesh.receiveShadow = grp.receive;
+      mesh.castShadow = casters.length > 0; mesh.receiveShadow = grp.receive;
+      if (casters.length && others.length) {
+        mesh.userData.castCount = casters.reduce((n, g) => n + g.attributes.position.count, 0);
+        mesh.onBeforeShadow = castersOnly; mesh.onAfterShadow = allPieces;
+      }
       mesh.matrixAutoUpdate = false;
       mesh.intersectsFrustum = batchInFrustum;
       mesh.name = `batch:${grp.mat.name}`; mesh.userData.band = grp.band;
@@ -333,4 +347,34 @@ export class Batcher {
     this.groups.clear();
     return meshes;
   }
+}
+
+// One mesh per material for the pieces of a moving prop: a group's direct child meshes that keep their place in it
+// (an entity that animates only the group: a rope ladder's ropes and rungs, a drawbridge's planks) merge into one
+// draw per material and shadow flags, in the group's own space, so the group's animation moves them as before.
+// Returns the number of draws saved.
+export function mergeChildren(group) {
+  const sets = new Map();
+  for (const o of group.children) {
+    if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || o.isBatchedMesh || Array.isArray(o.material) || o.children.length || o.morphTargetInfluences || o.customDepthMaterial) continue;
+    const g = o.geometry;
+    const key = [o.material.uuid, o.castShadow, o.receiveShadow, o.layers.mask, o.renderOrder, o.visible, o.frustumCulled, !!g.index, Object.keys(g.attributes).sort().join()].join('|');
+    if (!sets.has(key)) sets.set(key, []);
+    sets.get(key).push(o);
+  }
+  let saved = 0;
+  for (const list of sets.values()) {
+    if (list.length < 2) continue;
+    const geos = list.map((o) => { if (o.matrixAutoUpdate) o.updateMatrix(); return o.geometry.clone().applyMatrix4(o.matrix); });
+    const merged = mergeGeometries(geos, false);
+    for (const g of geos) g.dispose();
+    if (!merged) continue;
+    const a = list[0], m = new THREE.Mesh(merged, a.material);
+    m.name = `${group.name || 'group'}:${a.material.name || 'part'}`;
+    m.castShadow = a.castShadow; m.receiveShadow = a.receiveShadow; m.layers.mask = a.layers.mask; m.renderOrder = a.renderOrder; m.frustumCulled = a.frustumCulled;
+    group.add(m);
+    for (const o of list) { o.removeFromParent(); o.geometry.dispose(); }
+    saved += list.length - 1;
+  }
+  return saved;
 }

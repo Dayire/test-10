@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { boxMM, worldUV, shadeByHeight, setColor } from '../../assets/geom.js';
+import { boxMM, worldUV, shadeByHeight, setColor, mergeChildren } from '../../assets/geom.js';
 import { building, wallWithOpenings, archFrame, arcade, dome, minaret, cornice, merlons, zellige, door, spandrels, archBead } from '../../assets/architecture.js';
 import { barrel, pot, rugRoll, hangingRug, sack, basket, cart, awning, drape, lanternMesh, bracket, laundry, wire, eave, stairs, stool, pole, souqCanopy } from '../../assets/props.js';
 import { ivyCurtain, ivyPatch, leafClump, grassTufts } from '../../assets/foliage.js';
@@ -181,6 +181,7 @@ export function* buildLevel(game, kit) {
   const ladderVine = { x0: 112.7, x1: 113.5, y0: 0, y1: 4.6, exit: { x: 114.1, y: 4.6 }, enabled: false };
   game.vines.push(ladderVine);
   L.ladder = new RopeLadder(game, { x: 113.1, y0: 0, y1: 4.6, z: 0.05, vine: ladderVine });
+  mergeChildren(L.ladder.mesh); // ropes and rungs: one draw per material (requests/I0.md #1)
   L.lever = new Lever(game, { x: 110.7, y: 0, dir: -1, onPulled: () => L.ladder.release() });
   facades([[112.4, 120, 11, 'blue', { door: false }]]);
   block(118, 119.7, 0, 2.3, { z0: FZ, z1: 1.3, mat: 'plasterBlue', coping: 'limestone' });
@@ -214,6 +215,7 @@ export function* buildLevel(game, kit) {
   // stone lip at the ravine edge
   vbox(136.45, -0.02, FZ, 136.85, 0.08, 2.5, 'limestone', { base: 0 });
   L.bridge = new Drawbridge(game, { x0: 136.8, x1: 140.3, y: 0, source: () => L.plate.load });
+  mergeChildren(L.bridge.mesh); // planks and beams: one draw per material
   // canyon view through the ravine gap
   vbox(136.8, -9, FZ - 30, 140.3, -8.9, FZ, 'sand', { cast: false });
   vbox(136.0, -9, FZ - 30, 136.8, 14, FZ - 0.1, 'plasterBlue', { base: -9, grime: 4 });
