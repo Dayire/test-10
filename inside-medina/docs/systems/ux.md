@@ -245,37 +245,42 @@ Every screen keeps `hidden` (attribute) and the `hidden` class while closed, whi
 
 SwiftShader container (4 CPUs, shared with another agent), dev server.
 
-`ux-tests` — 9 / 9:
+`ux-tests` — 11 / 11:
 
 | Scenario | Result |
 |---|---|
-| keyboard | menu interactive at 0.43–0.60 s (gate 3 s) and on top of the splash while the chapter builds (ready 12–15 s); settings → audio → music 10 → 4 (shell, engine and mixer all 4) → back → new journey → walk → Esc → pause → title → continue resumes souk / 0; 0 page errors |
+| keyboard | menu interactive at 0.44–0.59 s (gate 3 s) and on top of the splash while the chapter builds (ready 10.6–16.2 s); settings → audio → music 10 → 4 (shell, engine and mixer all 4) → back → new journey → walk → Esc → pause → title → continue resumes souk / 0; 0 page errors |
 | gamepad | the same with a stubbed Xbox pad (d-pad, A, B, RB, Start); family `xbox`, legend A / B; a hard landing rumbles once (the mixer stays unstarted: a pad press is no user activation) |
-| storage | `Storage` throwing: the broken-link glyph shows, settings apply from memory, new journey plays, a 94-character save code round-trips (souk/0 after reset → night/3, chapters, furthest checkpoints, deaths), tampered codes are refused |
+| storage | `Storage` throwing: the broken-link glyph shows, settings apply from memory, new journey plays, a 94-character save code round-trips (souk/0 after reset → night/3, chapters, furthest checkpoints, deaths), tampered codes are refused; hand-made codes with a valid checksum open `sundown/1` for a locked dawn at checkpoint 99, and souk 6 for checkpoint 40 of a 7-checkpoint souk |
 | persist | film grain 40, menu text 125 %, crawl toggle, effects 7 survive a reload and are applied (`--menu-scale` 1.25, Input's crawl mode) |
 | autostart | play, no screen open, `#title` hidden, input not zeroed |
-| menubg | under the menu: cap 30, internal 360 × 203 of 720 × 405, vignette 0.70; in play: uncapped, full size, 0.50 |
+| menubg | under the menu: cap 30, internal 360 × 203 of 720 × 405, vignette 0.70, still 0.70 resting (Esc) and through two resizes; in play: uncapped, full size, 0.50 |
 | chapters | keyboard: chapters → the souk → its pips → checkpoint 2 → one card (`select`) → souk / 2 |
-| artifact | `medina.html` 1.16 MB (module 1.04 MB) in `test.html` inside `sandbox="allow-scripts"`: opaque origin, storage refused, service workers refused, no external URL, no console error through boot, title and a new journey |
-| hosted | `vite build`: Chrome's installability check returns no error (standalone, 192 / 512 / maskable icons), the worker controls the second load, and with the network off the page reloads to the title (vendored font in cache) |
+| crawl | toggle mode: ↓ in the pause menu never latches; after restart checkpoint he stands; ↓ latches and ↓ releases in play; holding the crate ↓ never latches (no Sunwork mirror on this tree) |
+| hints | the jump glyph at the sack pile (opacity 0.85), held out of sight under the pause (controls listed), back on resume, gone after the jump and saved; grab by the crate; none at the 3.1 m wall; jump once the crate stands at its foot; the lab learns a hint in memory (`saving` false) and `medina.save.v1` stays absent |
+| artifact | `medina.html` 1.17 MB in `test.html` inside `sandbox="allow-scripts"`: opaque origin, storage refused, service workers refused, no external URL, no console error through boot, title and a new journey |
+| hosted | `vite build`: Chrome's installability check returns no error (standalone, 192 / 512 / maskable icons), the worker controls the second load, and with the network off the page reloads to the title (vendored font in cache); after a deploy the open tab still loads the previous build's chapter chunk (200, two caches) and gets the new manifest (the previous worker's lookups returned the old one) |
 
-`mobile-tests` — 21 / 21 (iPhone 13 portrait 390 × 844 with insets 47 / 34, iPhone 13 landscape 844 × 390 with
-47 / 47 / 21, Pixel 7 412 × 915 with a 26 px cutout; real CDP touches):
+`mobile-tests` — 25 / 25 (iPhone 13 portrait 390 × 844 with insets 47 / 34, iPhone 13 landscape 844 × 390 with
+47 / 47 / 21, Pixel 7 412 × 915 with a 26 px cutout, a 1280 × 720 touch laptop with a fine mouse; real CDP touches):
 
 | Check | Result (all three) |
 |---|---|
 | menus | the touch layer hidden (`visibility: hidden`) under the title; every title entry, settings tab and visible row of all five tabs, chapter card and confirm button ≥ 44 px and inside the safe area; a tap on "new journey" starts play and the layer comes back |
+| settings | (phones) each tab, tapped after the previous one was scrolled to its end, opens at scroll 0 with its first option in view; landscape: tabs on one line, 6 rows in view (4 before), fade and hairline track on every list that runs on, at menu text 150 % the strip scrolls to `data` and the underline follows; portrait: 7–11 rows in view, tabs on two lines |
 | controls | jump 84, grab 72, ⏸ 44 px, all inside the safe area (⏸ at 10, 57 under the notch); a tap on ⏸ pauses with the layer hidden; every pause entry ≥ 44 px inside the safe area |
 | jump | a tap leaves the ground (apex 0.87 m) |
 | stick | the base spawns under the thumb; 0.5 R → x 0.5, walking at 1.43 m/s; 1.0 R → x 1, running at 4.1 m/s; release → 0 |
 | grab | stick and grab held together (two touches) grip and push the souk's first crate 1.36 m |
 | lens | the boy's projection inside the play rect, near its centre (portrait: 441 in 47–607 above the band) |
 | aim | the touch reaches `pin.aimTarget` at the world point under the finger (error 0, pointer kind `touch`) |
+| hybrid (touch laptop) | the layer away and transparent to hits (canvas under the zone, jump and ⏸); a mouse drag on the left is the scene pointer (kind `mouse`), no stick, the boy does not move, no lens shift, the device stays keyboard; a click on the ⏸ corner does not pause; the first touch brings the layer back with the stick under the thumb (300, 450), the boy walks 1.98 m and the scene pointer stays free; a mouse move sends it away again; a jump tap whose press and lift land in one frame jumps (0.89 m) |
 
 With L's Sunwork files laid over this branch in a scratch tree (not committed here), `mobile-tests --only aim`
 grips `M2` with a touch tap (latched, the layer switches to its aiming layout), touches the lock `L4` and the mirror
 settles on −45° on all three devices.
 
 The foundation suite (the engine's own, frozen; `--artifact`) passes 18 / 18 with the shell, including the boot
-budget against the pre-foundation tree (median 18.1 s against 19.1 s under the same load, 24 painted loading values)
-and the artifact boot; the souk bot (85.37 s, no death, hash `7bd4df65`) and the 13 souk negatives pass.
+budget against the pre-foundation tree (median 16.1 s against a budget of 16.4 s, base medians 15.0 s, under another
+agent's load; 24 painted loading values) and the artifact boot; the souk bot (85.37 s, no death, hash `7bd4df65`)
+and the 13 souk negatives pass.
