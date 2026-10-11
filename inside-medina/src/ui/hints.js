@@ -164,14 +164,19 @@ export class HintDirector {
     const p = this.game.player;
     return p.x >= z.x0 && p.x <= z.x1 && (z.y0 === undefined || p.y >= z.y0) && (z.y1 === undefined || p.y <= z.y1);
   }
-  // above the boy's head, projected through the live camera (lens shift included)
+  // above the boy's head, projected through the live camera (lens shift included), kept whole inside the play rect
+  // (a boy at the frame's edge); while he is out of the frame the glyph waits
   place(h) {
     const g = this.game, n = this.el.firstChild;
     if (!n) return;
     const v = this._v.set(g.player.x, g.player.y + (g.player.crawling ? 1.15 : 1.75), g.player.z || 0).project(g.camera);
-    const x = (v.x * 0.5 + 0.5) * innerWidth, y = (-v.y * 0.5 + 0.5) * innerHeight;
-    const a = Math.min(1, Math.max(0, (h.t - (h.delay || 0)) / 0.45));
-    n.style.transform = `translate3d(${x.toFixed(1)}px, ${(y - 18).toFixed(1)}px, 0) translate(-50%, -100%)`;
+    let x = (v.x * 0.5 + 0.5) * innerWidth, y = (-v.y * 0.5 + 0.5) * innerHeight - 18;
+    n._size ||= [Math.max(44, n.offsetWidth), Math.max(44, n.offsetHeight)];
+    const r = this.ui.playRect?.() || { x: 0, y: 0, w: innerWidth, h: innerHeight }, hw = n._size[0] / 2 + 6, hh = n._size[1] + 6;
+    const off = x < r.x - 40 || x > r.x + r.w + 40 || y < r.y - 40 || y > r.y + r.h + hh + 40;
+    x = Math.max(r.x + hw, Math.min(r.x + r.w - hw, x)); y = Math.max(r.y + hh, Math.min(r.y + r.h, y));
+    const a = off ? 0 : Math.min(1, Math.max(0, (h.t - (h.delay || 0)) / 0.45));
+    n.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(-50%, -100%)`;
     n.style.opacity = String(a);
   }
 

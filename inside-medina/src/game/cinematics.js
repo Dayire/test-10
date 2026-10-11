@@ -109,12 +109,13 @@ export class DepthWalk {
   }
 }
 
-// establishing shot with a live, slow sway (the title / chapter intro)
+// establishing shot with a live, slow sway (the title / chapter intro). On an upright screen it keeps the rail's
+// horizontal floor (52°), so a shot composed for landscape still holds the boy when play begins
 export function introShot(game, shot) {
   const pos = v3(shot.pos), look = v3(shot.look), fov = shot.fov ?? 42, sway = shot.sway ?? 0.5;
   const focus = shot.shadowFocus ? v3(shot.shadowFocus) : null;
-  const p = new THREE.Vector3();
-  return () => ({ pos: p.set(pos.x + Math.sin(game.time * 0.05) * sway, pos.y, pos.z), look, fov, shadowFocus: focus });
+  const p = new THREE.Vector3(), floor = (a) => (a < 1 ? THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(26)) / a)) : 0);
+  return () => ({ pos: p.set(pos.x + Math.sin(game.time * 0.05) * sway, pos.y, pos.z), look, fov: Math.max(fov, floor(game.camera?.aspect || 1.78)), shadowFocus: focus });
 }
 
 // main-menu background shot (same contract; menus may add pointer parallax)

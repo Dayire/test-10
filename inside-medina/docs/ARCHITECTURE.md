@@ -277,7 +277,8 @@ change as a LookDirector override and restores the preset on `stop()`. When the 
 to `fade.color` and the mix fades out; `endHold` seconds later `onEnd` runs (default `completeChapter()`).
 `stop({audio = true})` (death, restart, title) also fades the mix back in if the walk had faded it; the loader
 stops it with `{audio: false}` and the next chapter's reveal fades the mix in. `introShot(game, shot)` and `menuShot(game, shot)` return camera
-overrides with a live sway.
+overrides with a live sway (on an upright screen the field keeps the rail's 52° horizontal floor). A level's own shot
+releases itself with `camRig.clearOverride(blend, shot)`, which clears nothing once another override replaced it.
 
 ## 7. Rendering foundation
 

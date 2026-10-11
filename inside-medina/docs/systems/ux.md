@@ -117,6 +117,8 @@ The touch layer is the first child of `#ui`, so the card, the menus and the load
 **Lens shift** (FULL_GAME §8.2): in play on touch, `camRig.setSafeRect(ui.playRect())` keeps the boy centred in the
 play rect: portrait, the screen above a control band of max(160 px, 24 vh) plus the bottom inset; landscape, the safe
 area. It eases in and out over 0.8 s (the title shot is composed for the full screen, so the shift is cleared there).
+On an upright screen the title and intro shots keep the rail's 52° horizontal floor, so play opens with the boy in
+the frame (mobile-tests `menus` checks him inside the play rect from the first frames of play).
 The camera distance setting `auto` (the default) resolves to `close` on portrait phones and `normal` elsewhere, and
 follows rotations. A one-time rotate-phone glyph shows for 3 s at the first portrait play (never blocking).
 
@@ -129,9 +131,9 @@ haptics, crawl). Defaults: `defaultSettings(deviceClass)`.
 
 | Tab | Options (default) |
 |---|---|
-| graphics | quality (auto), render scale 50–100 (100), dynamic resolution (on), frame cap 30/60/display (60 on touch, display on desktop), battery saver (off), depth of field (on), film grain 0–100 (60), motion blur (off; ultra only), brightness −3…+3 (0, with the calibration rosettes), camera auto/close/normal/wide (auto), fullscreen (only where `document.fullscreenEnabled`; a phone then tries `screen.orientation.lock('landscape')`) |
+| graphics | quality (auto), render scale 50–100 (100), dynamic resolution (on), frame cap 30/60/display (60 on touch, display on desktop), battery saver (off), depth of field (on), film grain 0–100 (60), brightness −3…+3 (0, with the calibration rosettes), camera auto/close/normal/wide (auto), fullscreen (only where `document.fullscreenEnabled`; a phone then tries `screen.orientation.lock('landscape')`) |
 | audio | master, music, effects, ambience 0–10 (10), mute in background (on), mono (off), reduced dynamic range (off) |
-| controls | touch stick floating/fixed, touch size S/M/L, touch opacity 20–80 % (45), left-handed (touch devices only); grab hold/toggle, crawl hold/toggle, invert tilt, aim snap (on), vibration off/low/full (low), control hints always/first time/never (first time), keys (keyboard and pad glyphs, read-only) |
+| controls | touch stick floating/fixed, touch size S/M/L, touch opacity 20–80 % (45), left-handed (touch devices only); grab hold/toggle, crawl hold/toggle, invert tilt, aim snap (on), vibration off/low/full (low), control hints always/first time/never (first time), keys (read-only: keyboard and pad glyphs, or on a touch device in use the touch layer's own glyphs and "a finger on the scene" for tilt and aim) |
 | accessibility | camera shake 0–100 % (100), reduce motion, reduce flashing, high contrast, visual sound cues, generous timing, assist, game speed 100/85/70 %, menu text size 100/125/150 % |
 | data | where progress is kept (a broken-link glyph when storage is unavailable), save code (copy), enter a save code, reset progress (glyph confirm) |
 
@@ -186,10 +188,13 @@ and in reach. The save code field is 16 px (iOS zooms the page when a smaller fi
   2.5 s; after 2.5 s a small rosette turns under the label while the chapter is still building (in the card's own
   column, inside the safe area, so it never meets the label on a short landscape phone).
 - **Credits** (`#end`, `game.hooks.credits(lines)`): a slow roll on the right (centred in portrait): MEDINA, a rosette, the
-  lines (strings, or `{role, name}`), and "thank you for walking with us". Ink follows what is behind (dark on a pale
+  lines (strings, or `{role, name}`), and "thank you for walking with us". The lines are `src/chapters/credits.js`
+  (roles: world and design, sunwork, music, sound, engine, typeface with its licence, tools, thanks), rolled from the
+  main menu and at the journey's end (Chapter IV's `def.credits`). Ink follows what is behind (dark on a pale
   exit colour). Skippable after the first completion, and always from the main menu.
 - **Confirm**: glyph, one short question, ✓ and ✕ (✕ focused).
-- **Lifecycle**: a lost GL context shows a lantern card ("tap to reload": the hosted page may reload, the artifact
+- **Lifecycle**: a lost GL context shows a lantern card ("tap to reload" on touch, "click to reload" with a mouse or
+  keys, wordless with a pad: the hosted page may reload, the artifact
   waits for the browser to restore it, after which the engine reloads the checkpoint); without WebGL 2 a static card
   says the city cannot be lit here.
 
@@ -207,7 +212,8 @@ player has tilted with the keys. A chapter's zones come first: a context hint fo
 counts down, and a verb learnt from a zone is not taught again from context. A pause or a menu
 holds the glyph out of sight; it comes back on resume. The glyph follows the device in hand
 (keycaps with the player's own layout letters, pad buttons of the pad's family, a ghost thumb on touch that also
-pulses the control) above the boy's projected head, and fades when the action happens; done hints are written to
+pulses the control) above the boy's projected head, kept whole inside the play rect (held out of sight while he is
+out of the frame), and fades when the action happens; done hints are written to
 `save.seenHints` (`<chapter>:<index>`, `move`); a dev chapter (the lab) keeps them in memory and never writes the save. **Visual sound cues**: the horn (`alarm`), shouts, darts and the drum
 show an edge glyph on the side they came from.
 

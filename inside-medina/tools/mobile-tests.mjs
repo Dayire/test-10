@@ -4,7 +4,7 @@
 // identifiers and the browser's own hit testing are all exercised. Checks per device:
 //   menus      the touch layer is hidden under the menus; every menu target is ≥ 44 px and inside the safe area
 //              (the chapter select's checkpoint stepper included: a tap opens it, its arrows step); a tap acts
-//              (new journey starts play)
+//              (new journey starts play) and the boy is inside the play rect from the first frames of play
 //   controls   jump, grab and ⏸ are ≥ 44 px and inside the safe area; ⏸ opens the pause menu (layer hidden)
 //   stick      floating stick: 0.5 of its radius walks, 1.0 runs (the boy's speed); it spawns under the thumb, and
 //              stays whole inside the safe area when the thumb lands by the notch or the home bar
@@ -12,8 +12,9 @@
 //   grab       grab held with the stick pushes the souk's first crate (two fingers at once)
 //   lens       the lens shift keeps the boy's projected position inside the play rect above the control band
 //   aim        finger aim on the Sunwork lab's props: a tap on grab latches M2, a finger on the lock L4 tilts it to
-//              −45° (the notch buzzes), a second tap lets go; the crank K2 turns F2 onto L7 (45°); the capstan turns
-//              the heliostat onto the fortress lamp (3.2°) and the lab ends
+//              −45° (the notch buzzes), a second tap lets go; the crank K2 turns F2 onto L7 (45°); at the capstan the
+//              fortress lamp comes into view and a finger on it turns the heliostat within the magnet's reach, which
+//              settles it on 3.2° once the finger lifts (the lab ends)
 //   settings   (phones) the tabs sit on one line; a tab opens at its first option (after the previous one was
 //              scrolled to its end), with enough rows in view; a list that runs on fades at its edge; the focused
 //              brightness slider answers a finger (its calibration rosettes sit beside it, never over it); the save
@@ -70,7 +71,7 @@ async function device(dev) {
   };
   const tap = async (x, y) => { await touch('start', 1, x, y); await frames(page, 1); await touch('end'); await frames(page, 2); };
   const centre = (r) => [r.x + r.w / 2, r.y + r.h / 2];
-  const W = dev.viewport.width, H = dev.viewport.height, I = dev.insets;
+  const W = dev.viewport.width, H = dev.viewport.height, I = dev.insets, innerW = W, innerH = H;
   const safe = { x0: I.left, y0: I.top, x1: W - I.right, y1: H - I.bottom };
   // visible interactive targets of the open screen (and the touch layer): size and safe-area containment
   const targets = (sel) => page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((e) => e.offsetParent !== null && !e.hidden && getComputedStyle(e).visibility !== 'hidden').map((e) => {
@@ -126,10 +127,20 @@ async function device(dev) {
     const nj = await page.evaluate(() => { const b = document.querySelector('#title .entry[data-k="new"]').getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
     await tap(...centre(nj));
     await page.waitForFunction(() => __medina.game.mode === 'play', null, { timeout: 60000 });
+    // the first frames of play show the boy: inside the play rect within the title-to-rail blend's first second
+    const boyAt = () => page.evaluate(() => {
+      const G = __medina.game, p = G.player, V = new (G.camera.position.constructor)(p.x, p.y + 0.6, 0).project(G.camera), r = __ui.playRect();
+      const x = (V.x * 0.5 + 0.5) * innerWidth, y = (-V.y * 0.5 + 0.5) * innerHeight;
+      return { t: +(G.time - (G.stats.t0 ?? G.time)).toFixed(2), x: Math.round(x), y: Math.round(y), in: x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h };
+    });
+    const early = [];
+    for (let i = 0; i < 6; i++) { early.push(await boyAt()); if (early.at(-1).t > 1) break; await frames(page, 2); }
     await frames(page, 4); await page.waitForTimeout(400);
     const shown = await page.evaluate(() => { const t = document.getElementById('touch'); return { hide: t.classList.contains('hide'), vis: getComputedStyle(t).visibility, device: __ui.input.lastDevice }; });
-    check('menus', hidden.exists && hidden.hide && hidden.vis === 'hidden' && !menuBad.length && !setBad.length && !chBad.length && !cfBad.length && !shown.hide && shown.vis === 'visible' && shown.device === 'touch',
-      { hiddenInMenu: hidden, menuBad, setBad: setBad.slice(0, 4), chBad, cfBad, inPlay: shown });
+    const firstSecond = early.filter((e) => e.t <= 1);
+    check('menus', hidden.exists && hidden.hide && hidden.vis === 'hidden' && !menuBad.length && !setBad.length && !chBad.length && !cfBad.length && !shown.hide && shown.vis === 'visible' && shown.device === 'touch'
+      && firstSecond.length > 0 && firstSecond.every((e) => e.in),
+      { hiddenInMenu: hidden, menuBad, setBad: setBad.slice(0, 4), chBad, cfBad, inPlay: shown, boy: early });
     // the controls, then ⏸
     const ctl = await page.evaluate(() => { const r = __ui.touch.rects(); return { jump: r.jump, grab: r.grab, pause: r.pause }; });
     const ctlBad = judge(Object.entries(ctl).map(([k, r]) => ({ k, ...r })));
@@ -320,13 +331,13 @@ async function device(dev) {
     // a finger on the scene aims it, the notch buzzes, a second tap lets go
     await page.goto(`${BASE}?${Q}&autostart=1&hold=1&chapter=lab&cp=0`); await ready(page); await frames(page, 3);
     const step = (n) => page.evaluate((n) => { const G = __medina.game; for (let i = 0; i < n; i++) __medina.sim(1 / 120, () => { const s = G.input.poll(); G.input.state = window.__simPrev || { ...s, jump: false, grab: false, y: 0 }; window.__simPrev = s; return s; }); }, n);
-    const at = (x, y) => page.evaluate(([x, y]) => { const G = __medina.game; const V = new (G.camera.position.constructor)(x, y, 0).project(G.camera); const sx = (V.x * 0.5 + 0.5) * innerWidth, sy = (-V.y * 0.5 + 0.5) * innerHeight; return { sx, sy, hit: document.elementFromPoint(sx, sy)?.tagName }; }, [x, y]);
+    const at = (x, y, z = 0) => page.evaluate(([x, y, z]) => { const G = __medina.game; const V = new (G.camera.position.constructor)(x, y, z).project(G.camera); const sx = (V.x * 0.5 + 0.5) * innerWidth, sy = (-V.y * 0.5 + 0.5) * innerHeight; return { sx, sy, hit: document.elementFromPoint(sx, sy)?.tagName }; }, [x, y, z]);
     const tapGrab = async () => { const gr = await page.evaluate(() => __ui.touch.rects().grab); await touch('start', 3, ...centre(gr)); await frames(page, 1); await step(6); await touch('end'); await frames(page, 1); await step(30); };
     const held = () => page.evaluate(() => { const p = __medina.game.player; return { grip: !!p.grip?.mirror, state: p.state, latch: p.latch, aiming: __ui.touch.aiming }; });
     // the finger stays on the world point while the camera settles (re-projected every quarter second of play)
-    const aim = async (x, y, read, n = 150) => {
-      let pt = await at(x, y); await touch('start', 4, pt.sx, pt.sy); await frames(page, 2);
-      for (let k = 0; k < n; k += 30) { await step(30); await frames(page, 1); pt = await at(x, y); await touch('move', 4, pt.sx, pt.sy); }
+    const aim = async (x, y, read, n = 150, z = 0) => {
+      let pt = await at(x, y, z); await touch('start', 4, pt.sx, pt.sy); await frames(page, 2);
+      for (let k = 0; k < n; k += 30) { await step(30); await frames(page, 1); pt = await at(x, y, z); await touch('move', 4, pt.sx, pt.sy); }
       const r = await page.evaluate(read); await touch('end'); await frames(page, 2); await step(10); return { ...r, hit: pt.hit };
     };
     const out = { mirrors: await page.evaluate(() => __medina.ext.light?.().mirrors?.length || 0) };
@@ -344,19 +355,24 @@ async function device(dev) {
     Object.assign(out.k2, await aim(125.3, 4.95, () => ({ alpha: __medina.game.level.light.get('F2').alpha })));
     await tapGrab(); await frames(page, 2);
     out.k2.let = await held();
-    // the capstan (checkpoint 12): touch toward the fortress lamp (a ray leaving H at −173.6°), the heliostat
-    // turns onto 3.2° and the light answers the fortress (the lab ends)
+    // the capstan (checkpoint 12): the capstan's shot brings the fortress into the frame; a finger on the fortress
+    // lamp itself (420, 9.3, z −4) turns the heliostat onto 3.2° and the light answers the fortress (the lab ends)
     await page.evaluate(() => { __medina.checkpoint(12); const c = __medina.game.level.light.get('capstan'); __medina.teleport(c.standX, c.y, 1); });
     await step(40); await tapGrab();
     out.cap = { took: await held() };
-    const th = -173.6 * Math.PI / 180;
-    Object.assign(out.cap, await aim(478 + 8 * Math.cos(th), 14.5 + 8 * Math.sin(th), () => ({ alpha: +__medina.game.level.light.get('H').alpha.toFixed(2) }), 360));
-    await step(600); // the eye holds 0.5 s, the fortress goes out over 2.4 s
+    await page.waitForFunction(() => __medina.game.camRig.overrideW >= 1, null, { timeout: 30000, polling: 100 }).catch(() => {});
+    out.cap.lamp = await at(420, 9.3, -4);
+    out.cap.lamp = { ...out.cap.lamp, sx: Math.round(out.cap.lamp.sx), sy: Math.round(out.cap.lamp.sy), inView: out.cap.lamp.sx > 0 && out.cap.lamp.sx < innerW && out.cap.lamp.sy > 0 && out.cap.lamp.sy < innerH };
+    // the finger holds the mirror on the line to the lamp (behind the plane: within the magnet's ±2°), and once it
+    // lifts the magnet settles it on 3.2°
+    Object.assign(out.cap, await aim(420, 9.3, () => ({ held: +__medina.game.level.light.get('H').alpha.toFixed(2) }), 360, -4));
+    await step(60); out.cap.alpha = await page.evaluate(() => +__medina.game.level.light.get('H').alpha.toFixed(2));
+    await step(540); // the eye holds 0.5 s, the fortress goes out over 2.4 s
     out.cap.end = await page.evaluate(() => __medina.events().some((e) => e.name === 'chapterEnd' && e.data.id === 'lab'));
     const ok = out.mirrors > 0
       && out.m2.took.grip && out.m2.took.latch && out.m2.took.aiming && Math.round(out.m2.alpha) === -45 && out.m2.buzz > 0 && out.m2.last === 'notch' && !out.m2.let.grip && !out.m2.let.latch && !out.m2.let.aiming
       && out.k2.took.state === 'crank' && out.k2.took.latch && Math.round(out.k2.alpha) === 45 && out.k2.let.state !== 'crank'
-      && out.cap.took.state === 'capstan' && Math.abs(out.cap.alpha - 3.2) < 0.6 && out.cap.end;
+      && out.cap.took.state === 'capstan' && out.cap.lamp.inView && Math.abs(out.cap.held - 3.2) < 2 && Math.abs(out.cap.alpha - 3.2) < 0.3 && out.cap.end;
     check('aim', ok, out);
   }
   // ------------------------------------------------------------------ the menu text size on a small screen
