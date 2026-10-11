@@ -81,6 +81,19 @@ export class Mirror {
     this.game.emit('notch', { id: this.id, notch: notchOf(t), alpha: t });
     return true;
   }
+  // the setting of the tray's line a (a, a ± 180: the same line) inside its travel that is nearest the current one:
+  // near the end of the travel the other turn is the way to it (a wanted −75 from +75 is −75, not a clamped +90)
+  fit(a) {
+    const R = this.range;
+    if (!R) return nearestTurn(a, this.target);
+    let best = null;
+    for (let k = -2; k <= 2; k++) {
+      const c = a + 180 * k;
+      if (c < R[0] - 1e-9 || c > R[1] + 1e-9) continue;
+      if (best === null || Math.abs(c - this.target) < Math.abs(best - this.target)) best = c;
+    }
+    return best ?? Math.max(R[0], Math.min(R[1], nearestTurn(a, this.target)));
+  }
   set(alpha, { snap = false } = {}) {
     this.target = this.range ? Math.max(this.range[0], Math.min(this.range[1], alpha)) : alpha;
     if (snap) this.alpha = this.target;
@@ -97,13 +110,11 @@ export class Mirror {
     this._aim = { x: p.x, y: p.y }; this._aimTh = thI; this.aimT = 0.08;
     const want = alphaFor(thI, angleOf(p.x - this.x, p.y - this.y));
     const st = this.notchDeg;
-    let a = Math.round(nearestTurn(want, this.target) / st) * st;
-    if (this.range) a = Math.max(this.range[0], Math.min(this.range[1], a));
+    let a = this.fit(Math.round(want / st) * st);
     const snap = this.game.settings?.aimSnap !== false && this.kind !== 'continuous' && this.system;
     if (snap && !this.system.probe(this, a)) {
-      for (const n of [a + st, a - st]) {
-        if (this.range && (n < this.range[0] || n > this.range[1])) continue;
-        if (this.system.probe(this, n)) { a = n; break; }
+      for (const n of [this.fit(a + st), this.fit(a - st)]) {
+        if (n !== a && this.system.probe(this, n)) { a = n; break; }
       }
     }
     if (a !== this.target) {

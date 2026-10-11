@@ -4,6 +4,7 @@
 // fixture (II-A1 … IV-E). Exit code 1 if anything fails.
 import { LightWorld, reflect, wrapAlpha, notchOf, alphaFor, angleOf, angDiff, rayBox, raySeg, rayCircle, NONE, SOLID, BODY, OCCLUDER, MIRROR, TARGET, KIND_NAME, DEG } from '../src/game/light/trace.js';
 import { chargeLevel, heatStep, keyed, clockT, clockDeath, magnet, liftClamp, crossAt } from '../src/game/light/logic.js';
+import { Mirror } from '../src/game/light/mirror.js';
 
 const args = process.argv.slice(2);
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
@@ -210,6 +211,27 @@ test('capstan magnet', () => {
   let a = 4.9; for (let i = 0; i < 48; i++) a = magnet(a, 3.2, 2, true, 1 / 120); ok(near(a, 3.2, 0.05), `eases to 3.2 in 0.4 s (${a})`);
   ok(magnet(5.3, 3.2, 2, true, 1 / 120) === 5.3, 'outside the window: no pull');
   ok(magnet(4.0, 3.2, 2, false, 1 / 120) === 4.0, 'held input: no pull');
+});
+
+// finger aim (§6.3): the wanted reflection picks the notch, on whichever turn of the tray's line (α, α ± 180) lies
+// inside its travel nearest the current notch; a crank tray has no travel limit and takes the nearer turn
+test('finger aim picks the notch inside the travel', () => {
+  const game = { phys: { addBody() {} }, settings: { aimSnap: false }, sfx() {}, emit() {} };
+  const m = new Mirror(game, { kind: 'anchored', x: 55, alpha: 30, thetaHint: 195, mesh: false });
+  const at = (thR) => ({ x: m.x + Math.cos(thR * DEG) * 5, y: m.y + Math.sin(thR * DEG) * 5 });
+  const got = [];
+  for (const a0 of [90, 75, 60, 0, -60, -75, -90]) for (const [thR, want] of [[15, -75], [75, -45], [195, 15], [315, 75]]) {
+    m.setState({ x: 55, y: 0, alpha: a0 }); m.aimAt(at(thR));
+    ok(m.target === want || (Math.abs(want) === 90 && Math.abs(m.target) === 90), `from α ${a0} aiming θr ${thR}: α ${m.target}, want ${want}`);
+    ok(near(reflect(195, m.target), thR % 360, 1e-9), `from α ${a0}: the beam leaves at ${reflect(195, m.target)}, not ${thR}`);
+    got.push(m.target);
+  }
+  // θr 345 needs α 90 ≡ −90: either end of the travel, the nearer one
+  for (const [a0, want] of [[75, 90], [-75, -90]]) { m.setState({ x: 55, y: 0, alpha: a0 }); m.aimAt(at(345)); ok(m.target === want, `θr 345 from ${a0}: ${m.target}`); }
+  const c = new Mirror(game, { kind: 'crank', x: 118.4, y: 6.8, alpha: 75, thetaHint: 105, mesh: false });
+  c.aimAt({ x: 118.4 + Math.cos(DEG * 255) * 4, y: 6.8 + Math.sin(DEG * 255) * 4 });
+  ok(c.target === 0 || c.target === 180, `crank θr 255 from 75: ${c.target}`);
+  return `${got.length} aims from the ends of the travel and the middle`;
 });
 
 // ------------------------------------------------------------------ Chapter II (195° sun)
