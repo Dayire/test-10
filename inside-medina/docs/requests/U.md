@@ -89,6 +89,18 @@ Everything U ships works without these (fallbacks noted). Each entry: file, chan
 - **Test.** `node tools/ux-tests.mjs --only hints` (already passes with the context hints); with the zones, the same
   scenario with `__ui.save.data.seenHints = {}` shows `souk:0` (jump) at x 7.4 and `souk:1` (grab) at x 36.
 
+## 8. `src/render/renderer.js` (P): a tier change keeps the menu background
+
+- **Change.** In `setTier` (or `_configureTier`), when `this.menuBackground` is on, keep the dynamic-resolution range
+  at 0.5 / 0.5 and the scale at 0.5 (as `setMenuBackground(true)` sets them) instead of resetting them to the new
+  tier's range and 1.
+- **Reason.** requests/P.md #8: the title renders at half resolution under the menus. A quality change in settings
+  over the title (or auto quality) went back to full resolution until the menu closed. The shell now re-asserts the
+  menu background when `rs.tier` changes (`ui.syncMenuBackground`), which works; this would make the renderer honour
+  its own flag.
+- **Test.** `node tools/ux-tests.mjs --only menubg` (it sets quality medium over the title and expects internal =
+  half of full and cap 30); it passes either way.
+
 ## Notes (no change requested)
 
 - A pad alone cannot start the audio: browsers do not count gamepad buttons as a user activation, so the music

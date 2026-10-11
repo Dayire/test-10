@@ -32,7 +32,9 @@ WebGL work in the same GPU process: a turning splash rosette doubled the bake (6
 `#ui.soft-gl` holds the endless decorative motions still (spins, the card's drifting lattice, hint pulses);
 transitions still play. Real GPUs keep every motion.
 While the main menu shows, `world.rs.setMenuBackground(true)` renders the title at 30 fps and half resolution
-(requests/P.md #8); desktop pointers add ±0.6 m of parallax to the title shot (the override function is wrapped).
+(requests/P.md #8); a new tier (the quality setting, or auto quality) resets the renderer's resolution range, so the
+shell asks again when `rs.tier` changes under the menu. Desktop pointers add ±0.6 m of parallax to the title shot (the
+override function is wrapped). Beside the settings sheet the live scene steps back under a plain dark scrim.
 
 ## Flow (FULL_GAME §7.1)
 
@@ -50,14 +52,16 @@ main menu over the live shot of the save's place (souk for a new player):
   credits       the roll over the live title (skippable)
   asset sheet   dev server only
 play: pause = Esc / P, pad Start, ⏸; auto on blur, hidden page, pad disconnect
-  → resume | restart checkpoint | restart chapter | chapters | settings | title
+  → resume | restart checkpoint | restart chapter (glyph confirm) | chapters | settings | title
+     every pause opens on resume (a reflex confirm never restarts or leaves)
 chapter end → the engine fades to the exit colour → the card (numeral and glyph, ≥ 2.5 s and until built)
 last chapter → credits (game.hooks.credits) → title
 ?autostart=1 skips every menu
 ```
 
-Esc on the title rests the scene: the game pauses (freeze-frame, no rendering) under the menu; any key wakes it.
-Hiding the page pauses play (the player returns to the pause menu) and the title alike, and flushes the save.
+Esc on the title rests the scene: the game pauses (freeze-frame, no rendering) under the menu; any key, or a touch or
+click anywhere over the title, wakes it. Hiding the page pauses play (the player returns to the pause menu) and the
+title alike, and flushes the save; when the page shows again the title simply carries on.
 
 ## Focus and input (`focus.js`, `src/core/input.js`)
 
@@ -71,8 +75,15 @@ role and an aria-label. Enter and Space act through the nav edges only (their na
 |---|---|---|---|---|---|
 | Keyboard | arrows / WASD, Tab | Enter / Space | Esc / Backspace | Q / E, [ ], PgUp / PgDn | P / Esc pause |
 | Gamepad | d-pad / stick | A (✕) | B (○) | LB / RB | Start pause |
-| Pointer | hover focuses | click | — | click a tab | drag a slider |
-| Touch | — | tap | — | tap a tab | drag a slider |
+| Pointer | hover focuses | click | the back glyph, a click beside the settings sheet, the browser's back | click a tab | drag a slider |
+| Touch | — | tap | the back glyph; Android's back gesture | tap a tab | drag a slider |
+
+**The way back.** Settings and chapters carry a 44 px back glyph (a brass-ringed chevron) beside their eyebrow, inside
+the safe area; a pad hides it (its legend says B). The browser's back closes the open screen: while a screen above the
+title is open, or in play on touch, one history entry stands guard (`history.pushState`); its `popstate` runs the open
+screen's back, or pauses play (so an edge swipe in landscape pauses instead of leaving), and the guard is stepped off
+(`history.back()`, its own `popstate` ignored) when nothing is left to go back from. Top-level pages only: the
+artifact's host keeps its own history.
 
 `Input.poll()` returns `{x, y, jump, grab, pause, any, pointer}` and fills `nav = {up, down, left, right, confirm,
 back, prev, next, pause}` (directions repeat after 400 ms every 120 ms). `jumpPressed`, `grabPressed`,
@@ -134,13 +145,16 @@ for L and the chapters to read (requests/U.md). The save code is `M1` + a two-ch
 progress (chapter, checkpoint, chapters reached, furthest checkpoints, completion, play time, deaths): 94 characters
 for a mid-game save. A hand-made code (the checksum is no secret) opens no locked chapter (the furthest unlocked one
 instead) and no checkpoint past the furthest reached or past the chapter's last one this device has built. Brightness calibration draws three rosettes lifted by the same exposure and gamma the grade
-applies (`1 + 0.08·b`, `1 − 0.04·b`).
+applies (`1 + 0.08·b`, `1 − 0.04·b`): beside the list on a wide screen, and on a full-width sheet (portrait) just above
+the focused brightness row (below it when the row is near the top), letting taps through, so the slider stays in sight
+and in reach. The save code field is 16 px (iOS zooms the page when a smaller field takes the focus).
 
 ## Screens
 
 - **Splash** (`index.html`): inline critical CSS and SVG, so it paints before the module loads; the rosette turns on
-  the compositor. `#loading .lbar i` keeps receiving the loader's progress (the foundation's boot test reads it); once
-  the menu is up the splash yields its text to the menu's own hairline.
+  the compositor, and the progress hairline grows by `transform: scaleX` (its `style.width` is still written: the
+  foundation's boot test reads it, while the stylesheet holds the visual width); once the menu is up the splash yields
+  its text to the menu's own hairline.
 - **Main** (`#title`, the title screen the engine's tests read): left column at 7.5 vw (landscape), a bottom sheet
   (portrait), two columns on phones in landscape; the continue entry names the save's
   chapter with its glyph; a broken-link glyph bottom right when progress cannot be kept.
@@ -148,14 +162,16 @@ applies (`1 + 0.08·b`, `1 − 0.04·b`).
   and the play controls for the hands in use (move, jump, grab, climb, crawl: keycaps with the player's layout letters,
   pad buttons, or the touch glyphs), bottom right on a desktop, under the chapter on phones.
 - **Chapters**: four arches (an SVG clip path), each with a 320 × 180 JPEG (q 0.7) captured from the canvas ~1.6 s
-  after a chapter first starts (`medina.v1.thumb.<id>`), else the chapter's palette; the glyph; checkpoint pips (the
+  into play the first time a chapter is reached (never from the dimmed half-resolution title; `medina.v1.thumb.<id>`),
+  else the chapter's palette; the glyph; checkpoint pips (the
   counts of FULL_GAME §2–5, replaced by the counts seen when a chapter loads). Locked chapters are dark arches with a
   closed door. Confirm (or a tap) on a chapter with reached checkpoints opens a stepper over the foot of its arch
   (‹ n/total ›, 44 px arrows; ← → or the d-pad on keys and pads, the legend says so); confirm or a tap on the card
   starts there. The pips stay on one row (they shrink for long chapters); a mouse may click a reached pip, on touch
   they are no targets.
 - **Card** (`game.hooks.card`): the chapter's tone, a drifting zellige lattice, the glyph assembled layer by layer
-  (ground, body, rays or stars), numeral, rule and label; resolves once it covers the screen, `hide()` keeps it at least
+  (ground, body, rays or stars), numeral, rule and label, in ivory, or in cedar ink when the glow behind the text is
+  pale (luminance > 0.3: the souk's noon and the dawn); resolves once it covers the screen, `hide()` keeps it at least
   2.5 s; after 2.5 s a small rosette turns under the label while the chapter is still building (in the card's own
   column, inside the safe area, so it never meets the label on a short landscape phone).
 - **Credits** (`#end`, `game.hooks.credits(lines)`): a slow roll on the right (centred in portrait): MEDINA, a rosette, the
@@ -204,7 +220,8 @@ each long synchronous step. Profiled against the foundation tree (4c166b2) with 
 load: the shell's own work before the world is ≈ 10 ms (UI, Input, the menu), pre-world ≈ 150–200 ms on both trees,
 the chapter build is the engine's, and the shell adds one presented title frame before `__ready` (≈ 40 ms); the
 medians of four boots each were 20.8 s against 20.7 s. The boot gate's spread on this shared machine is load. `window.__boot` marks `menu`, `world`, `overrides`, `init`, `chapter`; `window.__ui` is
-the shell (tests). Lifecycle: hidden page → pause, save flush, wake lock released; `pagehide` → flush; `blur` in play
+the shell (tests). Lifecycle: hidden page → pause, save flush, wake lock released (shown again on the title → the
+title wakes); `pagehide` → flush; `blur` in play
 → pause; pad disconnect → pause; `navigator.wakeLock` held in play only (guarded); `resize` → layout and the auto
 camera; `webglcontextlost` / `restored` → the lantern card, then the engine's `recoverContext()`.
 
@@ -234,8 +251,8 @@ fullscreen row unless the frame allows it, no pointer lock, `alert`, `print` or 
 ## Tests
 
 ```
-node tools/ux-tests.mjs --port 5176 [--only keyboard,gamepad,storage,persist,autostart,menubg,chapters,hints,crawl,artifact,hosted]
-node tools/mobile-tests.mjs --port 5176 [--device iphone|pixel|laptop] [--only menus,settings,controls,stick,jump,grab,lens,aim,hybrid]
+node tools/ux-tests.mjs --port 5176 [--only keyboard,gamepad,storage,persist,autostart,menubg,chapters,pause,mouse,hints,crawl,artifact,hosted]
+node tools/mobile-tests.mjs --port 5176 [--device iphone|pixel|laptop] [--only menus,settings,back,controls,stick,jump,grab,lens,aim,hybrid]
 ```
 
 Every screen keeps `hidden` (attribute) and the `hidden` class while closed, which the foundation suite reads on
