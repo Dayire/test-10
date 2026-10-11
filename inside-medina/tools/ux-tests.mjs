@@ -1,4 +1,4 @@
-// The shell's acceptance tests (FULL_GAME §11.4 U): node tools/ux-tests.mjs [--port 5176] [--only name,...]
+// The shell's acceptance tests (FULL_GAME §11.4 U): node tools/ux-tests.mjs [--port 5173] [--only name,...]
 //   keyboard   boot → settings → music 4 → back → new journey → play 2 s → Esc → title → continue resumes
 //   gamepad    the same with a stubbed standard pad (d-pad, A, B, RB, Start) and its rumble
 //   storage    localStorage throwing: playable, settings in memory, the save code round-trips (a hand-made code
@@ -12,7 +12,8 @@
 //   mouse      a mouse alone leaves settings and chapters (the back glyph, a click on the scene beside the sheet;
 //              a slider dragged past the sheet's edge stays), the browser's back closes the open screen
 //   chapters   chapter select by keyboard: the card covers the load, the chapter starts at the picked checkpoint
-//   hints      wordless first steps: the jump glyph at the sack pile (none at a wall too high), grab by the crate;
+//   hints      wordless first steps: the souk's zones (the jump glyph at the sack pile, none at a wall too high, grab by
+//              the crate, jump at the terrace once the crate stands there) before the context hints;
 //              a pause holds the glyph out of sight and lists the play controls; the lab (a dev chapter) learns a
 //              hint without writing the save
 //   crawl      crawl set to toggle: menu navigation never latches it, holding a crate (or a lab mirror) never does,
@@ -30,7 +31,7 @@ import os from 'os';
 import { execSync } from 'child_process';
 import { parseArgs, launch, ROOT } from './lib/harness.mjs';
 
-const o = parseArgs(process.argv.slice(2), { port: 5176 });
+const o = parseArgs(process.argv.slice(2));
 const BASE = process.env.BASE || `http://127.0.0.1:${o.port}/`;
 const Q = 'tex=0.1&tier=low&noauto=1';
 const only = o.only ? String(o.only).split(',') : null;
@@ -440,7 +441,7 @@ await scenario('hints', async () => {
   // shows nothing
   const { page, ctx, errors } = await open({ url: `${BASE}?${Q}&autostart=1&nosave=1&chapter=souk&cp=0` });
   await ready(page); await waitFor(page, () => __medina.game.mode === 'play');
-  const hint = () => page.evaluate(() => { const h = document.querySelector('#hints .hint:not(.out)'); return h ? { glyph: h.dataset.glyph, opacity: +h.style.opacity, html: h.innerHTML.length } : null; });
+  const hint = () => page.evaluate(() => { const h = document.querySelector('#hints .hint:not(.out)'); return h ? { glyph: h.dataset.glyph, id: __ui.hints.active?.id, opacity: +h.style.opacity, html: h.innerHTML.length } : null; });
   const out = {};
   await page.evaluate(() => __medina.teleport(7.2, 0, 1)); await frames(page, 4);
   await page.keyboard.down('ArrowRight');
@@ -482,10 +483,30 @@ await scenario('hints', async () => {
     await new Promise((r) => setTimeout(r, 1600));
     return { saving: __medina.game.saving, seen: __ui.hints.seen('ctx:jump'), stored: localStorage.getItem('medina.save.v1') };
   });
+  // the Sunwork verbs are taught from context: a gripped mirror shows tilt (↑ ↓), a tilt ends it; once tilted, the
+  // mouse is shown (aim); the crank shows its own glyph
+  const labHint = () => lab.page.evaluate(() => { const h = document.querySelector('#hints .hint:not(.out)'); return h ? { glyph: h.dataset.glyph, id: __ui.hints.active?.id } : null; });
+  const labWait = (g) => waitFor(lab.page, (g) => document.querySelector('#hints .hint:not(.out)')?.dataset.glyph === g, g, 20000).catch(() => {});
+  await lab.page.evaluate(() => { __ui.hints.devSeen.clear(); __medina.checkpoint(3); const m = __medina.game.level.light.get('M2'); __medina.teleport(m.body.x - 0.55, 0, 1); });
+  await frames(lab.page, 3);
+  await lab.page.keyboard.down('ShiftLeft');
+  await labWait('tilt'); out.tilt = await labHint();
+  const a0 = await lab.page.evaluate(() => __medina.game.level.light.get('M2').alpha);
+  await key(lab.page, 'ArrowUp'); await frames(lab.page, 8);
+  out.tilted = { hint: await labHint(), turned: (await lab.page.evaluate(() => __medina.game.level.light.get('M2').alpha)) !== a0 };
+  await labWait('aim'); out.aim = await labHint();
+  await lab.page.keyboard.up('ShiftLeft'); await frames(lab.page, 4);
+  await lab.page.evaluate(() => { __medina.checkpoint(6); __medina.game.player.spawn(117.65, 4.0, 1); });
+  await frames(lab.page, 4);
+  await lab.page.keyboard.down('ShiftLeft');
+  await labWait('crank'); out.crank = { ...(await labHint()), state: await lab.page.evaluate(() => __medina.game.player.state) };
+  await lab.page.keyboard.up('ShiftLeft');
   errors.push(...lab.errors);
   await lab.ctx.close();
-  const ok = out.jump?.glyph === 'jump' && out.jump.opacity > 0.5 && out.jump.html > 20 && out.paused.hint?.opacity === 0 && out.paused.ctl === 'move jump grab climb crawl'
-    && out.resumed?.glyph === 'jump' && out.resumed.opacity > 0 && !out.afterJump.hint && out.afterJump.seen && out.grab?.glyph === 'grab' && out.grab.opacity > 0.5 && !out.wall && out.crateStep?.glyph === 'jump' && out.lab.saving === false && out.lab.seen && out.lab.stored === null && !errors.length;
+  // the souk's own zones come first (requests/U.md #7): souk:0 at the sack pile, souk:1 by the crate, souk:2 at the terrace
+  const ok = out.jump?.glyph === 'jump' && out.jump.id === 'souk:0' && out.grab?.id === 'souk:1' && out.crateStep?.id === 'souk:2' && out.jump.opacity > 0.5 && out.jump.html > 20 && out.paused.hint?.opacity === 0 && out.paused.ctl === 'move jump grab climb crawl'
+    && out.resumed?.glyph === 'jump' && out.resumed.opacity > 0 && !out.afterJump.hint && out.afterJump.seen && out.grab?.glyph === 'grab' && out.grab.opacity > 0.5 && !out.wall && out.crateStep?.glyph === 'jump' && out.lab.saving === false && out.lab.seen && out.lab.stored === null
+    && out.tilt?.id === 'ctx:tilt' && out.tilted.turned && out.tilted.hint?.glyph !== 'tilt' && out.aim?.id === 'ctx:aim' && out.crank?.id === 'ctx:crank' && out.crank.state === 'crank' && !errors.length;
   return [ok || `hints ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
 });
 

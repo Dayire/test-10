@@ -317,6 +317,15 @@ export function* buildLevel(game, kit) {
     { x: 80.5, y: 0, z: 1.8, w: 3, n: 4 }, { x: 160, y: 0, z: 1.5, w: 3, n: 4 }, { x: 188.2, y: 0, z: -19.5, w: 3, n: 7 },
   );
   L.bounds = { x0: -16, x1: 205, y0: -10, y1: 30 };
+  // wordless hints at the first use of each verb (FULL_GAME §7.6): puzzle-honest, none once the verb is spent
+  L.hints = [
+    { x0: 6.4, x1: 8.15, after: 0.6, glyph: 'jump', unless: (g) => g.player.x > 8.9 || g.player.y > 0.3 }, // the sack pile
+    { x0: 35.4, x1: 37.0, after: 1.5, glyph: 'grab', unless: (g) => L.crateA.body.x > 38.5 || !!g.player.grip }, // crate A
+    { x0: 40.2, x1: 41.0, y1: 0.2, after: 0.8, glyph: 'jump', unless: () => L.crateA.body.x < 40.9 }, // onto the crate at the terrace
+    { x0: 109.6, x1: 111.4, after: 1.0, glyph: 'grab', unless: () => L.lever.pulled }, // the lever
+    { x0: 121.2, x1: 124.0, y1: 0.5, after: 0.8, glyph: 'up', unless: (g) => g.player.state === 'climb' }, // the ivy wall
+    { x0: 181.2, x1: 182.6, after: 1.0, glyph: 'crawl', unless: (g) => g.player.crawling }, // the rubble tunnel
+  ];
   // starting at a checkpoint: solve the puzzles that precede it
   L.prepare = (i, g) => {
     const x = g.checkpoints[i].x;

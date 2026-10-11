@@ -16,6 +16,7 @@ const DONE = {
   tilt: (g) => Math.abs(g.input.state.y) > 0.6 || !!g.input.pointer?.active,
   crank: (g) => Math.abs(g.input.state.y) > 0.6 || !!g.input.pointer?.active,
   aim: (g) => !!g.input.pointer?.active,
+  turn: (g) => Math.abs(g.input.state.x) > 0.5 || !!g.input.pointer?.active,
 };
 // the verbs every chapter leans on, taught where the boy meets them (any chapter; a chapter's own L.hints come
 // first): a vine's foot, a ledge he hangs from, a crate or a lever at hand, something he walks into that a jump
@@ -41,6 +42,12 @@ const CONTEXT = [
   { id: 'ctx:grab', glyph: 'grab', after: 1.4, when: (g, p) => free(g, p) && !p.crawling && !!(p.crateAdjacent?.(p.facing) || p.crateAdjacent?.(-p.facing) || g.interactNear?.(p.x, p.y, p.facing)) },
   // shown once he has pushed against it a moment (0.01: a crate that will not move); it stays while he faces it
   { id: 'ctx:jump', glyph: 'jump', after: 0.7, when: (g, p) => free(g, p) && !p.crawling && Math.abs(g.input.state.x) > 0.5 && Math.sign(g.input.state.x) === p.facing && (Math.abs(p.body.vx) < 0.05 || p.pushing === 0.01) && jumpable(p), keep: (g, p) => free(g, p) && !p.crawling && jumpable(p) },
+  // Sunwork (L): a gripped mirror tilts (on touch: the finger aims it), a crank steps its tray, the capstan turns;
+  // a desktop player who has tilted with the keys is shown the mouse once
+  { id: 'ctx:tilt', glyph: 'tilt', after: 1.2, when: (g, p) => !!p.grip?.mirror && !p.dead },
+  { id: 'ctx:crank', glyph: 'crank', after: 1.0, when: (g, p) => p.state === 'crank' },
+  { id: 'ctx:turn', glyph: 'turn', after: 1.0, when: (g, p) => p.state === 'capstan' },
+  { id: 'ctx:aim', glyph: 'aim', after: 2.5, when: (g, p) => g.input.lastDevice === 'keyboard' && !!(p.grip?.mirror || p.state === 'crank') && !!g.ui?.hints?.seen('ctx:tilt') },
 ];
 const CUES = { alarm: 'horn', horn: 'horn', shout: 'shout', guardFrustrated: 'shout', dart: 'dart', turret: 'dart', dartGuard: 'dart', drum: 'drum' };
 
@@ -74,15 +81,15 @@ export class HintDirector {
       const t = (cls, extra = '') => `<span class="ghost ${cls}">${icon('thumb', 'thumb')}${extra}</span>`;
       return {
         move: t('lr', icon('arrowLR', 'arr')), jump: t('tap'), grab: t('tap'), up: t('up', icon('arrowUp', 'arr')), down: t('down', icon('arrowDown', 'arr')),
-        crawl: t('down', icon('arrowDown', 'arr')), tilt: t('aim', icon('sun', 'arr')), crank: t('aim', icon('sun', 'arr')), aim: t('aim', icon('sun', 'arr')),
+        crawl: t('down', icon('arrowDown', 'arr')), tilt: t('aim', icon('sun', 'arr')), crank: t('aim', icon('sun', 'arr')), aim: t('aim', icon('sun', 'arr')), turn: t('aim', icon('sun', 'arr')),
       }[glyph] || '';
     }
     if (dev === 'gamepad') {
-      return { move: stick('lr'), jump: padButton(kind, 'bottom'), grab: padButton(kind, 'left'), up: stick('up'), down: stick('down'), crawl: stick('down'), tilt: stick('ud'), crank: stick('ud'), aim: stick('ud') }[glyph] || '';
+      return { move: stick('lr'), jump: padButton(kind, 'bottom'), grab: padButton(kind, 'left'), up: stick('up'), down: stick('down'), crawl: stick('down'), tilt: stick('ud'), crank: stick('ud'), aim: stick('ud'), turn: stick('lr') }[glyph] || '';
     }
     return {
       move: `${key(kl?.left || '←')}${key(kl?.right || '→')}`, jump: key('space', true), grab: key('shift', true), up: key('↑'), down: key('↓'), crawl: key('↓'),
-      tilt: `${key('↑')}${key('↓')}`, crank: `${key('↑')}${key('↓')}`, aim: icon('mouse', 'mouse'),
+      tilt: `${key('↑')}${key('↓')}`, crank: `${key('↑')}${key('↓')}`, aim: icon('mouse', 'mouse'), turn: `${key(kl?.left || '←')}${key(kl?.right || '→')}`,
     }[glyph] || '';
   }
 
@@ -133,17 +140,20 @@ export class HintDirector {
       return;
     }
     if (!playing || this.mode === 'never') return;
-    const L = g.level.hints || [];
+    const L = g.level.hints || [], pending = new Set();
     for (let i = 0; i < L.length; i++) {
       const z = L[i], id = `${g.chapterId}:${i}`;
       if (this.mode === 'first' && this.seen(id)) continue;
       if (!this.inZone(z)) { this.zoneT.delete(i); continue; }
       const t = (this.zoneT.get(i) || 0) + dt;
       this.zoneT.set(i, t);
-      if (t >= (z.after ?? 0) && !z.unless?.(g)) { this.show({ ...z, id }); this.zoneT.delete(i); return; }
+      if (z.unless?.(g)) continue;
+      if (t >= (z.after ?? 0)) { this.show({ ...z, id }); this.zoneT.delete(i); return; }
+      pending.add(z.glyph);
     }
+    // a chapter's zone comes first: the same verb is not taught from context while its zone counts down
     for (const c of CONTEXT) {
-      if (this.mode === 'first' && this.seen(c.id)) continue;
+      if (pending.has(c.glyph) || (this.mode === 'first' && this.seen(c.id))) continue;
       if (!c.when(g, g.player)) { this.ctxT.delete(c.id); continue; }
       const t = (this.ctxT.get(c.id) || 0) + dt;
       this.ctxT.set(c.id, t);
