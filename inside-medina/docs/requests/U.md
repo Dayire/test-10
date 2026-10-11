@@ -1,8 +1,13 @@
 # Requests from U (the shell) for files U does not own
 
-Everything U ships works without these (fallbacks noted). Each entry: file, change, reason, test.
+Everything U ships works without these (fallbacks noted). Each entry: file, change, reason, test. "Done (I1)" marks
+what the integration of L and U applied; #4 and #5 wait for C4.
 
 ## 1. `docs/ARCHITECTURE.md` (F / integrator): the shell's contracts
+
+**Done (I1).** §3 (the boot order, marks, `?unlock`, `?nosw`, `window.__ui`), §5 (the shell's settings keys,
+`cameraDist: 'auto'`, `timeScale` 100 / 85 / 70), §9 (edges against the raw poll, nav, `padKind`, the device and pad
+events, touch, haptics, the crawl toggle).
 
 - **Change.** In §3 (Boot) add the order U's `boot.js` now follows (UI and Input first, the main menu interactive
   before the world exists, the loop started before the chapter load, `nextFrame()` waiting for a presented frame),
@@ -19,6 +24,9 @@ Everything U ships works without these (fallbacks noted). Each entry: file, chan
 
 ## 2. `package.json` (F): scripts
 
+**Done (I1).** `npm test` runs both after the foundation suite (and the lab's suites); `test:ux`, `test:mobile`,
+`icons`, `font`. Both runners now default to port 5173, like every other runner on the integration branch.
+
 - **Change.** `"test:ux": "node tools/ux-tests.mjs"`, `"test:mobile": "node tools/mobile-tests.mjs"`,
   `"icons": "node tools/make-icons.mjs"`, `"font": "node tools/fetch-font.mjs"`; add both test scripts to `npm test`
   after the foundation suite.
@@ -26,6 +34,12 @@ Everything U ships works without these (fallbacks noted). Each entry: file, chan
 - **Test.** `npm run test:ux -- --port 5176` exits 0.
 
 ## 3. L and the chapters: high contrast and reduced flashing
+
+**Done (L, checked at I1).** L reads both live from `game.settings`: beams and tripwires gain edge outlines, lock rims
+a bright ring, searchlight cones a silhouette line (`beams.js`, `targets.js`, `entities.js`); reduce flashing dims
+glints, rod glints and the dazzle. Checked with `?chapter=lab&cp=3`: `__ui.setSetting('highContrast', true)` changes
+the picture near the beams and locks only: with the camera at rest, 1.06 % of the pixels of a 960 × 540 frame change, all
+but 61 of them (0.01 %) within 24 px of a traced beam or 40 px of a lock.
 
 - **Change.** Read `game.settings.highContrast` (boolean, live: `applySettings` merges it) to outline beams and lock
   rims (L, `src/game/light/beams.js`, targets), tripwires and searchlight cones (L's `Sensor`, `Searchlight`; C3's
@@ -38,6 +52,9 @@ Everything U ships works without these (fallbacks noted). Each entry: file, chan
 
 ## 4. C4: the drum for the visual sound cues
 
+**Open (C4).** Chapter IV's drummer is not built yet (`src/chapters/dawn` is still the stub); `drum` is in the
+ARCHITECTURE.md sound registry as reserved, with this use named.
+
 - **Change.** When the drummer of Chapter IV strikes, call `game.sfx('drum', x)` (or `audio.play('drum', x)`), so the
   sound reaches every listener of the game's sounds; P's audio ignores the unknown name if it plays the drum itself
   from `mix.drummer`.
@@ -47,6 +64,10 @@ Everything U ships works without these (fallbacks noted). Each entry: file, chan
   side (`#cues .cue.on`).
 
 ## 5. F / C4: the epilogue as the title background after completion
+
+**Open (C4).** The epilogue (FULL_GAME §5.2 P4 step 8: the souk loaded in epilogue mode, no boy, the pedestal with the
+new tray) is C4's deliverable, and the tray it shows is C4's prop; the engine side lands with it, so the title's
+"from then on" and this test come with C4.
 
 - **Change.** FULL_GAME §5.2 P4 step 8 and §7.1: after the credits the title shows the epilogue shot (the Chapter I
   pedestal, no boy) "from then on". Proposal: C2 adds `epilogue: {pos, look, fov, sway}` to the souk's definition and
@@ -61,6 +82,9 @@ Everything U ships works without these (fallbacks noted). Each entry: file, chan
 
 ## 6. `src/chapters/index.js` (F): checkpoint counts in the registry
 
+**Done (I1).** `cps` on each playable chapter; the chapter select draws them (counts learnt from a built chapter still
+win). `ux-tests --only chapters` checks a fresh device: sundown 11 pips, dawn 7.
+
 - **Change.** Add `cps: n` (the number of checkpoints) to each `CHAPTERS` entry (souk 7, sundown 11, night 8, dawn 7,
   as FULL_GAME §2–5).
 - **Reason.** The chapter select draws a pip per checkpoint without loading the chapter; it uses those numbers from
@@ -69,6 +93,10 @@ Everything U ships works without these (fallbacks noted). Each entry: file, chan
 - **Test.** `__ui.chapters.render()` with an empty `medina.v1.ui`: the sundown card has 11 pips.
 
 ## 7. C2: the souk's own hint zones (`src/chapters/souk/level.js`)
+
+**Done (I1),** as proposed. A context hint now waits while a zone for its verb counts down (the zones come first,
+as `hints.js` promised): `ux-tests --only hints` sees `souk:0` at the sack pile, `souk:1` by the crate and `souk:2`
+at the terrace.
 
 - **Change.** Declare `L.hints` (FULL_GAME §7.6) at the souk's first uses of each verb:
   ```js
@@ -91,6 +119,9 @@ Everything U ships works without these (fallbacks noted). Each entry: file, chan
 
 ## 8. `src/render/renderer.js` (P): a tier change keeps the menu background
 
+**Done (I1).** `_configureTier` keeps the 0.5 range and scale while the menu background is on; the shell's re-assert
+(`_bgTier`) is gone. `ux-tests --only menubg` passes.
+
 - **Change.** In `setTier` (or `_configureTier`), when `this.menuBackground` is on, keep the dynamic-resolution range
   at 0.5 / 0.5 and the scale at 0.5 (as `setMenuBackground(true)` sets them) instead of resetting them to the new
   tier's range and 1.
@@ -105,6 +136,5 @@ Everything U ships works without these (fallbacks noted). Each entry: file, chan
 
 - A pad alone cannot start the audio: browsers do not count gamepad buttons as a user activation, so the music
   starts on the first key, click or touch (P resumes on those).
-- Finger aim is tested against the lab stub on this branch (the touch reaches `pin.aimTarget` at the touched world
-  point, within 5 cm); with L's Sunwork lab merged, `tools/mobile-tests.mjs --only aim` grips `M2` (room "tilt",
-  checkpoint 3), touches the lock `L4` and expects the mirror at −45°.
+- Finger aim was tested against the lab stub on this branch; since the integration `tools/mobile-tests.mjs --only aim`
+  runs on the Sunwork lab only (M2 to −45° with a notch buzz and a tap release, the crank K2, the capstan).

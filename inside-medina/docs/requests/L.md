@@ -1,8 +1,11 @@
 # Requests from L (Sunwork) for files L does not own
 
-Each entry: file, change, reason, test. Everything L ships works without them (fallbacks noted).
+Each entry: file, change, reason, test. Everything L ships works without them (fallbacks noted). "Done (I1)" marks
+what the integration of L and U applied (every item: #1–#9).
 
 ## 1. `tools/playtest.mjs` (F, frozen): inject the Sunwork bot helpers
+
+**Done (I1).** Applied as written; the fallback in `tools/bots/lab.js` is gone and the lab bot passes.
 
 - **Change.** After `inject(P.page, 'tools/bots/lib.js')`, also `if (exists('tools/bots/lightlib.js')) await inject(P.page, 'tools/bots/lightlib.js');`
   (before the chapter bot).
@@ -13,6 +16,9 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 - **Test.** `node tools/playtest.mjs --chapter lab` passes with the fallback in `lab.js` removed.
 
 ## 2. `src/game/game.js` (F, frozen): the colour a death fades to
+
+**Done (I1),** with #8: `updateDying` fades to `L.deathColor?.(kind) ?? black`, and `Player.deathTint` with its
+display-encoding stopgap is gone. The lab negative `idle sunset` reads the indigo off the screen.
 
 - **Change.** In `updateDying`, `this.fadeColor.set(this.level?.deathColor?.(this.deathKind) ?? 0x000000)` instead of
   always black.
@@ -27,6 +33,9 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 
 ## 3. `docs/ARCHITECTURE.md` (F / integrator): the Sunwork contracts
 
+**Done (I1).** ARCHITECTURE.md §13 (the LightSystem, entities, light-blocking flags, player states) and §12 (the
+Sunwork events and sounds).
+
 - **Change.** Add `docs/systems/light.md`'s summary: the LightSystem as a chapter system, the entity list, the player
   states (`crank`, `capstan`), the light-blocking flags (`Solid.light`, `Body.light`, entity `lightPlank` / `lightBox`),
   and these names to the registries:
@@ -40,6 +49,8 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 
 ## 4. `docs/FULL_GAME.md` §5.2 IV-D (C4's design): a two-mirror shortcut
 
+**Done (I1).** The rafter is in IV-D's table (C4 builds it); `light-unit.mjs` checks both versions.
+
 - **Change.** Add a light-blocking rafter, solid x 162.5–169.0, y 9.0–9.3 (or move L_TOP), to the minaret chain.
 - **Reason.** `node tools/light-unit.mjs` finds that, as specified, C1 at −60° alone sends a 150° leg from (170.8, 6.0)
   into L_TOP at (161.55, 11.34), whatever C2 does: 12 of the 1727 wrong settings light the lock, so C4's negative
@@ -48,6 +59,11 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 - **Test.** The `IV-D minaret chain` fixture in `tools/light-unit.mjs` (it checks both versions).
 
 ## 5. `src/ui/**`, `src/core/input.js` (U): touch grab and haptics hooks
+
+**Done (U, checked at I1).** The touch grab icon reads `player.reachable()` (☼ for a mirror, crank or capstan), and
+the haptics subscribe to `notch`, `lockOpen`, `ropeSnap` and `death`. `mobile-tests --only aim` now runs on the real
+lab with real touches on three phones: a tap latches M2, a finger on L4 tilts it to −45° and the notch buzzes, a
+second tap lets go; K2 turns F2 onto L7; the capstan turns the heliostat onto the fortress lamp and the lab ends.
 
 - **Change (none required in L's files).** The context icon of the touch grab button can read
   `game.player.reachable()` (`'mirror' | 'crank' | 'capstan' | 'crate' | 'lever' | null`), and haptics can subscribe
@@ -58,6 +74,8 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
   canvas while gripping `M2` in `?chapter=lab&cp=3`).
 
 ## 6. `tools/neg/foundation.mjs` (F, frozen): two scenarios written against the lab stub
+
+**Done (I1),** with exactly this patch, in the merge's first follow-up commit; both scenarios pass.
 
 - **Change.** In `lab end keeps the save`, reach the lab's real end instead of running right from x 26 (the stub's
   end): `M.checkpoint(12); const H = G.level.light.get('H'); H.setState({ ...H.getState(), alpha: 3.2 });
@@ -114,6 +132,9 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 
 ## 7. `docs/FULL_GAME.md` §6 and §3.2 (design owner / integrator): the rules Sunwork ships
 
+**Done (I1).** §6.1 (both faces, lattice gates), §6.2 (LampEye `face`, the dazzle's settle and re-arm, the daylight
+stun and the asleep body).
+
 - **Change.** Sign off these shipped rules so C2–C4 build against them:
   - §6.1 "What blocks light": "Mirror trays (one-sided: the back face blocks)" becomes "Mirror trays (both faces
     reflect; `oneSided: true` makes the back face block)". II-B2 starts on the underside at +30° and IV-A1's crank
@@ -133,6 +154,9 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 
 ## 8. `src/render/post.js` (P): a fade colour shows darker than its hex
 
+**Done (I1):** `p = mix(p, toSRGB(uFadeColor), uFade)`. Every fade colour now shows its own hex (Chapter I's warm exit
+`#f8e6c7` too); the stopgap went with #2.
+
 - **Change.** In the final pass, mix the fade in display space: `p = mix(p, toSRGB(uFadeColor), uFade);` (this form,
   in the shader: L's stopgap below keys on the old line).
 - **Reason.** `P.fadeColor` is a `THREE.Color`, so `set('#0b1026')` stores the linear value (0.003, 0.005, 0.019), but
@@ -148,6 +172,10 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
   and expects (11, 16, 38) ± 3; it passes before and after the change.
 
 ## 9. `src/game/game.js` (F, frozen): the boy's turn diverges below ~19 fps
+
+**Done (I1),** the exact step as written. Tested by the foundation scenario `the boy turns cleanly at 5 fps`
+(`game.frame(0.1)` × 60 after each of three changes of facing: the yaw stays within ±π, settles on the target with
+no velocity left, the wrists stay finite).
 
 - **Change.** In `render`, step the yaw spring exactly (as `camera.js`'s `spring` does) instead of the explicit
   update:

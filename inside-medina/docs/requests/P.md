@@ -3,7 +3,7 @@
 Everything below already works through optional chaining or default arguments, so nothing breaks
 before these land. Each entry: file, change, reason, test. "Landed" marks what the foundation
 (b5fb61d) already does; it stays here because P's tests depend on it. "Done (I0)" marks what the first
-integration pass applied; #8 belongs to U and #9 to L.
+integration pass applied; #8 belongs to U and #9 to L, both done (checked at I1).
 
 ## 1. `src/game/boot.js` (F12, then U): frame cap and paused frames (landed)
 
@@ -94,11 +94,18 @@ side. Tested by the foundation scenario `LUT looks follow the time of day` (`?ch
 
 ## 8. `src/ui/**` (U): menu background
 
+**Done (U, checked at I1).** `ui.syncMenuBackground()` turns it on while a menu is up over the held title; the renderer
+keeps it through a tier change (requests/U.md #8). `ux-tests --only menubg`: cap 30, internal half of full.
+
 - **Change.** While the main menu is up over the live shot: `world.rs.setMenuBackground?.(true)` (30 fps at
   half resolution, FULL_GAME §7.2); `false` when play starts.
 - **Test.** `world.rs.stats.cap === 30` and `stats.internal` is half the canvas while the menu shows.
 
 ## 9. `src/game/entities.js` (L): the Chapter I searchlight cone
+
+**Done (L, checked at I1).** `BEAM_FS` ends with the fog chunk and the cone is on `LAYERS.BEAMS` with `softFade`;
+L's beams use the same soft uniforms (`softUniforms`). `perf.mjs --check ldr` passes. The lamp's brass housing now
+also gets the white vertex colour the library's materials multiply by (it rendered black).
 
 - **Change.** `BEAM_FS` ends with `#include <fog_fragment>`; the cone moves to `LAYERS.BEAMS` with
   `softFade` (`src/render/layers.js`, as FULL_GAME §6.5 asks of L's beams).
