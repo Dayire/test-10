@@ -7,6 +7,7 @@ import { particles } from '../../render/particles.js';
 import { tube, setColor } from '../../assets/geom.js';
 
 const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+const UP = new THREE.Vector3(0, 1, 0), _dir = new THREE.Vector3();
 const glintSprite = (game, scale = 0.6) => {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: lightTextures().glint, color: new THREE.Color(3, 2.4, 1.6), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
   s.scale.setScalar(scale); s.renderOrder = 7;
@@ -255,7 +256,7 @@ export class Sensor {
         const p0 = this._p, p1 = posOf(this.target, this._q) || p0;
         const d = this.dartMesh;
         d.visible = k2 < 1; d.position.lerpVectors(p0, p1, k2);
-        d.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p1.clone().sub(p0).normalize());
+        d.quaternion.setFromUnitVectors(UP, _dir.subVectors(p1, p0).normalize());
       } else this.dartMesh.visible = false;
     }
   }

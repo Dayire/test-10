@@ -203,12 +203,12 @@ void main(){
 // solid bodies, mirror trays and guards. Seen for 0.18 s → alarm → a dart 1.05 s later. Only the lamp's own eye
 // sees (its reflected light detects nothing).
 //   mode 'sweep' (between x0 and x1) or 'watch' (a fixed aim at watchAt, a visual unless detect: true)
-//   dazzle(sec): the aim swings up 8 m, the beam whitens, it sees nothing
+//   dazzle(sec): the aim swings up 8 m (and back toward the lamp), the beam whitens, it sees nothing
 //   fixate(target, {while}): the beam narrows to a 0.05 rad wedge on the target while the condition holds
 // The light is one of the rig's two shared spots, acquired near the camera. With a LightSystem (light.lamp(sl))
 // its beam is a light source too (reflectable, I 1.5) and its eye can be dazzled by reflections.
 export class Searchlight {
-  constructor(game, { origin, x0, x1, aimY = 0.6, speed = 3.2, pause = 1.1, covers = [], color = 0xfff0d0, startX, mode = 'sweep', watchAt = null, detect, id } = {}) {
+  constructor(game, { origin, x0, x1, aimY = 0.6, speed = 3.2, pause = 1.1, covers = [], color = 0xfff0d0, startX, mode = 'sweep', watchAt = null, detect, id, power = 520 } = {}) {
     this.game = game; if (id !== undefined) this.id = id;
     this.origin = origin.clone();
     this.x0 = x0 ?? (watchAt ? watchAt[0] : 0); this.x1 = x1 ?? this.x0; this.aimY = aimY; this.speed = speed; this.pauseT = pause;
@@ -228,7 +228,7 @@ export class Searchlight {
     this.show = { aim: this.aim.clone(), dir: 1, pause: 0 }; this.showing = false;
     this.off = new THREE.Vector3(); this._view = new THREE.Vector3();
     // the light itself is one of the rig's two shared spots, acquired near the camera
-    this.angle = 0.11; this.power = 520;
+    this.angle = 0.11; this.power = power; // a night square's lamps run lower, so the pool keeps its cookie under the bloom
     this.spot = null;
     this.baseColor = new THREE.Color(color);
     this.beamColor = this.baseColor.clone();
@@ -293,7 +293,12 @@ export class Searchlight {
   // blinded by its own light thrown back: the aim swings up, the beam whitens, nothing is seen
   dazzle(sec = 7) {
     if (!this.enabled) return;
-    if (!(this.dazzled > 0)) { this.game.sfx('dazzle', this.origin.x); this.game.audio?.stinger?.('dazzle'); }
+    if (!(this.dazzled > 0)) {
+      this.game.sfx('dazzle', this.origin.x); this.game.audio?.stinger?.('dazzle');
+      // it lifts back toward its own side (up to 4 m), clear of the walls at the end of its sweep
+      const d = this.origin.x - this.aim.x;
+      this.dzX = this.aim.x + Math.sign(d) * Math.min(4, Math.abs(d) * 0.35);
+    }
     this.dazzled = Math.max(this.dazzled, sec);
     this.state = 'dazzled'; this.seen = 0; this.fix = null;
     this.game.emit('lampDazzled', { id: this.id, sec });
@@ -336,7 +341,7 @@ export class Searchlight {
     if (this.state === 'dazzled') {
       this.dazzled -= dt;
       // the beam lifts off the street and drifts while the lamp is blind
-      this._t.set(this.aim.x + Math.sin(this.game.time * 1.7) * 0.6 * dt, this.aimY + 8, 0);
+      this._t.set((this.dzX ?? this.aim.x) + Math.sin(this.game.time * 1.7) * 0.6, this.aimY + 8, 0);
       this.aim.lerp(this._t, 1 - Math.exp(-3 * dt));
       if (this.dazzled <= 0) this.recover();
       return;

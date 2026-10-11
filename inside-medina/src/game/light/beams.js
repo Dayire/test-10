@@ -12,9 +12,9 @@ import { G } from '../../render/atmosphere.js';
 
 const MAXQ = 96, MAXG = 64;
 const BEAM_VS = /* glsl */ `
-attribute vec3 aA; attribute vec3 aB; attribute vec4 aCol; attribute vec4 aP;
+attribute vec3 aA; attribute vec3 aB; attribute vec4 aCol; attribute vec4 aP; attribute vec2 aS;
 uniform float uMinPx; uniform float uViewH;
-varying vec4 vCol; varying vec2 vQ; varying float vLen; varying float vS; varying vec3 vP;
+varying vec4 vCol; varying vec2 vQ; varying float vLen; varying float vS; varying vec3 vP; varying float vSoft;
 void main(){
   float side = position.x, end = position.y;
   vec3 ax = aB - aA; float L = length(ax); ax /= max(L, 1e-5);
@@ -23,14 +23,14 @@ void main(){
   vec3 sd = cross(ax, toCam); float sl = length(sd); sd = sl > 1e-4 ? sd / sl : vec3(0., 1., 0.);
   vec4 vp = viewMatrix * vec4(P, 1.);
   float px = 2. * max(-vp.z, .1) / (projectionMatrix[1][1] * uViewH);
-  float w = max(aP.x, uMinPx * px);
+  float w = max(aP.x, uMinPx * aS.y * px);
   P += sd * side * w;
-  vCol = aCol; vQ = vec2(side, end); vLen = L; vS = end * L + aP.w; vP = vec3(aP.y, aP.z, w / max(aP.x, 1e-4));
+  vCol = aCol; vQ = vec2(side, end); vLen = L; vS = end * L + aP.w; vP = vec3(aP.y, aP.z, w / max(aP.x, 1e-4)); vSoft = aS.x;
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.);
 }`;
 const BEAM_FS = /* glsl */ `
 uniform float uTime; uniform float uHC;
-varying vec4 vCol; varying vec2 vQ; varying float vLen; varying float vS; varying vec3 vP;
+varying vec4 vCol; varying vec2 vQ; varying float vLen; varying float vS; varying vec3 vP; varying float vSoft;
 ${SOFT_GLSL}
 float h3(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719))) * 43758.5453); }
 float n3(vec3 p){ vec3 i = floor(p), f = fract(p); f = f*f*(3.-2.*f);
@@ -38,16 +38,19 @@ float n3(vec3 p){ vec3 i = floor(p), f = fract(p); f = f*f*(3.-2.*f);
 void main(){
   float x = abs(vQ.x);
   // a widened (pixel-floored) beam keeps its energy: a thin far beam is a crisp line, not a fat glow
-  float k = 1. / max(vP.z, 1.);
-  float core = exp(-x * x * 30.) * (1. + uHC * .8);
-  float halo = exp(-x * x * 4.5) * .42 * k;
+  // soft (moonlight): a faint core in a wide pale haze, thick with dust and motes
+  float k = 1. / max(vP.z, 1.), so = vSoft;
+  float core = exp(-x * x * mix(30., 6., so)) * (1. + uHC * .8) * (1. - .78 * so);
+  float halo = exp(-x * x * mix(4.5, 1.4, so)) * (.42 + .2 * so) * k;
   float s = vS;
-  float dust = .7 + .55 * n3(vec3(s * 2.1 - uTime * .32, x * 2.5, uTime * .18));
-  float motes = smoothstep(.78, .98, n3(vec3(s * 7. - uTime * .55, x * 5., uTime * .45))) * 1.3;
+  // (the noise reads the signed side, so the dust is never mirrored about the beam's axis)
+  float dust = .7 + .55 * n3(vec3(s * mix(2.1, 1.1, so) - uTime * .32, vQ.x * mix(2.5, 1.2, so) + 7., uTime * .18));
+  float motes = smoothstep(.78, .98, n3(vec3(s * mix(7., 4., so) - uTime * .55, vQ.x * 5. + 7., uTime * .45))) * (1.3 - .5 * so);
   float t = vQ.y * vLen;
   float ends = smoothstep(0., max(vP.x, 1e-3), t);
   if (vP.y > 0.) ends *= 1. - smoothstep(vLen - vP.y, vLen, t);
   float a = (core * (.85 + .3 * dust) + halo * (dust + motes)) * ends * vCol.a;
+  a *= mix(1., 1. - smoothstep(.45, 1., x), so); // a soft beam's haze dies out before the ribbon's edge
   // high contrast: a crisp outline along both edges of the ribbon
   a += uHC * smoothstep(.6, .76, x) * (1. - smoothstep(.86, .98, x)) * ends * min(vCol.a, 1.4) * .8;
   a *= softFade(.16) * softNear(1.2);
@@ -93,7 +96,7 @@ export class BeamRenderer {
     }
     g.setAttribute('position', new THREE.BufferAttribute(corner, 3));
     g.setIndex(new THREE.BufferAttribute(idx, 1));
-    for (const [k, n] of [['aA', 3], ['aB', 3], ['aCol', 4], ['aP', 4]]) { const a = new THREE.BufferAttribute(new Float32Array(MAXQ * 4 * n), n); a.setUsage(THREE.DynamicDrawUsage); g.setAttribute(k, a); }
+    for (const [k, n] of [['aA', 3], ['aB', 3], ['aCol', 4], ['aP', 4], ['aS', 2]]) { const a = new THREE.BufferAttribute(new Float32Array(MAXQ * 4 * n), n); a.setUsage(THREE.DynamicDrawUsage); g.setAttribute(k, a); }
     g.setDrawRange(0, 0);
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
     this.mat = new THREE.ShaderMaterial({
@@ -126,13 +129,15 @@ export class BeamRenderer {
     this._c = new THREE.Color();
   }
 
-  quad(i, ax, ay, az, bx, by, bz, c, a, w, fadeIn, fadeOut, s0) {
+  // soft: 0 a sunbeam's hot core, 1 moonlight's haze; px: the pixel floor's multiplier
+  quad(i, ax, ay, az, bx, by, bz, c, a, w, fadeIn, fadeOut, s0, soft = 0, px = 1) {
     const A = this.geo.attributes;
     for (let k = 0; k < 4; k++) {
       const v = i * 4 + k;
       A.aA.setXYZ(v, ax, ay, az); A.aB.setXYZ(v, bx, by, bz);
       A.aCol.setXYZW(v, c.r, c.g, c.b, a);
       A.aP.setXYZW(v, w, fadeIn, fadeOut, s0);
+      A.aS.setXY(v, soft, px);
     }
   }
   glow(i, x, y, z, c, a, size, kind, lift, rot = 0) {
@@ -143,7 +148,11 @@ export class BeamRenderer {
   update(dt) {
     const g = this.game, sys = this.sys;
     const rs = g.world.rs;
-    this.mat.uniforms.uViewH.value = Math.max(1, rs?.h || rs?.renderer?.domElement?.height || 720);
+    // the pixel floor holds in render pixels and in CSS pixels, whichever is wider (a phone renders at 2× or more)
+    const cssH = rs?.cssH || (typeof window !== 'undefined' ? window.innerHeight : 0) || 720;
+    this.mat.uniforms.uViewH.value = Math.max(1, Math.min(rs?.h || rs?.renderer?.domElement?.height || 720, cssH));
+    // tripwires are threads: on a small screen they keep 3 px and glow a little more
+    const small = cssH < 900, wirePx = small ? 3 / 2.2 : 1, wireGlow = small ? 1.3 : 1;
     const hc = g.settings?.highContrast ? 1 : 0;
     this.mat.uniforms.uHC.value = hc;
     this.mat.uniforms.uMinPx.value = hc ? 3.4 : 2.2; // room for the outline on thin beams
@@ -158,7 +167,7 @@ export class BeamRenderer {
     for (const [src, R] of sys.results) {
       if (!R.on || !R.n) continue;
       const col = src.color(g), glow = src.glow ?? 1;
-      const lamp = src.kind === 'lamp';
+      const lamp = src.kind === 'lamp', soft = src.soft ?? (src.kind === 'moon' ? 1 : 0);
       for (let i = 0; i < R.n && nq < MAXQ; i++) {
         const h = R.hits[i];
         const ax = R.pts[i * 2], ay = R.pts[i * 2 + 1], bx = R.pts[i * 2 + 2], by = R.pts[i * 2 + 3];
@@ -169,8 +178,8 @@ export class BeamRenderer {
           const len = Math.hypot(bx - ax, by - ay);
           const fadeIn = i === 0 ? Math.min(0.6, len * 0.3) : 0.04;
           const fadeOut = h.kind === NONE ? Math.min(len * 0.7, 25) : 0;
-          const bright = (lamp ? 1.6 : 2.2) * glow * Math.min(1.6, h.I);
-          this.quad(nq++, ax, ay, 0, bx, by, bz, col, bright, src.width * 0.5, fadeIn, fadeOut, i * 3.7 + (src.x || 0));
+          const bright = (lamp ? 1.6 * wireGlow : 2.2) * glow * Math.min(1.6, h.I);
+          this.quad(nq++, ax, ay, 0, bx, by, bz, col, bright, src.width * 0.5, fadeIn, fadeOut, i * 3.7 + (src.x || 0), soft, lamp ? wirePx : 1);
         }
         if (h.kind === NONE || ng >= MAXG) continue;
         const flick = 0.9 + 0.1 * Math.sin(t * 13 + i * 2.1 + bx);
@@ -186,8 +195,8 @@ export class BeamRenderer {
           } else {
             const px = h.x + h.nx * 0.03, py = h.y + h.ny * 0.03;
             const pz = h.kind === TARGET && h.obj.z !== undefined ? h.obj.z : 0;
-            const sz = lamp ? 0.22 : 0.85 + 0.45 * h.I;
-            this.glow(ng++, px, py, pz, col, (lamp ? 0.9 : 1.5) * Math.min(1.6, h.I) * flick * reduce, sz, 0, 0.06);
+            const sz = lamp ? 0.22 : (0.85 + 0.45 * h.I) * (1 + 0.5 * soft);
+            this.glow(ng++, px, py, pz, col, (lamp ? 0.9 : 1.5 - 0.7 * soft) * Math.min(1.6, h.I) * flick * reduce, sz, 0, 0.06);
           }
           if (drawn && !lamp && !(h.kind === TARGET && h.obj.kind === 'eye') && Math.abs(h.x - fx) <= rw && Math.abs(h.y - fy) <= rh) {
             const d = Math.hypot(h.x - fx, h.y - fy), I = Math.min(1.6, h.I);
@@ -197,7 +206,7 @@ export class BeamRenderer {
       }
     }
     this.geo.setDrawRange(0, nq * 6);
-    for (const k of ['aA', 'aB', 'aCol', 'aP']) { const a = this.geo.attributes[k]; a.needsUpdate = true; a.clearUpdateRanges?.(); a.addUpdateRange?.(0, nq * 4 * a.itemSize); }
+    for (const k of ['aA', 'aB', 'aCol', 'aP', 'aS']) { const a = this.geo.attributes[k]; a.needsUpdate = true; a.clearUpdateRanges?.(); a.addUpdateRange?.(0, nq * 4 * a.itemSize); }
     this.qgeo.instanceCount = ng;
     for (const k of ['iPos', 'iCol', 'iP']) { const a = this.qgeo.attributes[k]; a.needsUpdate = true; a.clearUpdateRanges?.(); a.addUpdateRange?.(0, ng * a.itemSize); }
     const P = this.pool;

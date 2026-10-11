@@ -348,16 +348,18 @@ export function starCookie() {
   const g = x.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
   g.addColorStop(0, '#fff'); g.addColorStop(0.75, '#f4f0e8'); g.addColorStop(1, '#8a8478');
   x.fillStyle = g; x.fillRect(0, 0, n, n);
-  // the pierced brass of the lantern: a lattice of eight-point stars, its bars cast as dark lines
-  const cell = n / 7;
-  x.strokeStyle = 'rgba(0,0,0,.92)'; x.lineWidth = n * 0.018; x.lineJoin = 'round';
+  // the pierced brass of the lantern: a lattice of eight-point stars, its bars cast as dark lines: four stars
+  // across and bold bars, so the stars still read where the pool lies far off or across the stones at a slant
+  const cell = n / 4;
+  x.strokeStyle = 'rgba(0,0,0,.94)'; x.lineWidth = n * 0.03; x.lineJoin = 'round';
   const star = (cx, cy, r) => {
     x.beginPath();
-    for (let i = 0; i <= 16; i++) { const a = (i / 16) * Math.PI * 2 + Math.PI / 8, rr = i % 2 ? r * 0.62 : r; const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr; i ? x.lineTo(px, py) : x.moveTo(px, py); }
+    for (let i = 0; i <= 16; i++) { const a = (i / 16) * Math.PI * 2 + Math.PI / 8, rr = i % 2 ? r * 0.6 : r; const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr; i ? x.lineTo(px, py) : x.moveTo(px, py); }
     x.closePath(); x.stroke();
   };
-  for (let i = -1; i <= 7; i++) for (let j = -1; j <= 7; j++) { star((i + 0.5) * cell, (j + 0.5) * cell, cell * 0.47); }
-  for (let i = 0; i <= 7; i++) { x.beginPath(); x.moveTo(i * cell, 0); x.lineTo(i * cell, n); x.moveTo(0, i * cell); x.lineTo(n, i * cell); x.lineWidth = n * 0.008; x.stroke(); }
+  for (let i = -1; i <= 4; i++) for (let j = -1; j <= 4; j++) { star((i + 0.5) * cell, (j + 0.5) * cell, cell * 0.46); }
+  x.lineWidth = n * 0.014;
+  for (let i = 0; i <= 4; i++) { x.beginPath(); x.moveTo(i * cell, 0); x.lineTo(i * cell, n); x.moveTo(0, i * cell); x.lineTo(n, i * cell); x.stroke(); }
   x.restore();
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.name = 'cookie.star'; t.userData.shared = true;
   _star = t;

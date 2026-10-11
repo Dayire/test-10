@@ -15,7 +15,7 @@ export class LightSource {
     this.isSource = true;
     this.enabledFn = typeof enabled === 'function' ? enabled : null;
     this.on = enabled !== false;
-    this.width = width ?? (kind === 'lamp' ? 0.03 : kind === 'moon' ? 0.3 : kind === 'searchlight' ? 0.42 : 0.34);
+    this.width = width ?? (kind === 'lamp' ? 0.03 : kind === 'moon' ? 0.9 : kind === 'searchlight' ? 0.42 : 0.34);
     this.fixed = color !== undefined && color !== null ? new THREE.Color(color) : null;
     this.glow = glow; // visual brightness of the beam (gameplay intensity is I)
     this.col = new THREE.Color(1, 0.85, 0.6);
@@ -44,7 +44,9 @@ export class LightSource {
 }
 
 export class SunRay extends LightSource { constructor(o = {}) { super({ kind: 'sun', I: 1, ...o }); } }
-export class MoonRay extends LightSource { constructor(o = {}) { super({ kind: 'moon', I: 0.5, color: 0xc8d8ff, ...o }); } }
+// moonlight is weak (it half-opens a gold lock): a pale, cool haze rather than a hot line (the renderer draws a
+// moon beam soft)
+export class MoonRay extends LightSource { constructor(o = {}) { super({ kind: 'moon', I: 0.5, color: 0x9fb4e0, width: 0.9, glow: 0.5, ...o }); } }
 
 // a brass lamp throwing a thin beam (tripwires): a mesh at (x, y, z) aimed along the angle
 export class BeamLamp extends LightSource {

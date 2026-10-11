@@ -3,7 +3,7 @@ import { Crate, Gate, Searchlight, Guard, Trigger } from '../../game/entities.js
 import { Body } from '../../game/physics.js';
 import { Drawbridge, RopeLadder } from '../../game/bridge.js';
 import { LightSystem, SunRay, MoonRay, Mirror, Crank, Capstan, SunLock, LampEye, Sensor, BurnRope, Occluder, Terminator, SunClock } from '../../game/light/index.js';
-import { starInlay, lightMaterials, starCookie, trayMesh } from '../../assets/lightprops.js';
+import { starInlay, lightMaterials, starCookie } from '../../assets/lightprops.js';
 import { hangingRug, pole, wire, basket, laundry, lanternMesh, barrel } from '../../assets/props.js';
 import { ivyPatch, ivyCurtain } from '../../assets/foliage.js';
 import { Batcher, boxMM, setColor, worldUV } from '../../assets/geom.js';
@@ -21,7 +21,17 @@ export const LOOK_KEYS = [
   { x: -10, preset: 'sunset' }, { x: 176, preset: 'sunset' }, { x: 204, preset: 'dusk' }, { x: 212, preset: 'night' },
   { x: 342, preset: 'night' }, { x: 352, preset: 'dawn' }, { x: 470, preset: 'sunrise' },
 ];
-const WIN = new THREE.Color(2.4, 1.45, 0.72); // the low sun seen through an aperture
+// the sky through an aperture: a glow brightest where the ray enters (low centre), its colour and strength the
+// live sun's (a warm blaze at sunset, a dim blue under the moon); one material for every window
+function apertureGlow() {
+  const n = 64, c = document.createElement('canvas'); c.width = c.height = n;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(n * 0.5, n * 0.58, 0, n * 0.5, n * 0.58, n * 0.75);
+  g.addColorStop(0, '#ffffff'); g.addColorStop(0.35, '#d8c6b0'); g.addColorStop(1, '#5a4a40');
+  x.fillStyle = g; x.fillRect(0, 0, n, n);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.name = 'lab.aperture';
+  return t;
+}
 
 export function* buildLab(game, kit) {
   const { L, K, FZ, ground, block, vbox, lantern, cp, cam, farBuilding, kerb, killZone, solid, r } = kit;
@@ -37,6 +47,7 @@ export function* buildLab(game, kit) {
   const lock = (id, x, y, o = {}) => add(new SunLock(game, { id, x, y, ...o }));
   const sun = (id, x, y, angle = 195, o = {}) => add(new SunRay({ id, x, y, angle, ...o }));
   const star = (x, y = 0) => { const m = starInlay(game.mats); m.position.set(x, y + 0.002, 0.15); game.add(m); };
+  const winMat = new THREE.MeshBasicMaterial({ map: apertureGlow(), color: 0xffffff, fog: false, toneMapped: true });
   // a puzzle room's frame (FULL_GAME §1.2): while the boy is between x0 and x1 the camera holds the room's centre
   // cx (keys at both ends and the middle, focusBias cx − x, no look-ahead), so the source, the tool and the target
   // share one frame; distPortrait fits the room's span inside the 52° field of a phone held upright
@@ -45,7 +56,7 @@ export function* buildLab(game, kit) {
   const wall = (x0, x1, spans, { mat = 'sandstone', windows = [] } = {}) => {
     for (const [y0, y1] of spans) block(x0, x1, y0, y1, { mat, coping: y0 > 0 ? null : 'limestone', ledges: false });
     for (const [y0, y1] of windows) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0 + 0.02, y1 - y0), new THREE.MeshBasicMaterial({ color: WIN }));
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0 + 0.02, y1 - y0), winMat);
       m.position.set((x0 + x1) / 2, (y0 + y1) / 2, FZ + 0.05); m.rotation.y = 0; game.add(m);
       vbox(x0 - 0.06, y0 - 0.08, FZ, x1 + 0.06, y0, 1.35, 'limestone', { base: y0 - 0.1, grimeAmt: 0.1 });
       vbox(x0 - 0.06, y1, FZ, x1 + 0.06, y1 + 0.08, 1.35, 'limestone', { base: y1, grimeAmt: 0.1 });
@@ -177,7 +188,8 @@ export function* buildLab(game, kit) {
   wall(125.6, 126.4, [[2.4, 2.6], [3.4, 12]], { windows: [[2.6, 3.4]] });
   sun('sun7', 126.45, 2.96);
   cam(105.5, { dist: 18, height: 3.2, lookY: 4.6, fov: 40, ahead: 0.6, focusBias: 2 });
-  frame(110, 125.4, 118.8, { dist: 18, distPortrait: 17.4, height: 3.2, lookY: 4.6, fov: 40 }); // the ivy 111.2 … the window 126.45
+  // lookY 2.4: on the gallery (y 4) the frame still holds M7 on the floor above the legend; on the floor, F2 and L7
+  frame(110, 125.4, 118.8, { dist: 19.5, distPortrait: 17.4, height: 2.6, lookY: 2.4, fov: 40 }); // the ivy 111.2 … the window 126.45
   room('crank', () => { M7.setState({ x: 119.9, y: 0, alpha: -30 }); F2.setState({ alpha: 45 }); L7.setState({ level: 1, done: true }); G7.setState({ open: 1 }); });
   yield 0.5;
 
@@ -191,13 +203,27 @@ export function* buildLab(game, kit) {
   const cw = new THREE.Group();
   { const b = new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.7, 0.8, 0.7)), game.mats.get('sandstone')); setColor(b.geometry, 0xd8d0c0); b.castShadow = true; cw.add(b); const ring = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.02, 6, 12), game.mats.get('iron')); ring.position.y = 0.45; cw.add(ring); }
   cw.position.set(136.6, 6.2, -0.2); game.add(cw);
-  K.add(boxMM(133.8, 8.3, FZ, 137.4, 8.55, 0.3), 'woodDark'); // the beam the pulley hangs from
+  K.add(boxMM(133.8, 8.3, FZ, 137.4, 8.55, 0.3), 'woodDark'); // the beam the pulleys hang from
+  // the rig: the rope is tied to a ring on the wall (x 135, y 6.45), runs up through the burn point, over two
+  // pulleys under the beam and down to the counterweight's ring; burnt, the weight falls with its end
+  const PR = 0.16, pa = 135.0 + PR, pb = 136.6 - PR, py = 8.3 - 0.05 - PR;
+  for (const px of [pa, pb]) {
+    const w = new THREE.CylinderGeometry(PR, PR, 0.06, 18); w.rotateX(Math.PI / 2); w.translate(px, py, 0); K.add(w, 'iron', null, { cast: false });
+    const strap = boxMM(px - 0.025, py, -0.05, px + 0.025, 8.3, 0.05); K.add(strap, 'iron', null, { cast: false });
+  }
+  K.add(boxMM(134.9, 6.38, FZ, 135.1, 6.52, FZ + 0.12), 'iron', null, { cast: false });
+  { const ring = new THREE.TorusGeometry(0.06, 0.014, 6, 14); ring.translate(135.0, 6.45, -0.02); K.add(ring, 'iron', null, { cast: false });
+    const arm = new THREE.CylinderGeometry(0.018, 0.018, -FZ - 0.02, 6); arm.rotateX(Math.PI / 2); arm.translate(135.0, 6.45, FZ / 2 - 0.01); K.add(arm, 'iron', null, { cast: false }); }
+  const hemp = game.mats.get('hemp');
+  const ropeSeg = (a, b, r = 0.02) => { const len = a.distanceTo(b), g = new THREE.CylinderGeometry(r, r, len, 6); g.translate(0, len / 2, 0); const m = new THREE.Mesh(setColor(g, 0xffffff), hemp); m.position.copy(a); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize()); m.castShadow = false; return m; };
+  const over = ropeSeg(new THREE.Vector3(pa, py + PR, 0), new THREE.Vector3(pb, py + PR, 0)); game.add(over); // the run between the pulleys
+  cw.add(ropeSeg(new THREE.Vector3(0, 0.5, 0), new THREE.Vector3(0, py - 6.2, 0.2))); // down from the second pulley to the ring
   const cwState = { t: -1 };
   const rope = add(new BurnRope(game, { id: 'rope', ...ROPE, onBurnt: () => { cwState.t = 0; } }));
   const bridge = E(new Drawbridge(game, { x0: 140.5, x1: 144, y: 0, source: () => (rope.burnt && cwState.t > 0.6 ? 1 : 0) }));
   bridge.id = 'bridge';
   L.entities.push({ id: 'counterweight', step(dt) { if (cwState.t >= 0 && cwState.t < 2) { const was = cwState.t; cwState.t += dt; if (was < 0.6 && cwState.t >= 0.6) { game.sfx('counterweight', 136.6); game.camRig.addShake(0.4); game.dust?.emit(new THREE.Vector3(136.6, 0, 0), { count: 16, spread: 1.4, size: 0.9, alpha: 0.35 }); } } },
-    render() { const t = Math.max(0, Math.min(0.6, cwState.t)); cw.position.y = cwState.t < 0 ? 6.2 : 6.2 - 0.5 * 17 * t * t; },
+    render() { const t = Math.max(0, Math.min(0.6, cwState.t)); cw.position.y = cwState.t < 0 ? 6.2 : 6.2 - 0.5 * 17 * t * t; over.visible = cwState.t < 0; },
     getState: () => ({ t: cwState.t }), setState: (s) => { cwState.t = s.t; } });
   const M5 = add(new Mirror(game, { id: 'M5', kind: 'wheeled', x: 132.6, alpha: 0, zone: { x0: 127, x1: 140 }, thetaHint: 195 }));
   kerb(132.1, 132.25); kerb(133.69, 133.84); star(133.34);
@@ -239,7 +265,10 @@ export function* buildLab(game, kit) {
   add(new SunRay({ id: 'lastRay', x: 214, y: 12.0, angle: 180, clipByTerminator: term }));
   L.triggers.push(new Trigger({ id: 'dusk', x0: 205.5, x1: 212, fn: () => restoreLook() }));
   cam(176, { dist: 19, distPortrait: 17.2, height: 4.8, lookY: 6.4, fov: 40, ahead: 1.0, focusBias: 4 });
-  frame(186, 200.5, 193, { dist: 19, distPortrait: 17.2, height: 4.8, lookY: 5.6, fov: 40 }); // the ivy 185.2 … L8 199.2
+  // the room's frame holds x 193 (the ivy 185.2 … L8 199.2); on the tower (tiers at y 4.6, 9.2, 10.6) it stays down
+  // on the ray's whole path, F3 (y 12) to L8 (y 4): yBias undoes his height there (the camera follows the ground
+  // he stands on)
+  for (const [x, yb] of [[186, 0], [186.6, -3.0], [188.8, -3.0], [189.4, -6.4], [190.3, -6.4], [190.9, -7.8], [194.3, -7.8], [195.3, 0], [200.5, 0]]) cam(x, { dist: 19, distPortrait: 17.2, height: 4.8, lookY: 5.6, fov: 40, ahead: 0, focusBias: 193 - x, yBias: yb });
   room('clock', () => { L8.setState({ level: 1, done: true }); ladder9.setState({ t: 1, target: 1 }); G9.setState({ open: 1 }); clock.setState({ t: 0, running: false, expired: false, setT: 6 }); });
   yield 0.7;
 
@@ -248,7 +277,7 @@ export function* buildLab(game, kit) {
   const coversA = [], coversB = [];
   for (const x of [215.5, 220, 224.5, 227]) rugCover(x, coversA);
   rugCover(246.5, coversB);
-  const S1 = E(new Searchlight(game, { id: 'S1', origin: new THREE.Vector3(221, 13, -8), x0: 212, x1: 230, aimY: 0.4, speed: 3.0, pause: 1.3, covers: coversA, startX: 230 }));
+  const S1 = E(new Searchlight(game, { id: 'S1', origin: new THREE.Vector3(221, 13, -8), x0: 212, x1: 230, aimY: 0.4, speed: 3.0, pause: 1.3, covers: coversA, startX: 230, power: 200 }));
   light.lamp(S1);
   const LM1 = add(new Mirror(game, { id: 'LM1', kind: 'wheeled', x: 214.0, alpha: 0, zone: { x0: 212.3, x1: 232.5 }, thetaHint: 305 }));
   kerb(229.8, 229.95); star(229.45);
@@ -264,15 +293,16 @@ export function* buildLab(game, kit) {
   vbox(232.28, 2.6, 0.75, 233.72, 2.86, 1.4, 'limestone', { base: 2.6, grimeAmt: 0.15 });
   for (const z of [1.3, -3.1, -7.5]) merlons(K, { x0: 232.5, x1: 233.5, y: 9.16, z, depth: 0.3, h: 0.5, mat: 'plasterBlue' });
   { const arm = new THREE.CylinderGeometry(0.03, 0.03, 1.1, 6); arm.rotateZ(Math.PI / 2); arm.translate(232.05, 4.1, -0.08); K.add(setColor(arm, 0xffffff), 'iron'); }
-  const S2 = E(new Searchlight(game, { id: 'S2', origin: new THREE.Vector3(246, 12, -8), x0: 234.5, x1: 254, aimY: 0.4, speed: 4.0, pause: 1.2, covers: coversB, startX: 254 }));
+  const S2 = E(new Searchlight(game, { id: 'S2', origin: new THREE.Vector3(246, 12, -8), x0: 234.5, x1: 254, aimY: 0.4, speed: 4.0, pause: 1.2, covers: coversB, startX: 254, power: 200 }));
   light.lamp(S2, { eye: 0.8, dazzle: 7 });
   const LM2 = add(new Mirror(game, { id: 'LM2', kind: 'anchored', x: 235.25, alpha: -30, thetaHint: 225 }));
   for (const [x, z] of [[221, -8.35], [246, -8.35]]) { vbox(x - 1.6, 11.4 + (x === 221 ? 1 : 0), z, x + 1.6, 11.65 + (x === 221 ? 1 : 0), z + 1.3, 'woodDark', { base: 11 }); }
   vbox(208, 0, -9.6, 258, 17, -8.4, 'plasterCream', { base: 0, grime: 3 });
   // lamp posts on the open square (no facade to hang a bracket on)
   for (const x of [210.5, 238.5, 256.5]) { pole(K, x, 0, 3.55, FZ + 0.25, 0.07); lantern(x, 3.3, FZ + 0.25, { bracketDir: 1, light: true, intensity: 2.0 }); }
-  cam(208, { dist: 18, height: 3.0, lookY: 3.6, fov: 39, ahead: 1.0, focusBias: 2 });
-  cam(256, { dist: 18, height: 3.0, lookY: 3.6, fov: 39, ahead: 1.0, focusBias: 1 });
+  // a little higher than the street rooms: the lattice pools on the stones read from above
+  cam(208, { dist: 18, distPortrait: 14, height: 4.6, lookY: 3.6, fov: 39, ahead: 1.0, focusBias: 2 });
+  cam(256, { dist: 18, distPortrait: 14, height: 4.6, lookY: 3.6, fov: 39, ahead: 1.0, focusBias: 1 });
   room('lamp', () => { LM1.setState({ x: 229.45, y: 0, alpha: 0 }); LL1.setState({ level: 1, done: true }); G10.setState({ open: 1 }); LM2.setState({ x: 235.25, y: 0, alpha: -45 }); });
   yield 0.8;
 
@@ -315,10 +345,11 @@ export function* buildLab(game, kit) {
   const G11 = gate('G11', 340.0, 2.6, 2.4, () => (ML.done ? 1 : 0));
   block(339.6, 340.4, 2.6, 14, { mat: 'sandstone', coping: null });
   for (const x of [262.5, 288.5, 308.5]) lantern(x, 3.2, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.0 });
-  cam(259, { dist: 16.5, height: 2.2, lookY: 2.4, fov: 38, ahead: 1.6 });
-  cam(296, { dist: 16.5, height: 2.2, lookY: 2.6, fov: 38, ahead: 2.0 });
-  cam(311, { dist: 19, distPortrait: 17.2, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 6 });
-  cam(342, { dist: 19, distPortrait: 17.2, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 1 });
+  // on a phone the night street comes close: the wires are threads, the boy a silhouette in the dark
+  cam(259, { dist: 16.5, distPortrait: 12, height: 2.2, lookY: 2.4, fov: 38, ahead: 1.6 });
+  cam(296, { dist: 16.5, distPortrait: 12, height: 2.2, lookY: 2.6, fov: 38, ahead: 2.0 });
+  cam(311, { dist: 19, distPortrait: 14.5, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 6 });
+  cam(342, { dist: 19, distPortrait: 14.5, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 1 });
   room('wire', () => { bkS.t = 6; bk.enabled = true; bk.x = 270.1; guard.setState({ state: 'asleep', x: 303.6, y: 0, vx: 0, vy: 0, t: 5, facing: 1 }); MM.setState({ x: 330.0, y: 0, alpha: -45 }); ML.setState({ level: 1, done: true }); G11.setState({ open: 1 }); });
   yield 0.85;
 
@@ -333,7 +364,8 @@ export function* buildLab(game, kit) {
   const LD1 = lock('LD1', 347.5, 1.25, { degree: 0 });
   const G12 = gate('G12', 354.0, 2.6, 2.4, () => (LD1.done ? 1 : 0));
   block(353.6, 354.4, 2.6, 7.5, { mat: 'plasterPeach', coping: 'limestone' });
-  add(new SunRay({ id: 'dawnRay', x: 362, y: 9.0, angle: 180, clipByTerminator: termD }));
+  // the first ray of the sunrise enters from beyond the frame's right edge (the room's frame ends near x 365)
+  add(new SunRay({ id: 'dawnRay', x: 374, y: 9.0, angle: 180, clipByTerminator: termD }));
   // IV-C: a lamp-keeper chases; sun shafts from rooftop mirrors stun him
   const captain = E(new Guard(game, { x: 372, y: 0, speed: 3.95, blockX: 429.6 }));
   captain.id = 'captain';
@@ -374,6 +406,13 @@ export function* buildLab(game, kit) {
   yield 0.95;
 
   // ================================================================ chapter hooks
+  // the apertures glow with the live sky: the sun's colour and strength, plus the sky's own light
+  const wl = game.world.light, skyC = new THREE.Color();
+  L.entities.push({ id: 'apertures', step() {}, render() {
+    const sn = wl?.sun, hm = wl?.hemi; if (!sn) return;
+    winMat.color.copy(sn.color).multiplyScalar(Math.min(2, 0.3 * sn.intensity));
+    if (hm) winMat.color.add(skyC.copy(hm.color).multiplyScalar(hm.intensity * 0.5));
+  }, getState: () => ({}), setState() {} });
   // the lamp-keepers' star lattice on the rig's spots in the night rooms (restored to the disc when the lab unloads)
   const rig = game.lightRig;
   L.entities.push({ id: 'cookie', liveUnderTitle: true, on: null, step() {}, render() { const on = game.player.x > 206 && game.player.x < 345; if (on !== this.on) { this.on = on; rig?.setCookie(on ? starCookie() : null); } }, dispose() { rig?.setCookie(null); }, getState: () => ({}), setState() {} });
