@@ -13,11 +13,12 @@
 //   artifact   npm run build:artifact: one page ≤ 3 MB, run in test.html inside a sandboxed iframe, no console
 //              errors, no service worker
 //   hosted     vite build: an installable manifest (Chrome's own installability check), the service worker
-//              takes control, and the game reloads offline
+//              takes control, the game reloads offline, and after a deploy the open tab still loads its chunks
 // One headless Chromium at a time; every scenario opens its own context. Exit code 1 when any fails.
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
+import os from 'os';
 import { execSync } from 'child_process';
 import { parseArgs, launch, ROOT } from './lib/harness.mjs';
 
@@ -378,16 +379,16 @@ await scenario('hints', async () => {
 });
 
 // ------------------------------------------------------------------ builds served from disk
-function serve(dir) {
+function serve(dir, root = { dir }) {
   const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
   const server = http.createServer((req, res) => {
     let p = decodeURIComponent(req.url.split('?')[0]); if (p.endsWith('/')) p += 'index.html';
-    const f = path.join(dir, p);
-    if (!f.startsWith(dir) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); res.end(); return; }
+    const f = path.join(root.dir, p);
+    if (!f.startsWith(root.dir) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'content-type': types[path.extname(f)] || 'application/octet-stream', 'cache-control': 'no-cache' });
     fs.createReadStream(f).pipe(res);
   });
-  return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ port: server.address().port, close: () => new Promise((c) => server.close(c)) })));
+  return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ port: server.address().port, root, close: () => new Promise((c) => server.close(c)) })));
 }
 
 await scenario('artifact', async () => {
@@ -444,8 +445,30 @@ await scenario('hosted', async () => {
     await page.reload(); await ready(page);
     const offline = await page.evaluate(() => ({ online: navigator.onLine, mode: __medina.game.mode, chapter: __medina.chapter(), font: document.fonts.check('300 20px "Cormorant Garamond"') }));
     await ctx.setOffline(false);
-    const out = { manifest, installable, iconsOk, controlled, offline, errors: errors.filter((e) => !/net::ERR_INTERNET_DISCONNECTED/.test(e)).slice(0, 3) };
-    const ok = manifest.display === 'standalone' && manifest.icons.includes('512x512:maskable') && iconsOk && !installable.length && controlled && offline.online === false && offline.chapter === 'souk' && offline.font && !out.errors.length;
+    // a deploy while the tab is open: the next build renames a chapter chunk; once its worker takes over, the open
+    // tab still gets the chunk it knows (the previous version's cache stays), though the server no longer has it
+    const next = fs.mkdtempSync(path.join(os.tmpdir(), 'medina-next-'));
+    fs.cpSync(dir, next, { recursive: true });
+    const chunk = fs.readdirSync(path.join(next, 'assets')).find((f) => /^sundown-.*\.js$/.test(f));
+    fs.renameSync(path.join(next, 'assets', chunk), path.join(next, 'assets', chunk.replace(/-[^-]+\.js$/, '-n3xtbuild.js')));
+    const sw = fs.readFileSync(path.join(next, 'sw.js'), 'utf8');
+    fs.writeFileSync(path.join(next, 'sw.js'), sw.replace(/medina-[0-9a-f]{12}/, 'medina-0nextbuild00').replace(chunk, chunk.replace(/-[^-]+\.js$/, '-n3xtbuild.js')));
+    srv.root.dir = next;
+    const deploy = await page.evaluate(async (chunk) => {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const changed = new Promise((r) => { navigator.serviceWorker.addEventListener('controllerchange', () => r(true), { once: true }); setTimeout(() => r(false), 30000); });
+      await reg.update();
+      const took = await changed;
+      // the tab switches workers when the new one starts activating: its activate step (the cache clean-up) ends later
+      const w = navigator.serviceWorker.controller;
+      if (w && w.state !== 'activated') await new Promise((r) => { w.addEventListener('statechange', () => w.state === 'activated' && r()); setTimeout(r, 30000); });
+      const res = await fetch(`./assets/${chunk}`);
+      return { took, caches: (await caches.keys()).filter((k) => k.startsWith('medina-')).length, oldChunk: res.status };
+    }, chunk);
+    srv.root.dir = dir; fs.rmSync(next, { recursive: true, force: true });
+    const out = { manifest, installable, iconsOk, controlled, offline, deploy, errors: errors.filter((e) => !/net::ERR_INTERNET_DISCONNECTED/.test(e)).slice(0, 3) };
+    const ok = manifest.display === 'standalone' && manifest.icons.includes('512x512:maskable') && iconsOk && !installable.length && controlled && offline.online === false && offline.chapter === 'souk' && offline.font
+      && deploy.took && deploy.caches === 2 && deploy.oldChunk === 200 && !out.errors.length;
     return [ok || `hosted ${JSON.stringify(out)}`, out];
   } finally { await ctx.close(); await srv.close(); }
 });

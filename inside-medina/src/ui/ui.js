@@ -309,7 +309,7 @@ export class UI {
     entries.forEach(([k, label], i) => {
       const b = document.createElement('button');
       b.className = 'entry'; b.dataset.k = k; b.style.setProperty('--i', i);
-      b.innerHTML = `<span class="mark"><svg viewBox="0 0 100 100">${STAR}</svg></span><span class="lbl">${label}</span>${k === 'continue' ? '<span class="sub"></span>' : ''}<span class="wait"><svg viewBox="0 0 100 100">${ROSETTE}</svg></span>`;
+      b.innerHTML = `<span class="lbl"><span class="mark"><svg viewBox="0 0 100 100">${STAR}</svg></span>${label}</span>${k === 'continue' ? '<span class="sub"></span>' : ''}<span class="wait"><svg viewBox="0 0 100 100">${ROSETTE}</svg></span>`;
       item(b, { act: () => this.mainAction(k), label });
       nav.appendChild(b);
     });
@@ -431,7 +431,7 @@ export class UI {
     acts.forEach(([k, label, fn], i) => {
       const b = document.createElement('button');
       b.className = 'entry'; b.dataset.k = k; b.style.setProperty('--i', i);
-      b.innerHTML = `<span class="mark"><svg viewBox="0 0 100 100">${STAR}</svg></span><span class="lbl">${label}</span>`;
+      b.innerHTML = `<span class="lbl"><span class="mark"><svg viewBox="0 0 100 100">${STAR}</svg></span>${label}</span>`;
       item(b, { act: () => { this.sound('confirm'); fn(); }, label });
       nav.appendChild(b);
     });

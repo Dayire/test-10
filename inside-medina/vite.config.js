@@ -30,8 +30,13 @@ const PRECACHE = __PRECACHE__;
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(PRECACHE.map((u) => new Request(new URL(u, self.registration.scope), { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
+// a tab opened before this version may still import the previous build's hashed chapter chunks: the previous
+// version's cache stays (lookups search every cache), older ones go
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k.startsWith('medina-') && k !== VERSION).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then((ks) => {
+    const old = ks.filter((k) => k.startsWith('medina-') && k !== VERSION);
+    return Promise.all(old.slice(0, -1).map((k) => caches.delete(k)));
+  }).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', (e) => {
   const r = e.request;

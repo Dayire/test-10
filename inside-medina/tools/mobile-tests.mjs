@@ -6,7 +6,8 @@
 //              (the chapter select's checkpoint stepper included: a tap opens it, its arrows step); a tap acts
 //              (new journey starts play)
 //   controls   jump, grab and ⏸ are ≥ 44 px and inside the safe area; ⏸ opens the pause menu (layer hidden)
-//   stick      floating stick: 0.5 of its radius walks, 1.0 runs (the boy's speed); it spawns under the thumb
+//   stick      floating stick: 0.5 of its radius walks, 1.0 runs (the boy's speed); it spawns under the thumb, and
+//              stays whole inside the safe area when the thumb lands by the notch or the home bar
 //   jump       a tap on jump leaves the ground
 //   grab       grab held with the stick pushes the souk's first crate (two fingers at once)
 //   lens       the lens shift keeps the boy's projected position inside the play rect above the control band
@@ -144,8 +145,13 @@ async function device(dev) {
     const runS = await run(0.8);
     await touch('end'); await frames(page, 1);
     const stop = await run(0.4);
-    check('stick', Math.abs(base[0] - sx) < 3 && Math.abs(base[1] - sy) < 3 && walk.inX === 0.5 && walk.vx > 0.4 && walk.vx < 2.5 && runS.vmax > 3.9 && runS.inX === 1 && stop.inX === 0,
-      { R, base: base.map(Math.round), walk, run: runS, released: stop.inX });
+    // a thumb by the screen's edge (under the notch in landscape): the base stays whole inside the safe area
+    await touch('start', 1, 6, H - 8); await frames(page, 2);
+    const edge = await page.evaluate(() => { const b = __ui.touch.base.getBoundingClientRect(); return { x0: b.x, y1: b.y + b.height }; });
+    await touch('end'); await frames(page, 1);
+    const edgeOK = edge.x0 >= I.left - 0.5 && edge.y1 <= H - I.bottom + 0.5;
+    check('stick', Math.abs(base[0] - sx) < 3 && Math.abs(base[1] - sy) < 3 && walk.inX === 0.5 && walk.vx > 0.4 && walk.vx < 2.5 && runS.vmax > 3.9 && runS.inX === 1 && stop.inX === 0 && edgeOK,
+      { R, base: base.map(Math.round), walk, run: runS, released: stop.inX, edge: [Math.round(edge.x0), Math.round(edge.y1)] });
     // grab + push: the souk's first crate (36.7–37.7); stick right and grab held together
     await page.evaluate(() => { __medina.teleport(35.6, 0, 1); });
     await run(0.2);

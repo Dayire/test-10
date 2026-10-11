@@ -37,7 +37,11 @@ export class TouchControls {
       const R = this.radius();
       let cx = e.clientX, cy = e.clientY;
       if (this.S.touchStick === 'fixed' || this.aiming) { const c = this.fixedCentre(); if (Math.hypot(cx - c.x, cy - c.y) > R * 1.8) return; cx = c.x; cy = c.y; }
-      else { cx = Math.max(R + 8, Math.min(innerWidth - R - 8, cx)); cy = Math.max(R + 8, Math.min(innerHeight - R - 8, cy)); }
+      else {
+        // the base stays whole inside the safe area (a thumb by the notch or the home bar)
+        const s = this.ui.safeInsets();
+        cx = Math.max(s.l + R + 8, Math.min(innerWidth - s.r - R - 8, cx)); cy = Math.max(s.t + R + 8, Math.min(innerHeight - s.b - R - 8, cy));
+      }
       this.stick = { id: e.pointerId, cx, cy, nx: 0, ny: 0, yOn: false, axis: 'x', axisT: 0 };
       this.stickEl.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
       this.el.classList.add('sticking');

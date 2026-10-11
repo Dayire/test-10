@@ -1,6 +1,6 @@
 // Fold the artifact build into one page (FULL_GAME §8.7): dist-artifact/medina.html holds the splash, every CSS
 // rule (fonts as data URIs) and the whole game module inline; nothing is fetched but the page itself. The host
-// (claude.ai) supplies <html>/<head>/<body>, so medina.html is a fragment; test.html wraps it the way the host
+// supplies <html>/<head>/<body>, so medina.html is a fragment; test.html wraps it the way the host
 // does, for local runs (tools/ux-tests.mjs loads it inside a sandboxed iframe).
 import fs from 'fs';
 import path from 'path';

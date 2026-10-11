@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
-// The artifact build (claude.ai's sandboxed frame): one module with every chapter inlined, fonts as data URIs,
+// The artifact build (the host's sandboxed frame): one module with every chapter inlined, fonts as data URIs,
 // and import.meta.env.VITE_ARTIFACT, which strips the dev views, the GLB fetch, the service worker and reloads.
 // tools/make-artifact.mjs then folds index.html, the CSS and the JS into one medina.html.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
