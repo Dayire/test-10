@@ -92,7 +92,7 @@ export class Player {
       case 'climb': this.stepClimb(dt, inp); break;
       case 'lever': this.stepLever(dt, inp); break;
       default: if (this.lever) this.stepLever(dt, inp); break;
-      case 'dead': this.deathT += dt; this.stepDeadFall(dt); this.deathTint(); break;
+      case 'dead': this.deathT += dt; this.stepDeadFall(dt); break;
     }
     this.cur.set(b.x, b.y);
   }
@@ -493,18 +493,6 @@ export class Player {
     }
     this.gripT += dt;
     lv.drive(inp, dt, this);
-  }
-
-  // the colour the screen dims to (FULL_GAME §3.2: the sunset clock's death goes to indigo): the chapter's
-  // L.deathColor(kind), held on the game's fade colour once the fade to dark has begun (black otherwise). The
-  // final pass mixes the fade colour in display space as it is given (requests/L.md #8): while it does, the colour
-  // is handed over display-encoded, so the screen ends on its own hex, not near black
-  deathTint() {
-    const g = this.game, c = g.level?.deathColor?.(this.deathKind);
-    if (c === undefined || c === null || g.fadeTarget !== 1 || !g.fadeColor) return;
-    if (this.fadeEncoded === undefined) { const f = g.world?.rs?.post?.mFinal?.fragmentShader; this.fadeEncoded = typeof f === 'string' && f.includes('p = mix(p, uFadeColor, uFade)'); }
-    g.fadeColor.set(c);
-    if (this.fadeEncoded) g.fadeColor.convertLinearToSRGB();
   }
 
   stepDeadFall(dt) {

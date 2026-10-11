@@ -190,7 +190,7 @@ void main(){
   }
   float vig = smoothstep(.95, .25, length(cc * vec2(uRes.x / uRes.y, 1.) * .9));
   p *= mix(1., vig, uVignette);
-  p = mix(p, uFadeColor, uFade);
+  p = mix(p, toSRGB(uFadeColor), uFade); // a fade colour is linear (THREE.Color): it shows its own hex
   float bars = step(abs(cc.y), .5 - uLetterbox);
   p *= bars;
   if (uGrain > 0.) {

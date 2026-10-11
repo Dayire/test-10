@@ -380,7 +380,7 @@ export class Game {
   updateDying(dt) {
     this.dieT += dt;
     if (this.deathKind === 'restart') { if (this.dieT > 0.26) this.respawn(); return; }
-    if (this.dieT > 1.6 && this.fadeTarget !== 1) { this.fadeTarget = 1; this.fadeSpeed = 1.8; this.fadeColor.set(0, 0, 0); }
+    if (this.dieT > 1.6 && this.fadeTarget !== 1) { this.fadeTarget = 1; this.fadeSpeed = 1.8; this.fadeColor.set(this.level?.deathColor?.(this.deathKind) ?? 0x000000); } // L.deathColor(kind): the sunset dims to indigo
     if (this.dieT > 2.35) this.respawn();
   }
 
@@ -603,12 +603,10 @@ export class Game {
       let targetYaw = pl.scripted ? pl.finaleYaw : pl.targetYaw();
       if (pl.state === 'climb') targetYaw = Math.PI * (root.rotation.y >= 0 ? 1 : -1);
       if (pl.dead && pl.deathKind !== 'fall') targetYaw = root.rotation.y;
-      // critically damped yaw
-      const w = 16;
-      const d = targetYaw - root.rotation.y;
-      const a = w * w * d - 2 * w * (pl.yawVel || 0);
-      pl.yawVel = (pl.yawVel || 0) + a * dt;
-      root.rotation.y += pl.yawVel * dt;
+      // critically damped yaw, stepped exactly (stable at any frame time, as camera.js's spring)
+      const w = 16, x0 = root.rotation.y - targetYaw, v0 = pl.yawVel || 0, e = Math.exp(-w * dt);
+      root.rotation.y = targetYaw + (x0 + (v0 + w * x0) * dt) * e;
+      pl.yawVel = (v0 - w * (v0 + w * x0) * dt) * e;
       // animation state
       let { st, fade } = pl.animState();
       if (this.debugPose) {
