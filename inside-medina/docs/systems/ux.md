@@ -251,8 +251,8 @@ fullscreen row unless the frame allows it, no pointer lock, `alert`, `print` or 
 ## Tests
 
 ```
-node tools/ux-tests.mjs --port 5176 [--only keyboard,gamepad,storage,persist,autostart,menubg,chapters,pause,mouse,hints,crawl,artifact,hosted]
-node tools/mobile-tests.mjs --port 5176 [--device iphone|pixel|laptop] [--only menus,settings,back,controls,stick,jump,grab,lens,aim,hybrid]
+node tools/ux-tests.mjs [--port 5173] [--only keyboard,gamepad,storage,persist,autostart,menubg,chapters,pause,mouse,hints,crawl,artifact,hosted]
+node tools/mobile-tests.mjs [--port 5173] [--device iphone|pixel|laptop] [--only menus,settings,back,controls,stick,jump,grab,lens,aim,hybrid]
 ```
 
 Every screen keeps `hidden` (attribute) and the `hidden` class while closed, which the foundation suite reads on

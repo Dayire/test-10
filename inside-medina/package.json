@@ -9,11 +9,17 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "assets": "node tools/export-assets.mjs",
     "astra": "node tools/astra-assets.mjs",
-    "test": "node tools/playtest.mjs --chapter souk && node tools/negative.mjs --chapter souk && node tools/negative.mjs --suite foundation",
+    "test": "node tools/playtest.mjs --chapter souk && node tools/negative.mjs --chapter souk && node tools/negative.mjs --suite foundation && node tools/light-unit.mjs && node tools/playtest.mjs --chapter lab && node tools/negative.mjs --chapter lab && node tools/ux-tests.mjs && node tools/mobile-tests.mjs",
+    "test:all": "npm test && node tools/audio-tests.mjs && node tools/perf.mjs --checks && node tools/cycle.mjs && npm run build && npm run build:artifact",
     "build:artifact": "vite build --config tools/vite.artifact.config.js && node tools/make-artifact.mjs dist-artifact",
     "test:souk": "node tools/playtest.mjs --chapter souk && node tools/negative.mjs --chapter souk",
     "test:foundation": "node tools/negative.mjs --suite foundation",
-    "cycle": "node tools/cycle.mjs"
+    "test:lab": "node tools/light-unit.mjs && node tools/playtest.mjs --chapter lab && node tools/negative.mjs --chapter lab",
+    "test:ux": "node tools/ux-tests.mjs",
+    "test:mobile": "node tools/mobile-tests.mjs",
+    "cycle": "node tools/cycle.mjs",
+    "icons": "node tools/make-icons.mjs",
+    "font": "node tools/fetch-font.mjs"
   },
   "dependencies": {
     "three": "^0.186.0"

@@ -1,4 +1,4 @@
-// Touch and mobile acceptance (FULL_GAME §8, §11.4 U): node tools/mobile-tests.mjs [--port 5176] [--only name] [--device name]
+// Touch and mobile acceptance (FULL_GAME §8, §11.4 U): node tools/mobile-tests.mjs [--port 5173] [--only name] [--device name]
 // Devices: iPhone 13 portrait and landscape (safe areas of the notch and the home bar), Pixel 7 (a punch-hole
 // inset). Touches are real CDP touch events (Input.dispatchTouchEvent), so pointer and touch events, multi-touch
 // identifiers and the browser's own hit testing are all exercised. Checks per device:
@@ -29,7 +29,7 @@
 import { devices } from 'playwright';
 import { parseArgs, launch } from './lib/harness.mjs';
 
-const o = parseArgs(process.argv.slice(2), { port: 5176 });
+const o = parseArgs(process.argv.slice(2));
 const BASE = process.env.BASE || `http://127.0.0.1:${o.port}/`;
 const Q = 'tex=0.1&tier=low&noauto=1&nosave=1';
 const DEVICES = [
