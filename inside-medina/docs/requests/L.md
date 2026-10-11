@@ -17,9 +17,12 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 - **Change.** In `updateDying`, `this.fadeColor.set(this.level?.deathColor?.(this.deathKind) ?? 0x000000)` instead of
   always black.
 - **Reason.** FULL_GAME §3.2 II-E2: when the sunset clock expires "the light dies, the screen dims to indigo (death
-  kind `sunset`)". The boy kneels into the dark (the `sunset` death pose) today, but the fade is black.
-- **Test.** `?chapter=lab&cp=9`, walk past x 176 and wait 49 s: during the dying fade `post.params.fadeColor` is the
-  chapter's indigo (`#0b1026` in Chapter II).
+  kind `sunset`)". The contract is already live without this change: a chapter declares `L.deathColor(kind)` (the lab
+  returns `#0b1026` for `sunset`), and the dead boy's step (`Player.deathTint`) holds that colour on `game.fadeColor`
+  once the fade to dark has begun, so the lab dims to indigo today. The engine-side line makes the rule the
+  engine's own (it would then cover a death whose boy is not stepping) and lets `deathTint` go.
+- **Test.** `node tools/negative.mjs --chapter lab --only "idle sunset"`: during the dying fade `game.fadeColor` is
+  `#0b1026` (asserted today); with the change, `post.params.fadeColor` is too from the first frame of the fade.
 
 ## 3. `docs/ARCHITECTURE.md` (F / integrator): the Sunwork contracts
 
@@ -67,7 +70,44 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
   (a dev end keeps the save and reloads the lab at x 1.5; a new chapter drops the maps it does not use).
 - **Test.** With exactly this patch (applied locally, run, then reverted), `node tools/negative.mjs --suite foundation
   --only "lab end keeps"` and `--only "x-keyed look"` pass; without it they are the suite's only two failures
-  (15 / 17).
+  (15 / 17). **Until it is applied `npm test` is red on the foundation suite after L merges**, so the integrator
+  applies it in the same step as the merge. The patch (`git apply` from the repo root):
+
+```diff
+--- a/inside-medina/tools/neg/foundation.mjs
++++ b/inside-medina/tools/neg/foundation.mjs
+@@ -209,8 +209,9 @@ export const scenarios = [
+     run: ({ page }) => page.evaluate(async () => {
+       const M = __medina, G = M.game;
+       const save0 = M.save();
+-      M.teleport(26, 0);
+-      for (let i = 0; i < 10 * 120 && G.mode === 'play'; i++) M.sim(1 / 120, { x: 1 });
++      // the lab's end: the heliostat (room 12) set on the fortress lamp
++      M.checkpoint(12); const H = G.level.light.get('H'); H.setState({ ...H.getState(), alpha: 3.2 }); M.teleport(475, 12, 1);
++      for (let i = 0; i < 10 * 120 && G.mode === 'play'; i++) M.sim(1 / 120, { x: 0 });
+       const endMode = G.mode;
+       await new Promise((r) => { const t0 = performance.now(); const f = () => (G.mode === 'play' || performance.now() - t0 > 15000 ? r() : setTimeout(f, 50)); f(); });
+       const ev = M.events().filter((e) => ['chapterEnd', 'credits', 'chapterStart'].includes(e.name)).map((e) => `${e.name}:${e.data.id ?? ''}${e.data.dev ? ':dev' : ''}`);
+@@ -469,7 +470,8 @@ export const scenarios = [
+       await at(26); await G.restartChapter(); await frames(3);
+       out.restart = { bakes, env: W.env === a.env, name: D.name };
+       await G.loadChapter('lab', 0, { reason: 'restart' });
+-      out.lab = { envs: D.envs.size };
++      const lk = G.def.look;
++      out.lab = { envs: D.envs.size, presets: new Set(Array.isArray(lk) ? lk.map((k) => k.preset) : [lk]).size };
+       W.bakeEnvironment = bake;
+       return out;
+     }),
+@@ -478,7 +480,7 @@ export const scenarios = [
+       const w = r.walk;
+       if (w.a !== 'dawn' || w.b !== 'sunrise' || w.c !== 'dawn' || !w.swapped || !w.back || !w.brass || w.bakes || new Set(w.progs).size !== 1 || !(w.sun[1] > w.sun[0])) return `walking the blend: ${JSON.stringify(w)}`;
+       if (r.restart.bakes || !r.restart.env || r.restart.name !== 'dawn') return `restart: ${JSON.stringify(r.restart)}`;
+-      if (r.lab.envs !== 1) return `the maps outlived their chapter: ${JSON.stringify(r.lab)}`;
++      if (r.lab.envs !== r.lab.presets) return `the maps outlived their chapter: ${JSON.stringify(r.lab)}`;
+       return true;
+     },
+   },
+```
 
 ## 7. `docs/FULL_GAME.md` §6 and §3.2 (design owner / integrator): the rules Sunwork ships
 
@@ -87,3 +127,14 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 - **Reason.** The fixtures of `tools/light-unit.mjs` (II-B2, II-C2, IV-A1, IV-E) and the lab negatives depend on
   them; the design text still says otherwise.
 - **Test.** `node tools/light-unit.mjs` (29 / 29) and `node tools/negative.mjs --chapter lab` on the merged tree.
+
+## 8. `src/render/post.js` (P): a fade colour shows darker than its hex
+
+- **Change.** In the final pass, mix the fade in display space: `p = mix(p, toSRGB(uFadeColor), uFade);` (or upload
+  `P.fadeColor` converted with `.convertLinearToSRGB()` before `f.uFadeColor.value.copy(...)`).
+- **Reason.** `P.fadeColor` is a `THREE.Color`, so `set('#0b1026')` stores the linear value (0.003, 0.005, 0.019), but
+  the shader mixes it into `p` after `toSRGB`: the screen ends at (1, 1, 5) instead of (11, 16, 38). The sunset
+  death's indigo (FULL_GAME §3.2, the lab's `L.deathColor`) and Chapter II's `#0b1026` exit fade read as black; any
+  fade colour is darker than designed (Chapter I's warm-white fade is light enough to hide it).
+- **Test.** `?chapter=lab&cp=9`: walk past x 176, set the clock to its last 0.05 s, sim 2.05 s; a screen pixel is
+  about (11, 16, 38) (today (1, 1, 5)).

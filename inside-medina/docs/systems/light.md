@@ -71,7 +71,7 @@ above it, which would otherwise shut the ray that holds a sun-bolt.
 | `BurnRope` | `x0, y0, x1, y1, need 1.6, burnT 1.5, cool 0.5, onBurnt` | `{heat, burnt}` |
 | `Occluder` | `x0, y0, x1, y1, mesh`; `to({y0, y1}, sec)` | `{x0, y0, x1, y1}` |
 | `Terminator` | `T, keys [[x, T], …], range [x0, x1] (where its shadow line is drawn)` | `{T}` |
-| `SunClock` | `T0, rate, y (the ray it kills), terminator, look {from, to, sec}, onExpire (default: die 'sunset'), onReset` | `{t, running, expired}` |
+| `SunClock` | `T0, rate, y (the ray it kills), terminator, look {from, to, sec}, onExpire (default: die 'sunset'), onReset`; `finish(sec 6)`: the race is won, the sun sets (T climbs past the ray, nobody dies) | `{t, running, expired, setT}` |
 | `Hatch` | `x0, x1, y0, y1, source, hinge` | `{open}` |
 
 ### Player states and input (§6.3)
@@ -88,12 +88,17 @@ above it, which would otherwise shut the ray that holds a sun-bolt.
   buffered by an up-press just before a grab is dropped. Only the jump button jumps from those states (it drops
   the grip; from a crank or the capstan it lets go and jumps).
 - **Latched grips**: `settings.grabMode === 'toggle'`, or touch (`input.lastDevice === 'touch'`) on a mirror, crank
-  or capstan: a tap takes it, the next tap lets it go.
+  or capstan: a tap takes it, the next tap lets it go, however long that tap is held (the releasing press never
+  takes the prop again until grab is released; lab negative "a second tap lets a latched grip go").
 - **Finger / mouse aim**: while gripping or cranking, `pin.aimTarget` sets the wanted reflection θr* = the direction
-  from the pivot to the point; α* = (θr* + θi)/2, θi the beam lighting the tray (or `thetaHint`), rounded to a notch.
+  from the pivot to the point; α* = (θr* + θi)/2, θi the beam lighting the tray (or `thetaHint`), rounded to a notch,
+  on whichever turn of the tray's line (α, α ± 180) lies inside its travel nearest the current notch (`Mirror.fit`:
+  from +75 a wanted −75 is −75, never a clamped +90).
   With `settings.aimSnap` (default on), if that notch lights no target but a neighbour does (a probe trace), the
   neighbour wins.
 - A grip survives a step down of up to 0.26 m (a kerb), so pushing a stand off a rail kerb keeps the hands on it.
+- `L.deathColor(kind)` (a chapter hook): the colour the screen dims to on that death; the dead boy holds it on
+  `game.fadeColor` once the fade begins (the lab: indigo `#0b1026` for `sunset`; requests/L.md #2 moves it engine-side).
 - `player.reachable()` → `'mirror' | 'crank' | 'capstan' | 'crate' | 'lever' | null`: what grab holds or would take
   now (the touch grab button's icon, requests/L.md #5).
 - `player.animContext()` adds `tilt {age, dir, rim}`, `crankA`, `capstanV`; animator states `crank`, `capstan`,
@@ -120,8 +125,10 @@ halved again by `reduceFlashing`.
 
 ### Guards
 
-`stun(sec)`: shield-eyes, no chase, then 2 s of immunity; `stun(Infinity)`: the asleep collapse (a turret dart),
-his body (a light and line-of-sight blocker) dropping to 0.45 m while he lies there. `onLight(I, dt, sys, sky)`: daylight
+`stun(sec)`: shield-eyes, no chase, then 2 s of immunity; `stun(Infinity)`: the asleep collapse (a turret dart): the
+knees buckle, then he falls back flat on the stones (the pelvis a torso's half depth up, one knee raised, the robe
+flattened), his lantern set down upright beside him (a lantern never sinks through the floor), his body (a light and
+line-of-sight blocker) dropping to 0.45 m while he lies there. `onLight(I, dt, sys, sky)`: daylight
 of I ≥ 0.8 stuns for 1.2 s (a sun shaft, a reflected sunbeam); `sky` is the share of sun and moon rays, so a
 searchlight's or a tripwire's own beam never stuns a lamp-keeper. Steps of ≤ 0.26 m are climbed, not vaulted.
 
@@ -137,8 +144,10 @@ searchlight's or a tripwire's own beam never stuns a lamp-keeper. Steps of ≤ 0
   `settings.reduceFlashing` dims them, the rod glints and the dazzle.
 - `settings.highContrast`: beams and tripwires gain an outline along both ribbon edges (and a 3.4 px floor), a
   searchlight cone its silhouette line, and every lock a bright rim ring.
-- The brightest end spot is a priority dynamic source of the light pool (priority 3), so a real point light warms
-  the wall around it; the census never changes.
+- The brightest end spot in view is a priority dynamic source of the light pool (priority 3), so a real point light
+  warms the wall around it; the census never changes. Only spots within the view (half-width + 1.5 m of the
+  camera's look) compete, nearest the look among equals; a searchlight's own cone leg (it has a rig spot) and
+  tripwire threads never do; a jump to another spot fades the light in there.
 - Beam colours: the sun's beams take the live key light's hue (lifted toward warm white), the moon's are silver-blue,
   a searchlight's follow its lamp (red in alarm, white when dazzled), tripwires are thin amber lines.
 - Locks read by shape: twelve brass petals hinged on the rim. Closed they meet over the lens as a domed bud (a disc
@@ -148,12 +157,18 @@ searchlight's or a tripwire's own beam never stuns a lamp-keeper. Steps of ≤ 0
   (whose petals close while lit); a latch sends a glint along its brass rod. The petals are re-composed only when
   they move.
 - The terminator is an invisible slab toward the sun whose shadow edge sits at T on the play plane. It is drawn into
-  the sun's shadow map only (an empty draw range in every camera pass and other lights' shadow maps).
+  the sun's shadow map only (an empty draw range in every camera pass and other lights' shadow maps). With a
+  `range` it is cut to that stretch of the play plane in light space, so its ends are fixed in the world (the lab's
+  clock terminator shades x 146 to the night square's edge and never the square, under the moon or the dusk sun).
 - The boy's hands hold the prop: the player gives the animator world points (`handHolds`: two points on the near
   rim of a gripped tray, the crank's knob and the rim opposite, the capstan bar crossing in front of him) and a
   two-bone IK over the pose puts the wrists there, eased in and out.
 - `starCookie()` is the lamp-keepers' eight-point star lattice for the rig spots (`lightRig.setCookie`); the lab
   uses it in its night rooms.
+- Draw calls (chapters fill rooms with these props): the parts that move together share one mesh, a second metal is a
+  vertex tint on the first (iron on a cart's wood, the engraving on the dish), the tray's axle rides the stand (a
+  cylinder about z needs no turning) and small parts cast no shadow. A wheeled or anchored mirror is 3 draws (2
+  shadow casters), a crank tray 2, a crank 2, the capstan 2, a lock 3 (2), a sensor 4 (1), the rope 1.
 
 ## Sounds and events
 
@@ -181,7 +196,12 @@ dawn Chapter IV's +330 / +310): **1 sunlock** (II-A1 laundry gust), **2 shadow**
 (II-D2), **9 clock** (II-E2 with the terminator and the sunset → dusk blend), **10 lamp** (III-B1 bounce, III-B2 dazzle),
 **11 wire** (III-A basket and tripwires, C2 walk-under, D the darted guard, E the moon well), **12 dawn** (IV-A1 under
 the descending terminator, IV-C sun shafts on a captain, IV-E the heliostat and the fortress lamp). The look follows
-the day (sunset → dusk → night → dawn → sunrise); `?look=<preset>` holds one preset for every room. Checkpoints
+the day (sunset → dusk → night → dawn → sunrise); `?look=<preset>` holds one preset for every room. Each puzzle room
+holds its frame while the boy is in it (`frame(x0, x1, cx)`: keys at both ends and the middle with focusBias cx − x
+and no look-ahead), so the source, the tool and the target share one frame, and `distPortrait` fits the room's span
+inside a phone's 52° field; the compact rooms (tilt, the bolt's work zone) follow him closer on a phone. A won sunset
+clock sets the sun over 6 s (the last ray is gone in the night rooms). In the lamp square the gate stands at the
+front of a wall that parts the square into two courts, LL1 on an iron arm from it. Checkpoints
 start each room with the earlier ones solved. The lamp room is an open square (no facades in front of the
 lamp-keepers' wall), so the cones fall whole from the lamps to the street. Tripwires hum (`tripHum`) within 3 m.
 
@@ -193,15 +213,17 @@ node tools/playtest.mjs --chapter lab --port N  # the lab bot, all twelve rooms
 node tools/negative.mjs --chapter lab --port N  # the lab negatives
 ```
 
-Measured on the dev server (headless Chromium, SwiftShader):
+Measured on the dev server (headless Chromium, SwiftShader), on the branch head after the fix round:
 
 | Check | Result |
 |---|---|
-| `light-unit.mjs` | 29 / 29: maths, primitives, 100 random traces against brute force (worst error 2.8e-14 m), every traced hit of §3–5 |
-| lab bot | all twelve rooms, 0 deaths, 287.4 s of game time, 0 jumps while gripping, trace p95 0.30 ms (loaded machine); the dazzle crossing (release, over the stand, sprint to x 258.8) takes 7.4 s of the 7.9 s the lamp is blind |
-| lab negatives | 17 / 17 (wrong notch ×12 in six rooms, one beam never burns, bolt dash, tripwires, darted guard (never stunned by T4's beam, falls at x 305.3, lies 0.45 m high, T4 clears, S5 lets go), dazzle crossing, the dazzle's end (7 s / 10.5 s with assist, nothing seen while blind, aim steps ≤ 0.11 m, the boy seen again 1.3 s after it settles, within the 12.2 s sweep cycle), sunset clock, lost mirror, death restores, finger aim, lit = seen, sun shafts, p95, census) |
+| `light-unit.mjs` | 30 / 30: maths, primitives, 100 random traces against brute force (worst error 2.8e-14 m), finger aim inside a tray's travel (28 aims from the ends and the middle), every traced hit of §3–5 |
+| lab bot | all twelve rooms, 0 deaths, 287.42 s of game time, 0 jumps while gripping, trace p95 0.200 ms, end hash `0f3383bb` |
+| lab negatives | 20 / 20 in 628 s: up never jumps (100 trials), a second tap lets a latched grip go (touch M2 and K2, toggle CR3; taps of 2, 12 and 60 steps), the jump button, wrong notch (×12 in six rooms, never latched, level ≤ 0.02), one beam never burns, bolt dash, tripwires, the darted guard, dazzle crossing, the dazzle's end, the idle sunset clock (dims to `#0b1026`), a won clock sets the sun, lost mirror, death restores, finger aim, lit = seen, sun shafts, p95, the beam's point light in view, census |
 | trace cost | p95 0.20 ms, median 0.10 ms over 600 passes with 22 sources (budget 0.35 ms) |
-| Chapter I | souk bot hash unchanged (`7bd4df65`), souk negatives 13 / 13 under the one searchlight rule |
-| census | `tools/cycle.mjs`: 13 loads, `{dir 1, hemi 1, point 7, spot 2}` in every chapter, memory flat |
-| LDR cone (P.md #9) | `?ldr=1&tier=low` courtyard cone matches the float path (mean luma 83.0 vs 85.8); `perf.mjs --check ldr` passes |
-| foundation | 15 / 17 (boot budget passes, median 22546 ms against 23203): the two failures assume the one-preset lab stub (requests/L.md #6; with that patch both pass: the dev end at the heliostat reloads x 1.5 and keeps the save, and the lab holds 5 maps for its 5 presets) |
+| Chapter I | souk bot hash unchanged (`7bd4df65`, 85.37 s, 0 deaths), souk negatives 13 / 13 under the one searchlight rule |
+| census | `{dir 1, hemi 1, point 7, spot 2}` in the lab, the souk and the lab again (lab negative) |
+| props | lab-wide 115 meshes / 67 shadow casters for 62 light entities (152 / 93 before the merge); a wheeled mirror 3 draws (6 before) |
+| draw calls (medium, frames with a shadow update) | 0@4 175, 1@19 203, 3@53 200 (207 before), 4@70 204, 5@98 185, 6@114 187, 7@131 184, 9@190 245, 10@216 189, 11@330 147, 12@350 175, 12@475 137; frames without one about 100. The rest above §8.5's 180 is the lab's scenery (facades and far city), which the chapters budget themselves |
+| LDR cone (P.md #9) | `?ldr=1&tier=low` courtyard cone matches the float path (mean luma 83.0 vs 85.8); `perf.mjs --check ldr` passes (measured on the previous round; the cone's code is unchanged) |
+| foundation | 15 / 17 (boot budget passes, median 22132 ms against 23893; context loss passes): the two failures assume the one-preset lab stub (requests/L.md #6, patch included; with it applied both pass: the dev end at the heliostat reloads x 1.5 and keeps the save, and the lab holds 5 maps for its 5 presets) |
