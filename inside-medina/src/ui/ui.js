@@ -67,6 +67,12 @@ export class UI {
     root.addEventListener('focusin', (e) => { const t = this.focus.top; const it = e.target.closest?.('.item'); if (t && it && t.el.contains(it) && it !== this.focus.current) this.focus.set(it, { scroll: false }); });
     for (const ev of ['contextmenu', 'dblclick', 'gesturestart', 'selectstart']) document.addEventListener(ev, (e) => { if (!editable(e.target)) e.preventDefault(); }, { passive: false });
     this.el('lost').addEventListener('click', () => this.handlers.reload?.());
+    // the browser's back (Android's back gesture, a desktop back button) closes the open screen, and pauses play on
+    // touch: one history entry stands guard while there is somewhere to go back from. A top-level page only: the
+    // artifact's host keeps its own history
+    this.histOK = !artifact && (() => { try { return window.top === window && typeof history.pushState === 'function'; } catch { return false; } })();
+    if (this.histOK) { try { if (history.state?.medina) history.replaceState(null, ''); } catch { this.histOK = false; } }
+    window.addEventListener('popstate', () => this.onPopState());
   }
 
   // ?autostart=1 skips every menu (read live: tests turn it off to see the title)
@@ -76,7 +82,7 @@ export class UI {
   on(a, fn) { this.handlers[a] = fn; }
   progress(p, msg) {
     const l = this.el('loading');
-    if (l) { l.querySelector('.lbar i').style.width = `${Math.round(p * 100)}%`; if (msg) l.querySelector('.lmsg').textContent = msg; }
+    if (l) { const i = l.querySelector('.lbar i'); i.style.width = `${Math.round(p * 100)}%`; i.style.transform = `scaleX(${Math.max(0, Math.min(1, p)).toFixed(3)})`; if (msg) l.querySelector('.lmsg').textContent = msg; }
     this.mainEl?.style.setProperty('--load', Math.max(0, Math.min(1, p)).toFixed(3));
   }
   hideLoading() {
@@ -140,7 +146,9 @@ export class UI {
     E.on('mode', ({ mode }) => {
       if (mode === 'play' && this.menuTheme) { this.menuTheme = false; this.audio?.setChapter?.(game.def?.audio, game.def); }
       if (mode === 'play') this.maybeRotateHint();
+      this.syncHistory();
     });
+    E.on('pause', () => this.syncHistory());
     E.on('save', () => this.fillMain());
     E.on('credits', () => { this.wasCompleted = !!(this.local.completed || this.bootCompleted); this.local.completed = true; this.writeLocal(); });
     E.on('contextLost', () => this.showLost());
@@ -168,11 +176,14 @@ export class UI {
     this.root.classList.toggle('menu-open', open);
     this.touch?.setVisible(!open && !this.cardUp);
     this.syncMenuBackground();
+    this.syncHistory();
   }
   syncMenuBackground() {
     const g = this.game, rs = this.world?.rs;
     const on = !!(g && this.ready && g.held && this.focus.top && !g.suspended);
-    if (rs && on !== this._menuBg) { this._menuBg = on; rs.setMenuBackground?.(on); }
+    if (rs && on !== this._menuBg) { this._menuBg = on; this._bgTier = rs.tier; rs.setMenuBackground?.(on); }
+    // a new tier (the quality setting, or auto quality) resets the renderer's resolution range: the menu asks again
+    else if (rs && on && rs.tier !== this._bgTier) { this._bgTier = rs.tier; rs.setMenuBackground?.(false); rs.setMenuBackground?.(true); }
     this._dim = on;
   }
   // a deeper post vignette behind the menus over the title (never a backdrop filter): applied to the post
@@ -189,6 +200,37 @@ export class UI {
     this.root.dataset.device = d;
     this.touch?.deviceChanged(d);
     this.fillLegends();
+    this.syncHistory();
+  }
+
+  // ------------------------------------------------------------------ the browser's back
+  wantGuard() {
+    const g = this.game, t = this.focus.top;
+    if (t) return t !== this.main;
+    return !!(this.touch && g && this.input?.lastDevice === 'touch' && !g.held && !g.paused && !g.suspended && ['play', 'intro', 'dying', 'finale', 'cutscene'].includes(g.mode));
+  }
+  syncHistory() {
+    if (!this.histOK || this._unguard) return;
+    const want = this.wantGuard();
+    try {
+      if (want && !this.guarded) { history.pushState({ medina: 1 }, ''); this.guarded = true; }
+      else if (!want && this.guarded) {
+        // step off the guard; its popstate is ours, not a back press
+        this.guarded = false; this._unguard = true;
+        clearTimeout(this._unguardT); this._unguardT = setTimeout(() => { this._unguard = false; this.syncHistory(); }, 1500);
+        history.back();
+      }
+    } catch { this.histOK = false; }
+  }
+  onPopState() {
+    if (!this.histOK) return;
+    if (this._unguard) { this._unguard = false; clearTimeout(this._unguardT); this.syncHistory(); return; }
+    if (!this.guarded) return; // an entry left by an earlier load of the page
+    this.guarded = false;
+    const t = this.focus.top;
+    if (t && t !== this.main) { if (t.back) t.back(); else this.focus.close(t); }
+    else if (!t) this.requestPause();
+    this.syncHistory();
   }
 
   applyLocal(S) {
@@ -260,6 +302,8 @@ export class UI {
   afterFrame(canvas) {
     const g = this.game;
     if (!this.thumbWanted || performance.now() < this.thumbWanted || !g) return;
+    // under the title (half resolution, the deeper vignette) or a menu: wait until play has run a moment
+    if (g.held || this._dim || this.focus.top) { this.thumbWanted = performance.now() + 1600; return; }
     if (g.fade > 0.02 || g.paused || g.suspended || !['intro', 'play'].includes(g.mode)) return;
     this.thumbWanted = 0;
     const url = captureThumb(canvas);
@@ -327,6 +371,8 @@ export class UI {
       onOpen: () => { if (this.game?.held && this.audio && !this.menuTheme) { this.menuTheme = true; this.audio.setChapter?.({ theme: 'menu', verb: 'menu' }); } },
     });
     el.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') this.mouse = { x: e.clientX / innerWidth * 2 - 1, y: -(e.clientY / innerHeight * 2 - 1) }; });
+    // a resting title (Esc, or the page was hidden) wakes on any touch or click, not only on an entry
+    el.addEventListener('pointerdown', () => { const g = this.game; if (g?.paused && g.held && this.focus.top === this.main) g.setPaused(false); });
     window.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' && this.focus.has(this.main)) this.mouse = { x: e.clientX / innerWidth * 2 - 1, y: -(e.clientY / innerHeight * 2 - 1) }; }, { passive: true });
     this.fillMain();
   }
@@ -391,7 +437,7 @@ export class UI {
     this.sound('confirm');
     if (k === 'continue') this.continueJourney();
     else if (k === 'new') {
-      if (this.save?.exists && (this.save.data.cp > 0 || this.save.data.chapter !== 'souk' || this.save.data.stats?.playSec > 5)) this.confirm({ glyph: 'rosette', text: 'begin a new journey?', yes: () => this.newJourney() });
+      if (this.hasJourney()) this.confirm({ glyph: 'rosette', text: 'begin a new journey?', yes: () => this.newJourney() });
       else this.newJourney();
     } else if (k === 'chapters') this.focus.open(this.chapters.screen);
     else if (k === 'settings') this.settings.open();
@@ -429,7 +475,7 @@ export class UI {
     const acts = [
       ['resume', 'resume', () => this.resume()],
       ['checkpoint', 'restart checkpoint', () => { this.focus.closeAll(); this.game.restartCheckpoint(); }],
-      ['restart', 'restart chapter', () => { this.focus.closeAll(); this.game.restartChapter()?.catch?.(() => {}); }],
+      ['restart', 'restart chapter', () => this.confirm({ glyph: meta(this.game?.chapterId)?.glyph || 'rosette', text: 'begin the chapter again?', yes: () => { this.focus.closeAll(); this.game.restartChapter()?.catch?.(() => {}); } })],
       ['chapters', 'chapters', () => this.focus.open(this.chapters.screen)],
       ['settings', 'settings', () => this.settings.open()],
       ['title', 'title', () => { this.focus.closeAll(); this.game.toTitle().catch(() => {}); }],
@@ -441,7 +487,8 @@ export class UI {
       item(b, { act: () => { this.sound('confirm'); fn(); }, label });
       nav.appendChild(b);
     });
-    this.pause = new Screen(this, { el, back: () => this.resume(), onOpen: () => { this._skipNav = true; } });
+    // every pause opens on resume (a reflex confirm never restarts or leaves)
+    this.pause = new Screen(this, { el, initial: () => nav.querySelector('[data-k="resume"]'), back: () => this.resume(), onOpen: () => { this._skipNav = true; } });
   }
   fillPause() {
     const g = this.game, el = this.pause.el, m = meta(g?.chapterId);
@@ -498,6 +545,9 @@ export class UI {
     const c = this.el('card');
     c.style.setProperty('--tone', m.tone || '#20140c');
     c.style.setProperty('--exit', m.exit || '#000');
+    // ink follows the glow behind the text (the tone lifted toward ivory at the centre): cedar on a pale dawn or
+    // noon, ivory on sundown and night
+    c.classList.toggle('light', cardGlowLum(m.tone || '#20140c') > 0.3);
     c.querySelector('.cn').textContent = m.numeral || '';
     c.querySelector('.cl').textContent = m.label || '';
     c.querySelector('.cglyph').innerHTML = (TIME_GLYPHS[m.glyph] || TIME_GLYPHS.rosette).map((l, i) => `<svg class="l ${l.k}" style="--i:${i}" viewBox="0 0 100 100" aria-hidden="true">${l.svg}</svg>`).join('');
@@ -579,6 +629,13 @@ export class UI {
     r.classList.remove('hidden');
     setTimeout(() => r.classList.add('hidden'), 3000);
   }
+}
+
+// relative luminance of the card's centre: 74 % tone, 26 % ivory (#fff3dc), as style.css mixes it
+function cardGlowLum(hex) {
+  const v = parseInt(String(hex).replace('#', '').padEnd(6, '0').slice(0, 6), 16), iv = [255, 243, 220];
+  const ch = [(v >> 16) & 255, (v >> 8) & 255, v & 255].map((c, i) => (c * 0.74 + iv[i] * 0.26) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
 }
 
 function padBtn(kind, pos) {

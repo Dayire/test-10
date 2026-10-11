@@ -27,7 +27,7 @@ export class ChaptersScreen {
     this.ui = ui;
     const el = this.el = document.createElement('section');
     el.id = 'chapters'; el.className = 'panel-screen'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'chapters');
-    el.innerHTML = `<svg class="defs" width="0" height="0" aria-hidden="true"><clipPath id="arch" clipPathUnits="objectBoundingBox"><path d="${ARCH}"/></clipPath></svg><header><div class="eyebrow"><svg viewBox="0 0 100 100">${STAR}</svg>chapters</div></header><div class="cards"></div><footer class="legend"></footer>`;
+    el.innerHTML = `<svg class="defs" width="0" height="0" aria-hidden="true"><clipPath id="arch" clipPathUnits="objectBoundingBox"><path d="${ARCH}"/></clipPath></svg><header><div class="hrow"><button class="back" type="button" aria-label="back">${icon('back')}</button><div class="eyebrow"><svg viewBox="0 0 100 100">${STAR}</svg>chapters</div></div></header><div class="cards"></div><footer class="legend"></footer>`;
     ui.menus.appendChild(el);
     this.picking = null; // the card whose checkpoints are being chosen
     this.screen = new Screen(ui, {
@@ -45,6 +45,7 @@ export class ChaptersScreen {
       },
       back: () => { if (this.picking) { this.unpick(); ui.sound('back'); } else ui.focus.close(this.screen); },
     });
+    el.querySelector('.back').addEventListener('click', (e) => { e.stopPropagation(); if (ui.focus.top === this.screen) this.screen.back(); });
   }
   refresh() { if (this.ui.focus.has(this.screen)) this.render(); }
 

@@ -42,7 +42,8 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #loading .lmark svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linejoin: round; }
 #loading .lt { font-size: clamp(30px, 5vw, 58px); letter-spacing: .6em; font-weight: 300; padding-left: .6em; color: #e9d9bf; }
 #loading .lbar { width: min(260px, 56vw); height: 1px; background: rgba(233, 217, 191, .14); overflow: hidden; }
-#loading .lbar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--brass-lo), var(--brass-hi)); transition: width .35s var(--ease); }
+/* the hairline grows by transform (the loader also writes its width, as the value the boot test reads) */
+#loading .lbar i { display: block; height: 100%; width: 100% !important; transform: scaleX(0); transform-origin: left; background: linear-gradient(90deg, var(--brass-lo), var(--brass-hi)); transition: transform .35s var(--ease); }
 #loading .lmsg { font-size: 14px; letter-spacing: .22em; color: rgba(233, 217, 191, .46); font-style: italic; min-height: 1.2em; }
 #loading > * { transition: opacity .7s var(--ease), transform .9s var(--ease); }
 /* the menu takes over the splash while the live scene is still being built */
@@ -120,11 +121,24 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 /* ------------------------------------------------------------ panels (settings, chapters) */
 .panel-screen .eyebrow { display: flex; align-items: center; gap: 10px; font-size: calc(12px * var(--ms)); letter-spacing: .42em; text-transform: uppercase; color: var(--brass); font-weight: 500; }
 .panel-screen .eyebrow svg { width: 10px; height: 10px; fill: var(--brass); }
-#settings .sheet { --pr: 48px; position: absolute; left: 0; top: 0; bottom: 0; width: min(680px, 56vw); box-sizing: border-box; padding: calc(9vh + var(--st)) var(--pr) calc(4vh + var(--sb)) calc(6.5vw + var(--sl)); display: flex; flex-direction: column; background: linear-gradient(90deg, rgba(14, 9, 6, .95) 0%, rgba(14, 9, 6, .9) 74%, rgba(14, 9, 6, .55) 92%, rgba(14, 9, 6, 0) 100%); opacity: 0; transform: translate3d(-24px, 0, 0); transition: opacity .5s var(--ease), transform .7s var(--ease); }
+/* the way back for fingers and a mouse: a brass-ringed chevron beside the eyebrow (keys and pads read the legend) */
+.panel-screen .hrow { display: flex; align-items: center; gap: 6px; }
+.panel-screen .back { position: relative; flex: none; display: grid; place-items: center; width: 44px; height: 44px; margin-left: -7px; color: var(--dim); transition: color .25s ease; }
+.panel-screen .back::before { content: ''; position: absolute; inset: 7px; border-radius: 50%; border: 1px solid rgba(233, 196, 143, .34); background: rgba(11, 8, 6, .32); transition: border-color .25s ease, background .25s ease, transform .45s var(--ease); }
+.panel-screen .back svg { position: relative; width: 32%; height: 32%; fill: none; stroke: currentColor; stroke-width: 9; stroke-linecap: round; stroke-linejoin: round; transition: transform .45s var(--ease); }
+.panel-screen .back:hover, .panel-screen .back:active { color: var(--brass-hi); }
+.panel-screen .back:hover::before, .panel-screen .back:active::before { border-color: var(--brass); background: rgba(220, 180, 111, .14); }
+.panel-screen .back:hover svg { transform: translate3d(-2px, 0, 0); }
+.panel-screen .back:active::before { transform: scale(.92); }
+#ui[data-device="gamepad"] .panel-screen .back { visibility: hidden; }
+#settings .sheet { --pr: 48px; position: absolute; left: 0; top: 0; bottom: 0; width: min(680px, 56vw); box-sizing: border-box; padding: calc(9vh + var(--st) - 15px) var(--pr) calc(4vh + var(--sb)) calc(6.5vw + var(--sl)); display: flex; flex-direction: column; background: linear-gradient(90deg, rgba(14, 9, 6, .95) 0%, rgba(14, 9, 6, .9) 74%, rgba(14, 9, 6, .55) 92%, rgba(14, 9, 6, 0) 100%); opacity: 0; transform: translate3d(-24px, 0, 0); transition: opacity .5s var(--ease), transform .7s var(--ease); }
 #settings .sheet::before { content: ''; position: absolute; inset: 0 8% 0 0; background-image: var(--zellige-faint); opacity: .5; pointer-events: none; -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 34%); mask-image: linear-gradient(180deg, #000 0%, transparent 34%); }
 #settings.in .sheet { opacity: 1; transform: none; }
+/* the live scene beside the sheet steps back, so the bright canopies never compete with the options */
+#settings::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(11, 8, 6, .5) 0%, rgba(11, 8, 6, .36) 56%, rgba(11, 8, 6, .46) 100%); opacity: 0; transition: opacity .6s var(--ease-io); }
+#settings.in::before { opacity: 1; }
 #settings header { position: relative; }
-#settings .tabs { display: flex; flex-wrap: wrap; gap: 4px 26px; margin-top: 22px; }
+#settings .tabs { display: flex; flex-wrap: wrap; gap: 4px 26px; margin-top: 8px; }
 #settings .tab { min-height: 44px; min-width: 44px; padding: 0 2px; font-size: calc(19px * var(--ms)); letter-spacing: .1em; color: var(--faint); transition: color .25s ease; }
 #settings .tab.active { color: var(--ivory-hi); }
 #settings .tab.focused { color: var(--brass-hi); }
@@ -184,7 +198,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #settings .calib svg { width: 46px; height: 46px; fill: currentColor; }
 #settings .calib p { margin: 12px 0 0; text-align: center; font-style: italic; font-size: 14px; letter-spacing: .1em; color: var(--faint); }
 #settings .code { position: absolute; left: calc(6.5vw + var(--sl)); right: 48px; bottom: calc(10vh + var(--sb)); padding: 18px; background: rgba(5, 4, 3, .96); border: 1px solid var(--hair); }
-#settings .code input { width: 100%; box-sizing: border-box; height: 46px; padding: 0 12px; font: 500 14px/1 ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: .02em; color: var(--ivory-hi); background: rgba(243, 230, 210, .06); border: 1px solid rgba(243, 230, 210, .24); border-radius: 4px; outline: none; -webkit-user-select: text; user-select: text; touch-action: manipulation; }
+#settings .code input { width: 100%; box-sizing: border-box; height: 46px; padding: 0 12px; font: 500 16px/1 ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: 0; color: var(--ivory-hi); background: rgba(243, 230, 210, .06); border: 1px solid rgba(243, 230, 210, .24); border-radius: 4px; outline: none; -webkit-user-select: text; user-select: text; touch-action: manipulation; }
 #settings .code input:focus { border-color: var(--brass); }
 #settings .code input::selection { background: rgba(220, 180, 111, .45); color: #fff; }
 #settings .rows { transition: opacity .35s ease; }
@@ -197,7 +211,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #chapters { background: radial-gradient(ellipse 90% 80% at 50% 50%, rgba(11, 8, 6, .62), rgba(11, 8, 6, .9)); opacity: 0; transition: opacity .5s var(--ease-io); }
 #chapters.in { opacity: 1; }
 #chapters .defs { position: absolute; }
-#chapters header { position: absolute; left: calc(7.5vw + var(--sl)); top: calc(9vh + var(--st)); }
+#chapters header { position: absolute; left: calc(7.5vw + var(--sl)); top: calc(9vh + var(--st) - 15px); }
 #chapters .cards { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-46%); display: flex; justify-content: center; gap: 2.6vw; padding: 0 calc(4vw + var(--sr)) 0 calc(4vw + var(--sl)); }
 .ccard { --w: min(18.5vw, 236px, 36vh); position: relative; display: flex; flex-direction: column; align-items: center; width: var(--w); color: var(--ivory); opacity: 0; transform: translate3d(0, 18px, 0); transition: opacity .6s var(--ease), transform .8s var(--ease); }
 #chapters.in .ccard { opacity: 1; transform: none; transition-delay: calc(var(--i) * 70ms + 80ms); }
@@ -278,6 +292,15 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #card .crule svg { width: 10px; height: 10px; fill: var(--ivory-hi); }
 #card .cl { margin-top: 14px; font-size: clamp(15px, 1.8vw, 21px); letter-spacing: .3em; padding-left: .3em; font-style: italic; color: rgba(251, 239, 220, .84); opacity: 0; }
 /* the waiting rosette sits in the card's own column, under the label, on every screen shape */
+/* a pale tone (noon, dawn) takes cedar ink; ivory ink keeps a soft warm shade under it */
+#card .cn, #card .cl { text-shadow: 0 1px 18px rgba(48, 20, 6, .32); }
+#card.light { color: #2a170c; }
+#card.light .cn, #card.light .cl { text-shadow: 0 1px 14px rgba(255, 243, 220, .3); }
+#card.light .cglyph .l { stroke: #2e1a0e; }
+#card.light .crule i { background: rgba(42, 23, 12, .5); }
+#card.light .crule svg { fill: #2e1a0e; }
+#card.light .cl { color: rgba(42, 23, 12, .88); }
+#card.light .cwait svg { stroke: rgba(42, 23, 12, .7); }
 #card .cwait { width: 18px; height: 18px; margin-top: clamp(20px, 6vh, 44px); opacity: 0; transition: opacity .6s ease; }
 #card .cwait svg { width: 100%; height: 100%; fill: none; stroke: rgba(251, 239, 220, .7); stroke-width: 5; animation: spin 3s linear infinite; }
 #card.waiting .cwait { opacity: 1; }
@@ -301,7 +324,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 /* ------------------------------------------------------------ credits */
 #end { z-index: 3; pointer-events: auto; transition: opacity .6s ease; }
 #end.out { opacity: 0; }
-#end .scrim { position: absolute; inset: 0; background: linear-gradient(270deg, rgba(11, 8, 6, .8) 0%, rgba(11, 8, 6, .66) 30%, rgba(11, 8, 6, .3) 50%, rgba(11, 8, 6, 0) 68%); opacity: 0; transition: opacity 1.5s ease; }
+#end .scrim { position: absolute; inset: 0; background: linear-gradient(270deg, rgba(11, 8, 6, .86) 0%, rgba(11, 8, 6, .8) 34%, rgba(11, 8, 6, .62) 48%, rgba(11, 8, 6, .28) 60%, rgba(11, 8, 6, .1) 76%, rgba(11, 8, 6, .06) 100%); opacity: 0; transition: opacity 1.5s ease; }
 #end.in .scrim { opacity: 1; }
 #end.light .scrim { display: none; }
 #end .roll { position: absolute; top: 0; bottom: 0; right: calc(8vw + var(--sr)); width: min(460px, 42vw); overflow: hidden; -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%); mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%); }
@@ -428,7 +451,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   #pause .where { left: 0; right: 0; top: calc(12vh + var(--st)); justify-content: center; }
   #pause .entries { top: auto; }
   #pause .ctl { left: calc(20px + var(--sl)); right: calc(20px + var(--sr)); bottom: auto; top: calc(12vh + var(--st) + 104px); max-width: 320px; margin: 0 auto; justify-content: center; gap: 12px 20px; }
-  #settings .sheet { --pr: calc(20px + var(--sr)); width: 100%; padding: calc(4vh + var(--st) + 44px) var(--pr) calc(2vh + var(--sb)) calc(20px + var(--sl)); background: rgba(14, 9, 6, .94); }
+  #settings .sheet { --pr: calc(20px + var(--sr)); width: 100%; padding: calc(4vh + var(--st) + 14px) var(--pr) calc(2vh + var(--sb)) calc(20px + var(--sl)); background: rgba(14, 9, 6, .94); }
   #settings .tabs { gap: 2px 18px; }
   #settings .tab { font-size: calc(17px * var(--ms)); }
   .slider .track { width: calc(110px * var(--ms)); }
@@ -437,6 +460,8 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   .row { padding-left: 18px; gap: 10px; }
   .row .rl { font-size: calc(17px * var(--ms)); }
   #settings .calib, #settings .code { left: calc(20px + var(--sl)); right: calc(20px + var(--sr)); top: auto; width: auto; bottom: calc(10vh + var(--sb)); }
+  #settings .calib { padding: 16px 20px 14px; pointer-events: none; z-index: 2; } /* placed beside the brightness row (settings.js placeCalib); taps pass through */
+  #settings .calib p { margin-top: 8px; }
   #chapters .cards { flex-wrap: wrap; gap: 18px 7vw; top: calc(12vh + var(--st)); transform: none; padding: 0 20px; }
   .ccard { --w: min(38vw, 190px, 22vh); }
   .ccard .arch { aspect-ratio: 1 / 1.2; }
@@ -445,6 +470,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   .ccard .pips i { flex-basis: 16px; height: 16px; }
   .ccard .pips i::before { width: 5px; height: 5px; }
   #chapters header { left: 0; right: 0; display: flex; justify-content: center; top: calc(6vh + var(--st)); }
+  #chapters .back { position: absolute; left: calc(12px + var(--sl)); top: 50%; margin: -22px 0 0; }
   #end .roll { right: 0; left: 0; width: auto; padding: 0 28px; }
   #end .ct { font-size: calc(min(24px, 5.2vw) * var(--ms)); }
   #end .scrim { background: linear-gradient(180deg, rgba(11, 8, 6, .4) 0%, rgba(11, 8, 6, .62) 50%, rgba(11, 8, 6, .4) 100%); }
@@ -469,15 +495,18 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   /* short screens: the tabs are one strip (it scrolls sideways when the menu text is large), the eyebrow gives
      its line to the options */
   #settings .sheet { padding: calc(3vh + var(--st)) var(--pr) calc(3vh + var(--sb)) calc(3.5vw + var(--sl)); width: min(640px, 66vw); }
+  #settings header { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; }
+  #settings .hrow { flex: none; }
   #settings .eyebrow { display: none; }
-  #settings .tabs { margin-top: 0; flex-wrap: nowrap; gap: 0 18px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; touch-action: pan-x; }
+  #settings .tabline { flex: 0 0 100%; }
+  #settings .tabs { flex: 1 1 0; min-width: 0; margin-top: 0; flex-wrap: nowrap; gap: 0 18px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; touch-action: pan-x; }
   #settings .tab { flex: none; min-height: 44px; white-space: nowrap; font-size: calc(16px * var(--ms)); letter-spacing: .08em; }
   #settings .rows { margin-top: 6px; padding-bottom: 10px; }
   .row { min-height: 44px; }
   .ccard { --w: min(17vw, 150px, 34vh); }
   .ccard .arch { aspect-ratio: 1 / 1.15; }
   #chapters .cards { transform: translateY(-44%); }
-  #chapters header { top: calc(5vh + var(--st)); }
+  #chapters header { top: calc(5vh + var(--st) - 12px); }
   .ccard .num { margin-top: 6px; font-size: 24px; }
   .ccard .lab { font-size: 14px; }
   .ccard .pips { margin-top: 4px; gap: 2px; }

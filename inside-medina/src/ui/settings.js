@@ -95,7 +95,7 @@ export class SettingsScreen {
     this.ui = ui;
     const el = this.el = document.createElement('section');
     el.id = 'settings'; el.className = 'panel-screen'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'settings');
-    el.innerHTML = `<div class="sheet"><header><div class="eyebrow"><svg viewBox="0 0 100 100">${STAR}</svg>settings</div><div class="tabs" role="tablist"></div><div class="tabline"><i></i></div></header><div class="rows" role="tabpanel"></div><div class="sbar" aria-hidden="true"><i></i></div><div class="calib hidden" aria-hidden="true"></div><div class="code hidden"><input type="text" spellcheck="false" autocomplete="off" aria-label="save code"><div class="cmsg"></div></div><footer class="legend"></footer></div>`;
+    el.innerHTML = `<div class="sheet"><header><div class="hrow"><button class="back" type="button" aria-label="back">${icon('back')}</button><div class="eyebrow"><svg viewBox="0 0 100 100">${STAR}</svg>settings</div></div><div class="tabs" role="tablist"></div><div class="tabline"><i></i></div></header><div class="rows" role="tabpanel"></div><div class="sbar" aria-hidden="true"><i></i></div><div class="calib hidden" aria-hidden="true"></div><div class="code hidden"><input type="text" spellcheck="false" autocomplete="off" aria-label="save code"><div class="cmsg"></div></div><footer class="legend"></footer></div>`;
     ui.menus.appendChild(el);
     this.tab = 0;
     this.screen = new Screen(ui, {
@@ -129,6 +129,12 @@ export class SettingsScreen {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.closeCode(); }
     });
     document.addEventListener('fullscreenchange', () => this.isOpen && this.render(true));
+    // a way out for fingers and a mouse: the back glyph, and a tap on the scene beside the sheet (press and lift
+    // both outside it, so a slider dragged past the sheet's edge never closes it)
+    el.querySelector('.back').addEventListener('click', (e) => { e.stopPropagation(); if (ui.focus.top === this.screen) this.screen.back(); });
+    let downOut = false;
+    el.addEventListener('pointerdown', (e) => { downOut = !e.target.closest('.sheet'); }, true);
+    el.addEventListener('click', (e) => { if (downOut && !e.target.closest('.sheet') && ui.focus.top === this.screen) this.screen.back(); downOut = false; });
   }
   get isOpen() { return this.ui.focus.has(this.screen); }
   open() { this.list = tabs(this.ui); this.ui.focus.open(this.screen); }
@@ -177,6 +183,7 @@ export class SettingsScreen {
   // a list longer than its view fades at the edge it runs on past and shows a brass hairline track at its side
   edges() {
     const R = this.rowsEl, max = R.scrollHeight - R.clientHeight, bar = this.el.querySelector('.sbar'), on = max > 2;
+    this.placeCalib();
     R.classList.toggle('above', R.scrollTop > 2);
     R.classList.toggle('below', R.scrollTop < max - 2);
     bar.classList.toggle('on', on);
@@ -269,6 +276,17 @@ export class SettingsScreen {
     const tone = (lin) => { const v = Math.pow(Math.min(1, lin * exp), gam); const s = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; return Math.round(s * 255); };
     const ros = (lin) => { const g = tone(lin); return `<svg viewBox="0 0 100 100" style="color:rgb(${g},${Math.round(g * 0.94)},${Math.round(g * 0.86)})"><path d="${star8(50, 50, 44)}"/><path d="${star8(50, 50, 30, 22.5)}"/></svg>`; };
     c.innerHTML = `<div class="cr">${ros(0.0045)}${ros(0.012)}${ros(0.03)}</div><p>the faint rosette should be barely visible</p>`;
+    this.placeCalib();
+  }
+  // a full-width sheet (portrait) has no room beside the list: the rosettes sit just above the brightness row, or
+  // just below it when the row is near the top, so the slider they calibrate stays in sight and in reach
+  placeCalib() {
+    const c = this.el.querySelector('.calib'), row = this.ui.focus.current;
+    let narrow = false; try { narrow = matchMedia('(orientation: portrait), (max-aspect-ratio: 1/1)').matches; } catch { /* no media queries */ }
+    if (!narrow || c.classList.contains('hidden') || row?.dataset.k !== 'brightness') { c.style.top = c.style.bottom = ''; return; }
+    const S = this.el.querySelector('.sheet').getBoundingClientRect(), R = this.rowsEl.getBoundingClientRect(), r = row.getBoundingClientRect(), h = c.offsetHeight;
+    const y = r.top - 8 - h >= R.top - 2 ? r.top - 8 - h : Math.min(r.bottom + 8, S.bottom - h - 8);
+    c.style.top = `${Math.round(y - S.top)}px`; c.style.bottom = 'auto';
   }
 
   keysHtml() {

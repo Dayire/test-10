@@ -128,7 +128,8 @@ export async function boot(canvas, params) {
   for (const ev of ['keydown', 'pointerdown', 'touchstart']) window.addEventListener(ev, unlockAudio, { passive: true });
   // lifecycle: hiding the page pauses (the player comes back to the pause menu) and saves
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { wake.sync(); return; }
+    // back on the title: the live shot simply carries on (play comes back to the pause menu instead)
+    if (!document.hidden) { if (game.held && game.paused) game.setPaused(false); wake.sync(); return; }
     if (['play', 'intro', 'dying', 'finale', 'cutscene'].includes(game.mode)) game.setPaused(true);
     save.flush(true);
     wake.release();

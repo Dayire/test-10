@@ -6,7 +6,11 @@
 //   persist    settings survive a reload (and apply); a save of settings alone shows no continue
 //   autostart  ?autostart=1 skips every menu
 //   menubg     the live title renders at 30 fps and half resolution under the menus (requests/P.md #8), its vignette
-//              deepened once (a resting title's redraws never deepen it again)
+//              deepened once (a resting title's redraws never deepen it again), still half after a quality change;
+//              a page shown again wakes the title, hiding it rests it; the chapter thumbnail comes from play
+//   pause      every pause opens on resume (after a restart too), restart chapter asks first
+//   mouse      a mouse alone leaves settings and chapters (the back glyph, a click on the scene beside the sheet;
+//              a slider dragged past the sheet's edge stays), the browser's back closes the open screen
 //   chapters   chapter select by keyboard: the card covers the load, the chapter starts at the picked checkpoint
 //   hints      wordless first steps: the jump glyph at the sack pile (none at a wall too high), grab by the crate;
 //              a pause holds the glyph out of sight and lists the play controls; the lab (a dev chapter) learns a
@@ -74,7 +78,8 @@ async function journey(page, press, { pad = false } = {}) {
   out.menuOnTop = await page.evaluate(async () => {
     await new Promise((r) => setTimeout(r, 900));
     const e = __ui.focus.current, b = e.getBoundingClientRect();
-    return { building: !window.__ready, hit: document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)?.closest('.entry') === e };
+    const i = document.querySelector('#loading .lbar i'), bar = i && { t: getComputedStyle(i).transform, w: i.style.width, full: Math.round(i.getBoundingClientRect().width) === Math.round(i.parentNode.getBoundingClientRect().width) || getComputedStyle(i).transform !== 'none' };
+    return { building: !window.__ready, hit: document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)?.closest('.entry') === e, bar };
   });
   await ready(page);
   out.readyMs = await page.evaluate(() => window.__boot.chapter);
@@ -122,7 +127,7 @@ async function journey(page, press, { pad = false } = {}) {
   await press('confirm');
   await waitFor(page, () => __medina.game.mode === 'play');
   out.resumed = await page.evaluate(() => ({ chapter: __medina.chapter(), cp: __medina.state().cp, menu: __ui.focus.top?.el.id || null }));
-  const ok = out.menuMs <= 3000 && out.menuOnTop.hit && out.toSettings === 'settings' && out.settingsTop === 'settings' && out.tab === 'audio' && out.row === 'volumes.music'
+  const ok = out.menuMs <= 3000 && out.menuOnTop.hit && (!out.menuOnTop.bar || /^matrix/.test(out.menuOnTop.bar.t)) && out.toSettings === 'settings' && out.settingsTop === 'settings' && out.tab === 'audio' && out.row === 'volumes.music'
     && out.music.ui === 4 && out.music.game === 4 && out.backTo === 'title' && out.walked > 0.5 && out.pauseTop === 'pause' && out.titleFocus === 'continue'
     && out.saved.chapter === out.place.chapter && out.saved.cp === out.place.cp && out.resumed.chapter === out.place.chapter && out.resumed.cp === out.place.cp && !out.resumed.menu;
   return [ok || `journey ${JSON.stringify(out)}`, out];
@@ -233,13 +238,17 @@ await scenario('persist', async () => {
     const c = document.querySelector('#title .entry[data-k="continue"]'), r = { exists: __ui.save.exists, hidden: c.hidden, focus: __ui.focus.current?.dataset.k };
     __ui.save.data.cp = 2; __ui.save.write(); __ui.fillMain(); r.withCp = !c.hidden;
     __ui.settings.resetProgress(); r.afterReset = c.hidden; r.focusAfter = __ui.focus.current?.dataset.k;
+    // three seconds of play at the souk's start: continue shows, and a new journey asks first
+    __ui.save.data.stats.playSec = 3; __ui.save.write(); __ui.fillMain(); r.short = !c.hidden;
+    __ui.mainAction('new'); r.shortAsks = __ui.focus.top?.el.id === 'confirm'; __ui.focus.close(__ui.confirmS);
+    __ui.settings.resetProgress();
     return r;
   });
   await page.evaluate(() => localStorage.clear());
   await ctx.close();
   const ok = after.S.grain === 40 && after.S.menuScale === 125 && after.S.crawlMode === 'toggle' && after.S.sfx === 7
     && after.applied.grain === 40 && after.applied.crawl === 'toggle' && after.applied.scale === '1.25' && after.applied.sfx === 7
-    && after.cont.exists && after.cont.hidden && after.cont.focus === 'new' && after.cont.withCp && after.cont.afterReset && after.cont.focusAfter === 'new' && !errors.length;
+    && after.cont.exists && after.cont.hidden && after.cont.focus === 'new' && after.cont.withCp && after.cont.afterReset && after.cont.focusAfter === 'new' && after.cont.short && after.cont.shortAsks && !errors.length;
   return [ok || `persist ${JSON.stringify({ before, after })} ${errors.slice(0, 2).join(' | ')}`, { before, after }];
 });
 
@@ -260,13 +269,28 @@ await scenario('menubg', async () => {
   const rest = [await page.evaluate(() => (__medina.game.paused ? +__medina.game.world.rs.post.params.vignette.toFixed(2) : 'not paused'))];
   for (const w of [940, 960]) { await page.setViewportSize({ width: w, height: 540 }); await frames(page, 3); rest.push(await page.evaluate(() => +__medina.game.world.rs.post.params.vignette.toFixed(2))); }
   menu.rest = rest;
+  // the page shown again wakes the resting title; hidden, it rests (paused, the entries quiet); shown, it wakes
+  const vis = (hidden) => page.evaluate((h) => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => h }); Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (h ? 'hidden' : 'visible') }); document.dispatchEvent(new Event('visibilitychange')); }, hidden);
+  const restSt = () => page.evaluate(() => ({ paused: __medina.game.paused, resting: __ui.mainEl.classList.contains('resting') }));
+  await vis(false); await frames(page, 2); menu.shown = await restSt();
+  await vis(true); await frames(page, 1); menu.hidden = await restSt();
+  await vis(false); await frames(page, 3); menu.back = await restSt();
+  // a quality change over the title keeps the menu background (the tier's new resolution range is asked again)
+  await page.evaluate(() => __ui.setSetting('quality', 'medium')); await frames(page, 4);
+  menu.medium = await page.evaluate(() => { const rs = __medina.game.world.rs; return { tier: rs.tier, cap: Math.round(rs.stats.cap), internal: [...rs.post.stats.internal], full: [rs.w, rs.h] }; });
+  // no thumbnail from the dimmed title (it has been up for seconds); one from play
+  menu.thumbOnTitle = await page.evaluate(() => localStorage.getItem('medina.v1.thumb.souk'));
   await page.evaluate(() => __ui.mainAction('new'));
   await waitFor(page, () => __medina.game.mode === 'play');
   await frames(page, 4);
   const play = await page.evaluate(() => { const rs = __medina.game.world.rs; return { cap: Math.round(rs.stats.cap), internal: [...rs.post.stats.internal], full: [rs.w, rs.h], vignette: +rs.post.params.vignette.toFixed(2) }; });
+  await waitFor(page, () => !!localStorage.getItem('medina.v1.thumb.souk'), null, 30000).catch(() => {});
+  play.thumb = await page.evaluate(() => (localStorage.getItem('medina.v1.thumb.souk') || '').length);
   await ctx.close();
-  const half = Math.abs(menu.internal[0] - menu.full[0] / 2) <= 2 && Math.abs(menu.internal[1] - menu.full[1] / 2) <= 2;
-  const ok = menu.cap === 30 && half && play.cap !== 30 && play.internal[0] > menu.internal[0] && menu.vignette > play.vignette && menu.rest.every((v) => v === menu.vignette) && !errors.length;
+  const half = (m) => Math.abs(m.internal[0] - m.full[0] / 2) <= 2 && Math.abs(m.internal[1] - m.full[1] / 2) <= 2;
+  const ok = menu.cap === 30 && half(menu) && play.cap !== 30 && play.internal[0] > menu.internal[0] && menu.vignette > play.vignette && menu.rest.every((v) => v === menu.vignette)
+    && !menu.shown.paused && !menu.shown.resting && menu.hidden.paused && menu.hidden.resting && !menu.back.paused && !menu.back.resting
+    && menu.medium.tier === 'medium' && menu.medium.cap === 30 && half(menu.medium) && !menu.thumbOnTitle && play.thumb > 1000 && !errors.length;
   return [ok || `menu background ${JSON.stringify({ menu, play })}`, { menu, play }];
 });
 
@@ -289,6 +313,69 @@ await scenario('chapters', async () => {
   await ctx.close();
   const ok = cards.length === 4 && picking[0] === 'souk' && picking[1] === 2 && out.chapter === 'souk' && out.cp === 2 && out.cards.length === 1 && out.cards[0][1] === 'select' && !out.top && !errors.length;
   return [ok || `chapters ${JSON.stringify({ cards, picking, out, errors: errors.slice(0, 2) })}`, { cards, picking, ...out }];
+});
+
+await scenario('pause', async () => {
+  // every pause opens on resume: after a restart from the pause menu, a reflex Enter resumes; restart chapter asks
+  const { page, ctx, errors } = await open({ url: `${BASE}?${Q}&autostart=1&nosave=1&chapter=souk&cp=1` });
+  await ready(page); await waitFor(page, () => __medina.game.mode === 'play');
+  await frames(page, 4);
+  const out = {};
+  const pause = async () => { await key(page, 'Escape'); await waitFor(page, () => __ui.focus.top?.el.id === 'pause', null, 30000); await frames(page, 2); return focused(page); };
+  out.first = await pause();
+  await key(page, 'ArrowDown'); out.picked = await focused(page);
+  await key(page, 'Enter');
+  await waitFor(page, () => __medina.game.mode === 'play' && !__medina.game.paused && !__ui.focus.top, null, 60000);
+  await frames(page, 6);
+  out.second = await pause();
+  await key(page, 'Enter');
+  await frames(page, 4);
+  out.afterEnter = await page.evaluate(() => ({ mode: __medina.game.mode, paused: __medina.game.paused, top: __ui.focus.top?.el.id || null, cp: __medina.state().cp }));
+  // restart chapter: a glyph confirm with ✕ focused; Esc leaves it and the pause stays
+  out.third = await pause();
+  for (let i = 0; i < 4 && (await focused(page)) !== 'restart'; i++) await key(page, 'ArrowDown');
+  await key(page, 'Enter');
+  out.confirm = { top: await top(page), focus: await page.evaluate(() => __ui.focus.current?.getAttribute('aria-label')), text: await page.evaluate(() => document.querySelector('#confirm .q').textContent) };
+  await key(page, 'Escape');
+  out.afterNo = { top: await top(page), cp: await page.evaluate(() => __medina.state().cp), mode: await page.evaluate(() => __medina.game.mode) };
+  await ctx.close();
+  const ok = out.first === 'resume' && out.picked === 'checkpoint' && out.second === 'resume' && out.afterEnter.mode === 'play' && !out.afterEnter.paused && !out.afterEnter.top && out.afterEnter.cp === 1
+    && out.third === 'resume' && out.confirm.top === 'confirm' && out.confirm.focus === 'no' && out.afterNo.top === 'pause' && out.afterNo.cp === 1 && !errors.length;
+  return [ok || `pause ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
+});
+
+await scenario('mouse', async () => {
+  // a mouse alone, no keys: into settings and chapters by clicks, and out again
+  const { page, ctx, errors } = await open({ url: `${BASE}?${Q}&nosave=1` });
+  await ready(page); await frames(page, 3);
+  const box = (sel) => page.evaluate((sel) => { const b = document.querySelector(sel)?.getBoundingClientRect(); return b && [b.x + b.width / 2, b.y + b.height / 2]; }, sel);
+  const click = async (sel) => { const c = await box(sel); if (!c) return false; await page.mouse.click(c[0], c[1]); await frames(page, 3); await page.waitForTimeout(500); return true; };
+  const out = {};
+  await click('#title .entry[data-k="settings"]'); out.open = await top(page);
+  out.backShown = await page.evaluate(() => { const b = document.querySelector('#settings .back').getBoundingClientRect(); return b.width >= 44 && b.height >= 44 && document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)?.closest('.back') !== null; });
+  await click('#settings .back'); out.byGlyph = await top(page);
+  // a click on the scene beside the sheet
+  await click('#title .entry[data-k="settings"]');
+  await page.mouse.click(900, 300); await frames(page, 3); await page.waitForTimeout(500);
+  out.byScene = await top(page);
+  // a slider dragged out past the sheet's edge keeps the screen open
+  await click('#title .entry[data-k="settings"]');
+  await page.evaluate(() => document.querySelector('#settings .row[data-k="grain"]').scrollIntoView({ block: 'center' })); await page.waitForTimeout(300);
+  const tr = await page.evaluate(() => { const b = document.querySelector('#settings .row[data-k="grain"] .track').getBoundingClientRect(); return [b.x + b.width * 0.5, b.y + b.height / 2]; });
+  await page.mouse.move(tr[0], tr[1]); await page.mouse.down(); await page.mouse.move(900, tr[1], { steps: 6 }); await page.mouse.up(); await frames(page, 3); await page.waitForTimeout(400);
+  out.dragged = { top: await top(page), grain: await page.evaluate(() => __ui.S.grain) };
+  // the browser's back closes it
+  out.guarded = await page.evaluate(() => __ui.guarded);
+  await page.evaluate(() => history.back()); await page.waitForTimeout(600); await frames(page, 2);
+  out.byHistory = await top(page);
+  // chapters: the back glyph
+  await click('#title .entry[data-k="chapters"]'); out.chapters = await top(page);
+  await click('#chapters .back'); out.chaptersBack = await top(page);
+  out.unguarded = await page.evaluate(() => ({ guarded: __ui.guarded, url: location.href }));
+  await ctx.close();
+  const ok = out.open === 'settings' && out.backShown && out.byGlyph === 'title' && out.byScene === 'title' && out.dragged.top === 'settings' && out.dragged.grain === 100
+    && out.guarded && out.byHistory === 'title' && out.chapters === 'chapters' && out.chaptersBack === 'title' && !out.unguarded.guarded && !errors.length;
+  return [ok || `mouse ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
 });
 
 await scenario('crawl', async () => {

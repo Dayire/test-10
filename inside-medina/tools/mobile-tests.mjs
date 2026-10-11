@@ -14,7 +14,12 @@
 //   aim        finger aim: a touch on the scene reaches the boy as pin.aimTarget at the touched world point; with the
 //              Sunwork lab present (a gripped mirror) the mirror tilts to the touched notch
 //   settings   (phones) the tabs sit on one line; a tab opens at its first option (after the previous one was
-//              scrolled to its end), with enough rows in view; a list that runs on fades at its edge
+//              scrolled to its end), with enough rows in view; a list that runs on fades at its edge; the focused
+//              brightness slider answers a finger (its calibration rosettes sit beside it, never over it); the save
+//              code field is ≥ 16 px (iOS zooms the page under that)
+//   back       (phones) settings and chapters are left by a tap on their back glyph, from the title and from the
+//              pause menu, and play resumes; a tap on the resting title wakes it; the browser's back (Android's
+//              gesture) pauses play, closes settings and resumes from the pause menu
 // A touch-screen laptop (touch events, a fine mouse pointer, 1280 × 720) runs one check:
 //   hybrid     the mouse never drives the hidden touch layer: a drag on the left reaches the scene as the pointer
 //              (no stick, no walk, no lens shift, the device stays keyboard), a click in the top-left corner does not
@@ -88,10 +93,10 @@ async function device(dev) {
     const menuBad = judge(await targets('#title .entry'));
     await page.evaluate(() => __ui.settings.open()); await frames(page, 3); await page.waitForTimeout(600);
     const setBad = [];
-    for (let t = 0; t < 5; t++) { await page.evaluate((t) => __ui.settings.setTab(t), t); await frames(page, 2); setBad.push(...judge(await targets('#settings .tab, #settings .rows .item'))); }
+    for (let t = 0; t < 5; t++) { await page.evaluate((t) => __ui.settings.setTab(t), t); await frames(page, 2); setBad.push(...judge(await targets('#settings .back, #settings .tab, #settings .rows .item'))); }
     await page.evaluate(() => __ui.focus.close(__ui.settings.screen));
     await page.evaluate(() => __ui.focus.open(__ui.chapters.screen)); await frames(page, 3); await page.waitForTimeout(600);
-    const chBad = judge(await targets('#chapters .ccard'));
+    const chBad = judge(await targets('#chapters .back, #chapters .ccard'));
     // a card with reached checkpoints: a tap opens its stepper, whose arrows are 44 px targets in the safe area and
     // step the checkpoint; the small pips are no touch targets (the card itself starts)
     await page.evaluate(() => { __ui.save.data.cps = { souk: 3 }; __ui.chapters.render(); }); await frames(page, 2); await page.waitForTimeout(500);
@@ -178,7 +183,68 @@ async function device(dev) {
       });
       if (!strip.inStrip || !strip.line || strip.lines !== 1) bad.push(`strip ${JSON.stringify(strip)}`);
     }
-    check('settings', !bad.length, { bad, tabs: tabs.map((v) => `${v.tab} st${v.st} ${v.full}/${v.n}${v.fade ? ' fade' : ''}${v.track ? ' track' : ''} lines${v.lines}`), strip });
+    // the brightness row focused: the rosettes sit beside it, its track answers a finger (a tap near its right end)
+    await page.evaluate(() => { __ui.settings.setTab(0); __ui.focus.set(document.querySelector('#settings .row[data-k="brightness"]')); }); await frames(page, 2); await page.waitForTimeout(500);
+    const cal = await page.evaluate(() => {
+      const r = document.querySelector('#settings .row[data-k="brightness"]'), t = r.querySelector('.track').getBoundingClientRect(), rb = r.getBoundingClientRect(), c = document.querySelector('#settings .calib'), cb = c.getBoundingClientRect();
+      const R = document.querySelector('#settings .rows').getBoundingClientRect();
+      return { shown: !c.classList.contains('hidden'), hit: !!document.elementFromPoint(t.x + t.width / 2, t.y + t.height / 2)?.closest('.track'), inList: rb.top >= R.top - 1 && rb.bottom <= R.bottom + 1,
+        overlap: cb.top < rb.bottom - 1 && cb.bottom > rb.top + 1 && cb.left < rb.right && cb.right > rb.left, row: [Math.round(rb.top), Math.round(rb.bottom)], calib: [Math.round(cb.top), Math.round(cb.bottom)], at: [t.x + t.width * 0.92, t.y + t.height / 2] };
+    });
+    await tap(...cal.at); await page.waitForTimeout(300);
+    cal.value = await page.evaluate(() => __ui.S.brightness);
+    await page.evaluate(() => __ui.setSetting('brightness', 0));
+    if (!cal.shown || !cal.hit || !cal.inList || cal.overlap || cal.value !== 3) bad.push(`brightness ${JSON.stringify(cal)}`);
+    // the save code field: ≥ 16 px, so iOS never zooms the page when it takes the focus; the back glyph closes it first
+    await page.evaluate(() => { __ui.settings.setTab(4); }); await frames(page, 2); await page.waitForTimeout(400);
+    const imp = await page.evaluate(() => { const b = document.querySelector('#settings .row[data-k="import"]').getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
+    await tap(...centre(imp)); await page.waitForTimeout(400);
+    const code = await page.evaluate(() => { const i = document.querySelector('#settings .code input'); return { px: parseFloat(getComputedStyle(i).fontSize), focused: document.activeElement === i }; });
+    const bk = await page.evaluate(() => { const b = document.querySelector('#settings .back').getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
+    await tap(...centre(bk)); await page.waitForTimeout(400);
+    code.after = await page.evaluate(() => ({ open: !document.querySelector('#settings .code').classList.contains('hidden'), top: __ui.focus.top?.el.id }));
+    if (code.px < 16 || !code.focused || code.after.open || code.after.top !== 'settings') bad.push(`code ${JSON.stringify(code)}`);
+    check('settings', !bad.length, { bad, tabs: tabs.map((v) => `${v.tab} st${v.st} ${v.full}/${v.n}${v.fade ? ' fade' : ''}${v.track ? ' track' : ''} lines${v.lines}`), strip, brightness: { row: cal.row, calib: cal.calib, value: cal.value }, code });
+  }
+
+  // ------------------------------------------------------------------ the way back by touch (iOS has no back key)
+  if (want('back')) {
+    await page.goto(`${BASE}?${Q}`); await ready(page); await frames(page, 4);
+    const rect = (sel) => page.evaluate((sel) => { const b = document.querySelector(sel)?.getBoundingClientRect(); return b && { x: b.x, y: b.y, w: b.width, h: b.height }; }, sel);
+    const topId = () => page.evaluate(() => __ui.focus.top?.el.id || null);
+    const tapSel = async (sel) => { const r = await rect(sel); if (!r) return false; await tap(...centre(r)); await page.waitForTimeout(500); return true; };
+    const out = { bad: [] };
+    const leave = async (from, entry, screen) => {
+      await tapSel(`#${from} .entry[data-k="${entry}"]`);
+      const opened = await topId(), b = await rect(`#${screen} .back`);
+      out.bad.push(...judge(b ? [{ k: `${screen} back`, ...b }] : [{ k: `${screen}: no back`, x: -1, y: -1, w: 0, h: 0 }]));
+      await tapSel(`#${screen} .back`);
+      return `${opened}>${await topId()}`;
+    };
+    out.title = [await leave('title', 'settings', 'settings'), await leave('title', 'chapters', 'chapters')];
+    // a resting title (the page was hidden) wakes on a tap anywhere over it
+    await page.evaluate(() => __medina.game.setPaused(true)); await frames(page, 2);
+    out.rest = await page.evaluate(() => __ui.mainEl.classList.contains('resting'));
+    await tap(W / 2, H * 0.3); await frames(page, 2);
+    out.wake = await page.evaluate(() => ({ paused: __medina.game.paused, resting: __ui.mainEl.classList.contains('resting'), top: __ui.focus.top?.el.id }));
+    // into play, the pause menu by ⏸, out of settings and chapters again, and resume
+    await tapSel('#title .entry[data-k="new"]');
+    await page.waitForFunction(() => __medina.game.mode === 'play', null, { timeout: 60000 }); await frames(page, 4); await page.waitForTimeout(400);
+    const pr = await page.evaluate(() => __ui.touch.rects().pause);
+    await tap(...centre(pr)); await page.waitForFunction(() => __ui.focus.top?.el.id === 'pause', null, { timeout: 30000 }).catch(() => {}); await page.waitForTimeout(500);
+    out.pause = [await leave('pause', 'settings', 'settings'), await leave('pause', 'chapters', 'chapters')];
+    await tapSel('#pause .entry[data-k="resume"]'); await frames(page, 3);
+    out.resumed = await page.evaluate(() => ({ mode: __medina.game.mode, paused: __medina.game.paused, top: __ui.focus.top?.el.id || null }));
+    // the browser's back (Android's gesture): play pauses, settings close, the pause menu resumes
+    const hist = async () => { await page.evaluate(() => history.back()); await page.waitForTimeout(700); await frames(page, 2); return page.evaluate(() => `${__ui.focus.top?.el.id || 'play'}${__medina.game.paused ? '/paused' : ''}`); };
+    out.hist = [await hist()];
+    await tapSel('#pause .entry[data-k="settings"]');
+    out.hist.push(await hist(), await hist());
+    out.url = await page.evaluate(() => location.pathname);
+    const ok = !out.bad.length && out.title.join() === 'settings>title,chapters>title' && out.rest && !out.wake.paused && !out.wake.resting && out.wake.top === 'title'
+      && out.pause.join() === 'settings>pause,chapters>pause' && out.resumed.mode === 'play' && !out.resumed.paused && !out.resumed.top
+      && out.hist.join() === 'pause/paused,pause/paused,play';
+    check('back', ok, out);
   }
 
   // ------------------------------------------------------------------ gameplay (deterministic: the sim reads the live touch input)
