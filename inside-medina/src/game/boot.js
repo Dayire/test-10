@@ -74,10 +74,12 @@ export async function boot(canvas, params) {
   const soundFns = [];
   const play = audio.play.bind(audio);
   audio.play = (name, x, data) => { for (const f of soundFns) f(name, x, data); return play(name, x, data); };
-  await world.bake(SESSION_SURFACES);
+  // the boy's surfaces: their targets exist now (his materials take them) and are drawn with the first chapter's own
+  const sessionJobs = world.prebake(SESSION_SURFACES);
   const game = new Game(world, input, audio, ui, P, { save });
   game.device = dev;
   game.initOnce({ pool: +(P.pool || dev.pool) });
+  game.loader.pendingBake = sessionJobs;
   // the crawl toggle latches only where the boy could crouch: in play, on the ground, his hands free (a gripped
   // mirror stays in the ground state, and its tilt reads the same down-press)
   input.context = () => {

@@ -69,6 +69,7 @@ export class ChapterLoader {
     this.stats = null;
     this.scope = []; // chapter-lived subscriptions (kit.on, kit.onFrame, kit.registerExt), undone by unload
     this.card = null;
+    this.pendingBake = null; // prepared surfaces the next load draws with its own (the boy's, at boot)
   }
 
   // loadChapter(id, cp, {reason, onProgress}) -> promise of L. reason: boot | start | chain | continue | select | restart | title
@@ -171,6 +172,8 @@ export class ChapterLoader {
         if (g.world.prebake) bakeJobs = g.world.prebake(def.needs);
         else if (g.world.bake) await g.world.bake(def.needs, (p, n) => prog(0.05 + p * 0.4, n));
       }
+      // surfaces the session prepared before any chapter (the boy's) are drawn with the first chapter's
+      if (this.pendingBake?.length) { bakeJobs = [...this.pendingBake, ...(bakeJobs || [])]; this.pendingBake = null; }
       this.flushGL();
       mark('prebake');
       // 8. build
