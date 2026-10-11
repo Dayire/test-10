@@ -81,7 +81,7 @@ export class FocusManager {
     if (t) {
       if (!t.isOpen) t.show(); else t.el.inert = false;
       this.set(t.last && t.list().includes(t.last) ? t.last : t.initial?.() || t.list()[0], { scroll: true }); // the last item may have gone (continue after a reset)
-    } else { this.current = null; if (document.activeElement && this.ui.root.contains(document.activeElement)) document.activeElement.blur(); }
+    } else { this.current?.classList.remove('focused'); this.current = null; if (document.activeElement && this.ui.root.contains(document.activeElement)) document.activeElement.blur(); }
     if (sound) this.ui.sound('close');
     this.ui.menuChanged();
   }
@@ -91,6 +91,8 @@ export class FocusManager {
     if (!el) return;
     const prev = this.current;
     if (prev && prev !== el) prev.classList.remove('focused');
+    // one mark per screen: an item focused before the stack emptied must not keep its star
+    for (const o of el.closest('.screen')?.querySelectorAll('.focused') || []) if (o !== el) o.classList.remove('focused');
     this.current = el;
     el.classList.add('focused');
     if (document.activeElement !== el) { try { el.focus({ preventScroll: true }); } catch { el.focus(); } }

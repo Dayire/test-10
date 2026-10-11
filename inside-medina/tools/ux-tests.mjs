@@ -8,7 +8,7 @@
 //   menubg     the live title renders at 30 fps and half resolution under the menus (requests/P.md #8), its vignette
 //              deepened once (a resting title's redraws never deepen it again), still half after a quality change;
 //              a page shown again wakes the title, hiding it rests it; the chapter thumbnail comes from play
-//   pause      every pause opens on resume (after a restart too), restart chapter asks first
+//   pause      every pause opens on resume (after a restart too) with one focus mark, restart chapter asks first
 //   mouse      a mouse alone leaves settings and chapters (the back glyph, a click on the scene beside the sheet;
 //              a slider dragged past the sheet's edge stays), the browser's back closes the open screen
 //   chapters   chapter select by keyboard: the card covers the load, the chapter starts at the picked checkpoint
@@ -55,6 +55,8 @@ const frames = (page, n = 2) => page.evaluate((n) => new Promise((r) => { const 
 const key = async (page, k, n = 1) => { for (let i = 0; i < n; i++) { await page.keyboard.press(k); await frames(page, 2); } };
 const focused = (page) => page.evaluate(() => { const e = __ui.focus.current; return e ? (e.dataset.k || e.textContent.trim()) : null; });
 const top = (page) => page.evaluate(() => __ui.focus.top?.el?.id || null);
+// every item drawn as focused in the open screens (one brass star and underline, never a stale second)
+const marks = (page) => page.evaluate(() => [...document.querySelectorAll('#menus .focused')].map((e) => e.dataset.k || e.getAttribute('aria-label') || e.textContent.trim()));
 const waitFor = (page, fn, arg, t = 120000) => page.waitForFunction(fn, arg, { timeout: t, polling: 100 });
 
 async function scenario(name, fn) {
@@ -123,13 +125,14 @@ async function journey(page, press, { pad = false } = {}) {
   await waitFor(page, () => __medina.game.held && __ui.focus.top?.el.id === 'title' && !__medina.game.suspended);
   await frames(page, 3);
   out.titleFocus = await focused(page);
+  out.titleMarks = await marks(page);
   out.saved = await page.evaluate(() => ({ chapter: __ui.save.data.chapter, cp: __ui.save.data.cp }));
   // continue resumes the same chapter and checkpoint
   await press('confirm');
   await waitFor(page, () => __medina.game.mode === 'play');
   out.resumed = await page.evaluate(() => ({ chapter: __medina.chapter(), cp: __medina.state().cp, menu: __ui.focus.top?.el.id || null }));
   const ok = out.menuMs <= 3000 && out.menuOnTop.hit && (!out.menuOnTop.bar || /^matrix/.test(out.menuOnTop.bar.t)) && out.toSettings === 'settings' && out.settingsTop === 'settings' && out.tab === 'audio' && out.row === 'volumes.music'
-    && out.music.ui === 4 && out.music.game === 4 && out.backTo === 'title' && out.walked > 0.5 && out.pauseTop === 'pause' && out.titleFocus === 'continue'
+    && out.music.ui === 4 && out.music.game === 4 && out.backTo === 'title' && out.walked > 0.5 && out.pauseTop === 'pause' && out.titleFocus === 'continue' && out.titleMarks.join() === 'continue'
     && out.saved.chapter === out.place.chapter && out.saved.cp === out.place.cp && out.resumed.chapter === out.place.chapter && out.resumed.cp === out.place.cp && !out.resumed.menu;
   return [ok || `journey ${JSON.stringify(out)}`, out];
 }
@@ -331,6 +334,7 @@ await scenario('pause', async () => {
   await waitFor(page, () => __medina.game.mode === 'play' && !__medina.game.paused && !__ui.focus.top, null, 60000);
   await frames(page, 6);
   out.second = await pause();
+  out.secondMarks = await marks(page);
   await key(page, 'Enter');
   await frames(page, 4);
   out.afterEnter = await page.evaluate(() => ({ mode: __medina.game.mode, paused: __medina.game.paused, top: __ui.focus.top?.el.id || null, cp: __medina.state().cp }));
@@ -342,7 +346,7 @@ await scenario('pause', async () => {
   await key(page, 'Escape');
   out.afterNo = { top: await top(page), cp: await page.evaluate(() => __medina.state().cp), mode: await page.evaluate(() => __medina.game.mode) };
   await ctx.close();
-  const ok = out.first === 'resume' && out.picked === 'checkpoint' && out.second === 'resume' && out.afterEnter.mode === 'play' && !out.afterEnter.paused && !out.afterEnter.top && out.afterEnter.cp === 1
+  const ok = out.first === 'resume' && out.picked === 'checkpoint' && out.second === 'resume' && out.secondMarks.join() === 'resume' && out.afterEnter.mode === 'play' && !out.afterEnter.paused && !out.afterEnter.top && out.afterEnter.cp === 1
     && out.third === 'resume' && out.confirm.top === 'confirm' && out.confirm.focus === 'no' && out.afterNo.top === 'pause' && out.afterNo.cp === 1 && !errors.length;
   return [ok || `pause ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
 });

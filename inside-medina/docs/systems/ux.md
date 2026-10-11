@@ -68,7 +68,8 @@ title alike, and flushes the save; when the page shows again the title simply ca
 it visible but inert). Hidden screens carry `hidden` and `inert`. Each screen declares `items()`, remembers its last
 focus, may handle `onNav(dir)` (the chapter grid, the settings tab row) and `tab(dir)`. Real DOM focus follows the
 roving focus, so `:focus-visible`, Tab (kept inside the open screen) and screen readers agree; every control has a
-role and an aria-label. Enter and Space act through the nav edges only (their native click is prevented).
+role and an aria-label. Enter and Space act through the nav edges only (their native click is prevented). A screen
+shows exactly one focus mark: emptying the stack clears it, and marking an item clears any other in its screen.
 
 | Device | Navigate | Confirm | Back | Tabs | Other |
 |---|---|---|---|---|---|
