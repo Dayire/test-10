@@ -22,7 +22,9 @@ on the compositor and keeps moving while the main thread bakes or builds. Screen
 
 The menus sit over the live title shot. The dimming is the post chain's vignette, deepened while a menu is up over
 the title (never `backdrop-filter`): `ui.beforeRender(post.params)` runs just before `rs.render` (boot wraps it), after
-the LookDirector has written the look, so the look itself carries no override under the title. Plain gradients sit
+the LookDirector has written the look, so the look itself carries no override under the title. It deepens the look's
+last written value once: a resting title (Esc pauses the scene under the menu, and the director rests with it) keeps
+its depth through every freeze-frame redraw. Plain gradients sit
 behind the text column.
 
 **Software rasterisers.** On SwiftShader or llvmpipe (`world.software`) every composited frame competes with the
@@ -96,7 +98,8 @@ the page hides.
 | ⏸ | 44 px, top left in the safe area (top right left-handed) |
 | Scene | a touch anywhere else hits the canvas: `Input.pointer` (kind `touch`) → `pin.aimTarget` (finger aim) |
 | Layout | left-handed mirrors everything; size S/M/L = 0.85 / 1 / 1.2; opacity 20–80 % of the idle outline |
-| Behaviour | every control follows its own pointer id (multi-touch); the layer fades out when a key or a pad is used, to 25 % after 5 s idle, and hides under every menu and card; `touch-action: none`, no callout, no selection, `contextmenu`/`dblclick`/`gesturestart` blocked |
+| Behaviour | every control follows its own pointer id (multi-touch); a button press shorter than a frame is latched until the next poll (`Input.touchTaps`, like keys); the layer fades out when a key or a pad is used, to 25 % after 5 s idle, and hides under every menu and card; `touch-action: none`, no callout, no selection, `contextmenu`/`dblclick`/`gesturestart` blocked |
+| Mouse and fingers | only fingers and pens drive the layer. While a keyboard, a pad or a mouse is in use the layer is away and lets every pointer through, so on a touch-screen laptop the mouse aims and clicks the scene and never walks the boy or pauses; a mouse that moves (8 px) or presses while the layer is up takes the device back. The first touch after that brings the layer back and goes to the control under it (a window capture listener routes it; the scene pointer never sees it) |
 
 The touch layer is the first child of `#ui`, so the card, the menus and the loading screen cover it.
 
@@ -121,10 +124,16 @@ haptics, crawl). Defaults: `defaultSettings(deviceClass)`.
 | accessibility | camera shake 0–100 % (100), reduce motion, reduce flashing, high contrast, visual sound cues, generous timing, assist, game speed 100/85/70 %, menu text size 100/125/150 % |
 | data | where progress is kept (a broken-link glyph when storage is unavailable), save code (copy), enter a save code, reset progress (glyph confirm) |
 
+A tab opens at its first option (a redraw of the same tab keeps its place). A list that runs on past its view fades at
+that edge (a mask on the list; a focused row scrolls clear of the fade) and shows a brass hairline track at its side.
+On landscape phones (height ≤ 460 px) the tabs are one strip that scrolls sideways under large menu text (the
+underline follows it) and the eyebrow gives its line to the options: six rows in view on an iPhone 13 instead of four.
+
 High contrast also brightens the shell; for beams, locks, tripwires and searchlight cones it is `game.settings.highContrast`
 for L and the chapters to read (requests/U.md). The save code is `M1` + a two-character checksum + base64url of the
 progress (chapter, checkpoint, chapters reached, furthest checkpoints, completion, play time, deaths): 94 characters
-for a mid-game save. Brightness calibration draws three rosettes lifted by the same exposure and gamma the grade
+for a mid-game save. A hand-made code (the checksum is no secret) opens no locked chapter (the furthest unlocked one
+instead) and no checkpoint past the furthest reached or past the chapter's last one this device has built. Brightness calibration draws three rosettes lifted by the same exposure and gamma the grade
 applies (`1 + 0.08·b`, `1 − 0.04·b`).
 
 ## Screens
@@ -168,7 +177,7 @@ A chapter's zones come first, and a verb learnt from a zone is not taught again 
 holds the glyph out of sight; it comes back on resume. The glyph follows the device in hand
 (keycaps with the player's own layout letters, pad buttons of the pad's family, a ghost thumb on touch that also
 pulses the control) above the boy's projected head, and fades when the action happens; done hints are written to
-`save.seenHints` (`<chapter>:<index>`, `move`). **Visual sound cues**: the horn (`alarm`), shouts, darts and the drum
+`save.seenHints` (`<chapter>:<index>`, `move`); a dev chapter (the lab) keeps them in memory and never writes the save. **Visual sound cues**: the horn (`alarm`), shouts, darts and the drum
 show an edge glyph on the side they came from.
 
 ## Haptics (`src/core/haptics.js`, FULL_GAME §8.3)
@@ -191,7 +200,10 @@ activation; iOS has no Vibration API.
 Order: storage and save, device class, UI, Input (+ touch layer, haptics), the main menu (interactive), the world,
 GLB overrides (skipped in the artifact), the session bake, Game, settings applied, the loop, then the chapter load
 under the title. `nextFrame()` waits for a presented frame, so the splash and the menu reach the compositor before
-each long synchronous step. `window.__boot` marks `menu`, `world`, `overrides`, `init`, `chapter`; `window.__ui` is
+each long synchronous step. Profiled against the foundation tree (4c166b2) with alternating boots under the same
+load: the shell's own work before the world is ≈ 10 ms (UI, Input, the menu), pre-world ≈ 150–200 ms on both trees,
+the chapter build is the engine's, and the shell adds one presented title frame before `__ready` (≈ 40 ms); the
+medians of four boots each were 20.8 s against 20.7 s. The boot gate's spread on this shared machine is load. `window.__boot` marks `menu`, `world`, `overrides`, `init`, `chapter`; `window.__ui` is
 the shell (tests). Lifecycle: hidden page → pause, save flush, wake lock released; `pagehide` → flush; `blur` in play
 → pause; pad disconnect → pause; `navigator.wakeLock` held in play only (guarded); `resize` → layout and the auto
 camera; `webglcontextlost` / `restored` → the lantern card, then the engine's `recoverContext()`.
@@ -203,7 +215,10 @@ camera; `webglcontextlost` / `restored` → the lantern card, then the engine's 
 from `tools/make-icons.mjs`: the brass tray with its engraved rosette, rendered in Chromium); `sw.js` generated at the
 end of the build from what was written: precache everything, cache-first for assets, network-first for the page
 (falling back to the cached page offline). A new version takes over at once and keeps the previous version's cache
-(older ones go), so a tab opened before a deploy still finds the hashed chapter chunks it imports later. It registers only in a production build, outside the artifact, in a top
+(older ones go), so a tab opened before a deploy still finds the hashed chapter chunks it imports later. Lookups go to
+this version's cache first; the previous one answers only for the build's hashed `assets/<name>-<hash>` files, or
+when the network is gone, so an unhashed file a deploy changed (the manifest, an icon, a model override) is never
+served stale. It registers only in a production build, outside the artifact, in a top
 window, in a secure context, and not with `?nosw=1`.
 
 **Artifact** (`npm run build:artifact` → `dist-artifact/medina.html`): `import.meta.env.VITE_ARTIFACT` strips the dev
@@ -220,7 +235,7 @@ fullscreen row unless the frame allows it, no pointer lock, `alert`, `print` or 
 
 ```
 node tools/ux-tests.mjs --port 5176 [--only keyboard,gamepad,storage,persist,autostart,menubg,chapters,hints,crawl,artifact,hosted]
-node tools/mobile-tests.mjs --port 5176 [--device iphone|pixel] [--only menus,controls,stick,jump,grab,lens,aim]
+node tools/mobile-tests.mjs --port 5176 [--device iphone|pixel|laptop] [--only menus,settings,controls,stick,jump,grab,lens,aim,hybrid]
 ```
 
 Every screen keeps `hidden` (attribute) and the `hidden` class while closed, which the foundation suite reads on
