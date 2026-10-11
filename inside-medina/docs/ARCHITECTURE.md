@@ -303,9 +303,9 @@ material that sampled the old one; returns the old one), `world.bakeEnvironment(
 uniforms stand), `world.rebuildEnvironment()` (both, then disposes the old map), `baker.rebakeAll()`. A surface not listed in
 `needs` is baked on first use with a warning.
 
-**Static batches** (`Batcher` in `src/assets/geom.js`): geometry merges by material, `receive` and x chunk; casting and
-non-casting pieces share a batch, the casters first, and the batch casts only its first `userData.castCount` vertices
-(its own shadow draws through `onBeforeShadow`, the proxies through the policy); the
+**Static batches** (`Batcher` in `src/assets/geom.js`): geometry merges by material, shadow flags and x chunk (on low,
+`castMerge`, casting and non-casting pieces share a batch, the casters first, and the batch casts only its first
+`userData.castCount` vertices: its own shadow draws through `onBeforeShadow`, the proxies through the policy); the
 chunk width follows depth (`BANDS`: centre z > −4: 0.6 × `chunk`; to −15: `chunk`; beyond: 2 × `chunk`), and the main
 pass culls a batch by its world box. **The low tier** (`QUALITY.low.lite`) builds for its draw budget: `DETAIL.lite`
 (`setDetail`) around the build makes arch outlines, extrusion curves, lathes and tubes take about half their segments
