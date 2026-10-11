@@ -5,6 +5,7 @@ import { ChaptersScreen, captureThumb } from './chapters.js';
 import { HintDirector } from './hints.js';
 import { TouchControls } from './touch.js';
 import { PLAYABLE, meta } from '../chapters/index.js';
+import { CREDITS } from '../chapters/credits.js';
 
 // The shell (FULL_GAME §7, §8): splash, main menu over the live title shot, pause, settings, chapters, the
 // chapter card, credits, glyph confirms, the wordless HUD (save rosette, hints, sound cues, the touch layer)
@@ -42,8 +43,8 @@ export class UI {
         <div class="cn"></div><div class="crule"><i></i><svg viewBox="0 0 100 100">${STAR}</svg><i></i></div><div class="cl"></div>
         <div class="cwait"><svg viewBox="0 0 100 100">${ROSETTE}</svg></div>
       </section>
-      <section id="lost" class="hidden" role="alert" aria-label="the picture was lost: tap to reload">
-        <div class="lglyph">${icon('lantern')}</div><div class="lring"><svg viewBox="0 0 100 100">${ROSETTE}</svg></div><div class="lmsg">tap to reload</div>
+      <section id="lost" class="hidden" role="alert" aria-label="the picture was lost: reload">
+        <div class="lglyph">${icon('lantern')}</div><div class="lring"><svg viewBox="0 0 100 100">${ROSETTE}</svg></div><div class="lmsg"></div>
       </section>
       <div id="dbg" class="hidden"></div>`);
     this.el = (id) => root.querySelector('#' + id);
@@ -296,7 +297,7 @@ export class UI {
     if (R.override && !R.override._parallax && (Math.abs(this.px) > 1e-3 || held)) {
       const f = R.override, out = { pos: null, look: null, fov: 40 };
       const w = (d) => { const o = f(d); out.pos = (out._p ||= o.pos.clone()).copy(o.pos); out.pos.x += this.px; out.pos.y += this.py; out.look = o.look; out.fov = o.fov; out.shadowFocus = o.shadowFocus; return out; };
-      w._parallax = true; R.override = w;
+      w._parallax = true; w._of = f._of || f; R.override = w;
     }
     this.touch?.frame(g);
     this.updateSafeRect(dt);
@@ -629,13 +630,16 @@ export class UI {
       t = setTimeout(done, (sec + 3.5) * 1000);
     });
   }
-  rollMenuCredits() {
-    const lines = this.game?.def?.credits || ['made entirely of code', 'three.js'];
-    this.credits(lines, { menu: true });
-  }
+  rollMenuCredits() { this.credits(CREDITS, { menu: true }); }
 
   // ------------------------------------------------------------------ lifecycle cards
-  showLost() { this.el('lost').classList.remove('hidden'); this.el('lost').classList.toggle('auto', !!this.artifact); }
+  // the reload gesture names the hands in use (a tap, a click); a pad's player waits wordlessly for the browser to
+  // hand the picture back (the ring turns)
+  showLost() {
+    const l = this.el('lost'), d = this.input?.lastDevice || 'keyboard';
+    l.querySelector('.lmsg').textContent = d === 'touch' ? 'tap to reload' : d === 'gamepad' ? '' : 'click to reload';
+    l.classList.remove('hidden'); l.classList.toggle('auto', !!this.artifact);
+  }
   hideLost() { this.el('lost').classList.add('hidden'); }
   fatal(kind = 'webgl') {
     this.root.insertAdjacentHTML('beforeend', `<section id="fatal" role="alert"><div class="fg">${icon('lantern')}</div><div class="fw">MEDINA</div><p>${kind === 'webgl' ? 'this browser cannot light the city: webgl 2 is needed' : 'the city could not be built here'}</p></section>`);

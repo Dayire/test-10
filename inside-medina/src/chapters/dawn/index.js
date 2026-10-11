@@ -1,4 +1,5 @@
 import { buildStub, STUB_NEEDS, stubIntro, stubAudio } from '../stub.js';
+import { CREDITS } from '../credits.js';
 
 // Chapter IV: the timekeeper's mirror (stub until the chapter package lands).
 // The look blends from dawn to sunrise along x.
@@ -8,6 +9,6 @@ export default {
   needs: STUB_NEEDS, surfaces: {}, materials: {},
   audio: stubAudio('rast'),
   intro: stubIntro, menuShot: { ...stubIntro, cp: 0 },
-  credits: ['made entirely of code', 'three.js'],
+  credits: CREDITS, // the ending's roll (the chapter package may add its own lines)
   build: (game, kit) => buildStub(game, kit, { styles: ['cream', 'white', 'peach', 'ochre', 'stone'] }),
 };

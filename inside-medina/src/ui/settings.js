@@ -39,7 +39,6 @@ function tabs(ui) {
       { k: 'batterySaver', label: 'battery saver', type: 'toggle' },
       { k: 'dof', label: 'depth of field', type: 'toggle' },
       { k: 'grain', label: 'film grain', type: 'slider', min: 0, max: 100, step: 5 },
-      { k: 'motionBlur', label: 'motion blur', type: 'toggle', enabled: (S) => S.quality === 'ultra' },
       { k: 'brightness', label: 'brightness', type: 'slider', min: -3, max: 3, step: 1, signed: true, calib: true },
       { k: 'cameraDist', label: 'camera', type: 'choice', values: ['auto', 'close', 'normal', 'wide'] },
       ...(fsOK() ? [{ k: 'fullscreen', label: 'fullscreen', type: 'toggle', get: () => !!document.fullscreenElement, set: (on) => ui.setFullscreen(on) }] : []),
@@ -66,7 +65,7 @@ function tabs(ui) {
       { k: 'aimSnap', label: 'aim snap', type: 'toggle' },
       { k: 'vibration', label: 'vibration', type: 'choice', values: ['off', 'low', 'full'] },
       { k: 'hints', label: 'control hints', type: 'choice', values: ['always', 'first', 'never'], labels: { first: 'first time' } },
-      { k: 'keys', label: 'keys', type: 'info' },
+      { k: 'keys', label: isTouch(ui) && ui.input?.lastDevice === 'touch' ? 'touch' : 'keys', type: 'info' },
     ] },
     { id: 'access', label: 'accessibility', rows: [
       { k: 'shake', label: 'camera shake', type: 'slider', min: 0, max: 100, step: 10, unit: '%' },
@@ -212,7 +211,6 @@ export class SettingsScreen {
     const set = (v) => {
       if (r.set) r.set(v); else ui.setSetting(r.k, v);
       this.paint(el, r, ui.S);
-      if (r.k === 'quality') this.render(true); // motion blur follows the tier
       if (r.k === 'menuScale' || r.k === 'touchStick') requestAnimationFrame(() => { this.ui.focus.current?.scrollIntoView?.({ block: 'nearest' }); this.line(); this.edges(); });
     };
     if (r.type === 'choice') {
@@ -291,6 +289,12 @@ export class SettingsScreen {
   }
 
   keysHtml() {
+    // fingers: the touch layer's own glyphs (as the pause draws them), and a finger on the scene aims a held prop
+    if (this.ui.touch && this.ui.input?.lastDevice === 'touch') {
+      const pad = (n) => `<span class="pad">${icon(n)}</span>`;
+      const rows = [['move', stick('lr')], ['climb · crawl', stick('ud')], ['jump', pad('jump')], ['grab', pad('hand')], ['tilt · aim', '<small>a finger on the scene</small>'], ['pause', pad('pause')]];
+      return `<table class="keys"><tbody>${rows.map(([a, g]) => `<tr><th>${a}</th><td>${g}</td></tr>`).join('')}</tbody></table>`;
+    }
     const kb = this.ui.input?.keyLabels, kind = this.ui.input?.pad?.kind || 'xbox';
     const L = kb ? `${kb.left} ${kb.right}` : 'A D';
     const pad = !!this.ui.input?.pad;

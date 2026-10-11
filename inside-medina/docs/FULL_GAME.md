@@ -887,7 +887,7 @@ Splash (CSS wordmark + turning brass rosette, < 0.3 s; keeps animating during sy
 | battery saver | on / off (30 fps, scale 0.75, DOF off) | off |
 | depth of field | on / off | on |
 | film grain | 0–100 | 60 |
-| motion blur | on / off (ultra only; cut-able) | off |
+| motion blur | cut (§13.1 #2): no row in the shell | — |
 | brightness | −3…+3, with a calibration rosette glyph (matters for Chapter III) | 0 |
 | camera | close / normal / wide (rail `dist` ×0.85 / 1 / 1.12) | close on portrait phones, otherwise normal |
 

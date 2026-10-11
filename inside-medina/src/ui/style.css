@@ -391,7 +391,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #lost .lring { width: 22px; height: 22px; color: var(--dim); }
 #lost .lring svg { animation: spin 3s linear infinite; stroke-width: 5; }
 #lost .lmsg { font-style: italic; letter-spacing: .2em; color: var(--dim); font-size: 16px; }
-#lost.auto .lmsg { display: none; }
+#lost.auto .lmsg, #lost .lmsg:empty { display: none; }
 #fatal .fw { font-size: clamp(32px, 6vw, 60px); font-weight: 300; letter-spacing: .5em; padding-left: .5em; }
 #fatal p { margin: 0; max-width: 26em; font-style: italic; letter-spacing: .1em; color: var(--dim); font-size: 17px; padding: 0 24px; }
 #dbg { position: fixed; left: 8px; top: 8px; font: 11px/1.4 monospace; color: #ffe; background: rgba(0, 0, 0, .5); padding: 6px 8px; white-space: pre; transition: none; z-index: 60; }
