@@ -122,7 +122,8 @@ export const scenarios = [
     check: (r) => (r.gripped && r.jumpFromGrip && r.upJumpsFree ? true : `jump paths ${JSON.stringify(r)}`),
   },
   {
-    // wrong notch → the lock stays dark for 10 s (every room with a tilting or cranking solution)
+    // wrong notch → the lock stays dark for 10 s (every room with a tilting or cranking solution): never latched, and
+    // no petal stirs (level ≤ 0.02 throughout)
     name: 'wrong notch: the lock stays dark 10 s', cp: 0,
     run: async ({ page }) => { await prep(page); return page.evaluate(() => {
       const { M, G, get, sim } = __neg;
@@ -134,7 +135,7 @@ export const scenarios = [
         { cp: 11, mirror: 'MM', lock: 'ML', right: -45, park: 312.5, pre: () => get('MM').setState({ x: 330, y: 0, alpha: 15 }) },
         { cp: 12, mirror: 'F1', lock: 'LD1', right: 30, park: 346.5 },
       ];
-      const out = [], odd = [];
+      const out = [], odd = [], glow = [];
       for (const R of rooms) {
         const lit = [];
         for (let n = -6; n < 6; n++) {
@@ -144,17 +145,21 @@ export const scenarios = [
           let max = 0;
           for (let i = 0; i < 20; i++) { sim(0.5, { x: 0 }); max = Math.max(max, get(R.lock).level); }
           if (get(R.lock).done || max >= 1) lit.push(a);
+          else if (max > 0.02) glow.push({ lock: R.lock, a, max: +max.toFixed(3) }); // not even a petal stirs
           if (G.mode !== 'play' || G.player.dead) odd.push({ lock: R.lock, a, mode: G.mode, dead: G.player.dead });
         }
         out.push({ lock: R.lock, lit });
       }
-      return { out, odd };
+      return { out, odd, glow };
     }); },
     check: (r) => {
       const want = { L4: [-45], LJ: [0], L7: [45], L8: [60], ML: [-45], LD1: [30] };
       const bad = r.out.filter((x) => JSON.stringify(x.lit) !== JSON.stringify(want[x.lock]));
-      // no setting of a lab mirror may end the chapter or kill the boy (a ray sent back into the fortress eye did)
-      return bad.length || r.odd.length ? `locks lit by other notches: ${JSON.stringify(bad)} odd: ${JSON.stringify(r.odd.slice(0, 4))}` : true;
+      // a wrong notch leaves the lock dark: level ≤ 0.02 for 10 s (no partial light: in these rooms every light that
+      // reaches a lock is strong enough to open it, so a half-open lock would be a stray beam). The one designed
+      // partial is the moon on a gold lock (GL), which is not among these locks.
+      // No setting of a lab mirror may end the chapter or kill the boy (a ray sent back into the fortress eye did)
+      return bad.length || r.odd.length || r.glow.length ? `locks lit by other notches: ${JSON.stringify(bad)} glowing: ${JSON.stringify(r.glow)} odd: ${JSON.stringify(r.odd.slice(0, 4))}` : true;
     },
   },
   {
