@@ -61,6 +61,50 @@ export const scenarios = [
     check: (r) => (r.trials === 100 && r.jumps === 0 && r.tilted >= 95 ? true : `jumped in ${r.jumps} of ${r.trials} trials (tilted ${r.tilted}): ${JSON.stringify(r.fails.slice(0, 5))}`),
   },
   {
+    // §6.3 / §8.1: a latched grip (touch on a mirror, a crank; grab 'toggle' on anything) is taken by a tap and let go
+    // by the next one, however long that tap is held: the releasing tap never takes the prop again. Hold mode on a
+    // keyboard keeps the plain rule (a grip lasts as long as grab is held)
+    name: 'a second tap lets a latched grip go', cp: 3,
+    run: async ({ page }) => { await prep(page); return page.evaluate(() => {
+      const { M, G, get, walkTo, until, sim } = __neg;
+      const out = {};
+      const holding = (k) => (k === 'K2' ? G.player.state === 'crank' : !!G.player.grip);
+      const press = (n) => { const seen = []; for (let i = 0; i < n; i++) { M.sim(1 / 120, { x: 0, grab: true }); seen.push(holding(out.k)); } return seen; };
+      const idle = (n = 24) => { for (let i = 0; i < n; i++) M.sim(1 / 120, { x: 0 }); };
+      const setups = {
+        M2: () => { G.input.lastDevice = 'touch'; M.checkpoint(3); walkTo(get('M2').body.x - 0.55); until(() => G.player.facing === 1, { x: 0.15 }, 1); idle(); },
+        K2: () => { G.input.lastDevice = 'touch'; M.checkpoint(6); G.player.spawn(117.65, 4.0, 1); sim(0.3); },
+        CR3: () => { G.input.lastDevice = 'keyboard'; G.settings.grabMode = 'toggle'; M.checkpoint(5); const c = get('CR3'); M.teleport(c.body.x + c.body.w / 2 + 0.19, 0, -1); idle(36); },
+      };
+      for (const k of ['M2', 'K2', 'CR3']) {
+        out.k = k; const r = out[k] = { runs: [] };
+        for (const n of [2, 12, 60]) {
+          setups[k]();
+          press(12); idle();
+          const taken = holding(k) && G.player.latch;
+          const during = press(n); idle();
+          const released = !holding(k) && !G.player.latch;
+          // a third tap takes it again: the latch still works after a release
+          press(12); idle();
+          r.runs.push({ n, taken, during: during.filter(Boolean).length, released, again: holding(k) && G.player.latch });
+          press(12); idle(); // let go before the next run
+        }
+      }
+      // hold mode on a keyboard: no latch, the grip ends with the press
+      G.settings.grabMode = 'hold'; out.k = 'M2'; G.input.lastDevice = 'keyboard'; M.checkpoint(3); walkTo(get('M2').body.x - 0.55); until(() => G.player.facing === 1, { x: 0.15 }, 1); idle();
+      const held = press(12); idle();
+      out.hold = { during: held.filter(Boolean).length, after: !!G.player.grip, latch: G.player.latch };
+      G.input.lastDevice = 'keyboard'; delete out.k;
+      return out;
+    }); },
+    check: (r) => {
+      const bad = [];
+      for (const k of ['M2', 'K2', 'CR3']) for (const x of r[k].runs) if (!x.taken || x.during || !x.released || !x.again) bad.push({ k, ...x });
+      if (r.hold.during < 11 || r.hold.after || r.hold.latch) bad.push({ hold: r.hold });
+      return bad.length ? `latched grips: ${JSON.stringify(bad)}` : true;
+    },
+  },
+  {
     // a jump still works from the ground, and the jump button drops a grip and jumps
     name: 'the jump button still jumps from a grip', cp: 4,
     run: async ({ page }) => { await prep(page); return page.evaluate(() => {

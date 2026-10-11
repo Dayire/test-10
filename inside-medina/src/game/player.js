@@ -41,7 +41,7 @@ export class Player {
     this.tune = { ...P }; // per-instance tuning (assists change coyote and buffer)
     this.z = 0; this.fvx = 0;
     // Sunwork: a latched (sticky) grip, the notch-repeat timer of a tilt, the jump an up-press buffered
-    this.latch = false; this.latchFresh = false; this.tilt = { dir: 0, t: 0, last: 0, age: 9 }; this.upJump = false;
+    this.latch = false; this.latchFresh = false; this.latchBlock = false; this.tilt = { dir: 0, t: 0, last: 0, age: 9 }; this.upJump = false;
     this.gripT = 0; this.aimAt = null;
   }
 
@@ -126,11 +126,12 @@ export class Player {
     if (this.game.settings?.grabMode === 'toggle') return true;
     return this.game.input?.lastDevice === 'touch' && !!(target?.mirror || target?.sunwork);
   }
-  // is the grip still held this step? (a latched grip lets go on the next grab press)
+  // is the grip still held this step? (a latched grip lets go on the next grab press; that press, however long it
+  // is held, never takes anything again: latchBlock lasts until grab is released)
   held(inp) {
     if (!this.latch) return !!inp.grab;
     if (this.latchFresh) { if (!inp.grab) this.latchFresh = false; return true; }
-    if (inp.grabPressed) { this.latch = false; return false; }
+    if (inp.grabPressed) { this.latch = false; this.latchBlock = !!inp.grab; return false; }
     return true;
   }
   take(target) {
@@ -201,7 +202,7 @@ export class Player {
       const g = this.grip;
       const away = g.anchored && inp.x !== 0 && Math.sign(inp.x) !== this.facing && Math.abs(inp.x) > 0.5; // walking away lets an anchored mirror go
       if (!this.held(inp) || !g.grounded || Math.abs(g.y - b.y) > 0.2 || away || !g.enabled) {
-        if (this.latch && inp.grab) this.latchBlock = true; // a tap that let go must not take it again at once
+        if (this.latch && inp.grab) this.latchBlock = true; // a latched grip that slipped with grab down: no retake
         this.latch = false; this.grip = null; g.mirror?.gripped?.(false, this);
       }
     }
@@ -485,7 +486,7 @@ export class Player {
     const sun = this.state === 'crank' || this.state === 'capstan';
     const jump = sun && this.jumpBuf > 0 && !this.upJump;
     if (!this.held(inp) || jump) {
-      if (this.latch && inp.grab) this.latchBlock = true;
+      if (this.latch && inp.grab) this.latchBlock = true; // (the releasing tap sets it in held())
       lv.release(this); this.lever = null; this.state = 'ground'; this.latch = false;
       if (jump && this.phys.free(b.x - P.w / 2, b.y + 0.1, b.x + P.w / 2, b.y + P.h + 0.2, b)) this.jump();
       return;
