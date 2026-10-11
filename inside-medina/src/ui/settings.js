@@ -173,12 +173,13 @@ export class SettingsScreen {
     this.edges();
     this.syncCalib();
   }
-  // the brass underline slides under the active tab (transform only)
+  // the brass underline slides under the active tab (transform only), on the tab's own row when the tabs wrap
   line() {
     const T = this.el.querySelector('.tabs'), a = T.querySelector('.active'), line = this.el.querySelector('.tabline i');
     if (!a || !line) return;
     const r0 = this.el.querySelector('.tabline').getBoundingClientRect(), r = a.getBoundingClientRect();
-    line.style.transform = `translateX(${r.left - r0.left}px) scaleX(${Math.max(1, r.width) / 100})`;
+    const dy = Math.min(0, Math.round(r.bottom - r0.top + 2));
+    line.style.transform = `translate(${r.left - r0.left}px, ${dy}px) scaleX(${Math.max(1, r.width) / 100})`;
   }
   // a list longer than its view fades at the edge it runs on past and shows a brass hairline track at its side
   edges() {
@@ -212,7 +213,7 @@ export class SettingsScreen {
       if (r.set) r.set(v); else ui.setSetting(r.k, v);
       this.paint(el, r, ui.S);
       if (r.k === 'quality') this.render(true); // motion blur follows the tier
-      if (r.k === 'menuScale' || r.k === 'touchStick') requestAnimationFrame(() => this.ui.focus.current?.scrollIntoView?.({ block: 'nearest' }));
+      if (r.k === 'menuScale' || r.k === 'touchStick') requestAnimationFrame(() => { this.ui.focus.current?.scrollIntoView?.({ block: 'nearest' }); this.line(); this.edges(); });
     };
     if (r.type === 'choice') {
       rc.innerHTML = `<span class="choice"><i data-step="-1" aria-hidden="true">‹</i><b></b><i data-step="1" aria-hidden="true">›</i></span>`;

@@ -21,6 +21,10 @@
 //   back       (phones) settings and chapters are left by a tap on their back glyph, from the title and from the
 //              pause menu, and play resumes; a tap on the resting title wakes it; the browser's back (Android's
 //              gesture) pauses play, closes settings and resumes from the pause menu
+//   text       (iPhone 13 both ways, and an iPhone SE that runs only this) the menu text at 100, 125 and 150 %: on the
+//              title, every settings tab, the chapter select, a confirm and the pause, nothing leaves the safe area
+//              (a list that scrolls stays inside it), no settings value is clipped, no two blocks meet, one focus
+//              mark (tools/lib/layout.mjs)
 // A touch-screen laptop (touch events, a fine mouse pointer, 1280 × 720) runs one check:
 //   hybrid     the mouse never drives the hidden touch layer: a drag on the left reaches the scene as the pointer
 //              (no stick, no walk, no lens shift, the device stays keyboard), a click in the top-left corner does not
@@ -29,6 +33,7 @@
 //              land between two frames still jumps
 import { devices } from 'playwright';
 import { parseArgs, launch } from './lib/harness.mjs';
+import { auditTextSizes } from './lib/layout.mjs';
 
 const o = parseArgs(process.argv.slice(2));
 const BASE = process.env.BASE || `http://127.0.0.1:${o.port}/`;
@@ -36,7 +41,8 @@ const Q = 'tex=0.1&tier=low&noauto=1&nosave=1';
 const DEVICES = [
   { name: 'iPhone 13 portrait', d: devices['iPhone 13'], viewport: { width: 390, height: 844 }, insets: { top: 47, bottom: 34, left: 0, right: 0 } },
   { name: 'iPhone 13 landscape', d: devices['iPhone 13 landscape'], viewport: { width: 844, height: 390 }, insets: { top: 0, bottom: 21, left: 47, right: 47 } },
-  { name: 'Pixel 7', d: devices['Pixel 7'], viewport: { width: 412, height: 915 }, insets: { top: 26, bottom: 0, left: 0, right: 0 } },
+  { name: 'Pixel 7', d: devices['Pixel 7'], viewport: { width: 412, height: 915 }, insets: { top: 26, bottom: 0, left: 0, right: 0 }, skip: ['text'] },
+  { name: 'iPhone SE', d: devices['iPhone SE'], viewport: { width: 375, height: 667 }, insets: { top: 20, bottom: 0, left: 0, right: 0 }, checks: ['text'] },
   { name: 'touch laptop', hybrid: true, d: {}, viewport: { width: 1280, height: 720 }, insets: { top: 0, bottom: 0, left: 0, right: 0 } },
 ].filter((x) => !o.device || x.name.toLowerCase().includes(String(o.device).toLowerCase()));
 const only = o.only ? String(o.only).split(',') : null;
@@ -85,7 +91,7 @@ async function device(dev) {
     results.push({ name: `${dev.name}: ${name}`, ok });
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${`${dev.name}: ${name}`.padEnd(34)} ${JSON.stringify(evidence)?.slice(0, 900)}`);
   };
-  const want = (n) => (dev.hybrid ? n === 'hybrid' : n !== 'hybrid') && (!only || only.some((s) => n.includes(s)));
+  const want = (n) => (dev.hybrid ? n === 'hybrid' : dev.checks ? dev.checks.includes(n) : n !== 'hybrid' && !dev.skip?.includes(n)) && (!only || only.some((s) => n.includes(s)));
 
   // ------------------------------------------------------------------ menus over the title, then play by a tap
   if (want('menus') || want('controls')) {
@@ -352,6 +358,12 @@ async function device(dev) {
       && out.k2.took.state === 'crank' && out.k2.took.latch && Math.round(out.k2.alpha) === 45 && out.k2.let.state !== 'crank'
       && out.cap.took.state === 'capstan' && Math.abs(out.cap.alpha - 3.2) < 0.6 && out.cap.end;
     check('aim', ok, out);
+  }
+  // ------------------------------------------------------------------ the menu text size on a small screen
+  if (want('text')) {
+    await page.goto(`${BASE}?${Q}&chapter=souk&cp=0`); await ready(page); await frames(page, 4);
+    const res = await auditTextSizes(page, { touch: true });
+    check('text', !Object.keys(res).length, res);
   }
   // ------------------------------------------------------------------ a touch-screen laptop: a mouse and fingers
   if (want('hybrid')) {

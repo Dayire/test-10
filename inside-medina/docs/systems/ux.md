@@ -17,7 +17,7 @@ on the compositor and keeps moving while the main thread bakes or builds. Screen
 |---|---|
 | ink / ivory / brass | `#0b0806` / `#f3e6d2` (`#fbefdc` focused) / `#dcb46f` (`#f3d79e` hi, `#a27436` lo) |
 | type | wordmark 300, 0.32 em tracking; entries 26 px (× menu text size); rows 19 px; micro labels 12 px caps 0.42 em |
-| rows | ≥ 48 px main entries, ≥ 50 px settings rows, ≥ 44 px everywhere (touch: 52 px entries in portrait) |
+| rows | ≥ 48 px main entries (30 px + 18 px × menu text size), ≥ 50 px settings rows, ≥ 44 px everywhere (touch: 52 px entries in portrait, 1.5 em at large text) |
 | motion | `cubic-bezier(.16,.84,.24,1)`; entries stagger 55 ms; cards assemble their glyph in 1.6 s |
 
 The menus sit over the live title shot. The dimming is the post chain's vignette, deepened while a menu is up over
@@ -139,6 +139,9 @@ A tab opens at its first option (a redraw of the same tab keeps its place). A li
 that edge (a mask on the list; a focused row scrolls clear of the fade) and shows a brass hairline track at its side.
 On landscape phones (height ≤ 460 px) the tabs are one strip that scrolls sideways under large menu text (the
 underline follows it) and the eyebrow gives its line to the options: six rows in view on an iPhone 13 instead of four.
+Where the tabs wrap (portrait, or desktop at 150 %) the underline sits under the active tab's own row. A row whose
+label and control do not fit on one line (large menu text on a phone) puts the control on a line of its own under the
+label, right-aligned, so no value is ever clipped by the list's edge.
 
 High contrast also brightens the shell; for beams, locks, tripwires and searchlight cones it is `game.settings.highContrast`
 for L and the chapters to read (requests/U.md). The save code is `M1` + a two-character checksum + base64url of the
@@ -158,9 +161,17 @@ and in reach. The save code field is 16 px (iOS zooms the page when a smaller fi
 - **Main** (`#title`, the title screen the engine's tests read): left column at 7.5 vw (landscape), a bottom sheet
   (portrait), two columns on phones in landscape; the continue entry names the save's
   chapter with its glyph; a broken-link glyph bottom right when progress cannot be kept.
+- **Menu text size** (100 / 125 / 150 %, `--menu-scale`): phones lay the title and the pause out in flow (a column in
+  portrait, a row or a two-column grid in landscape), so blocks push each other instead of meeting; the landscape
+  wordmark shrinks as the text grows and the tagline wraps, balanced. A title or pause whose blocks still meet or leave
+  the safe area (measured on layout boxes by `ui.fitMenu` whenever their sizes change) turns `tight`: the key legend
+  and the play controls give their room to the entries. The portrait chapter cards shrink with the text and their
+  list scrolls when two rows still do not fit (iPhone SE at 150 %). `tools/lib/layout.mjs` audits every screen at the
+  three sizes (ux-tests `textsize` on a desktop, mobile-tests `text` on iPhone 13 both ways and an iPhone SE).
 - **Pause**: the same column over the dimmed freeze-frame, with the chapter's glyph, numeral, label and checkpoint pips,
   and the play controls for the hands in use (move, jump, grab, climb, crawl: keycaps with the player's layout letters,
-  pad buttons, or the touch glyphs), bottom right on a desktop, under the chapter on phones.
+  pad buttons, or the touch glyphs), bottom right on a desktop, under the chapter on phones (the header centred over
+  the centred entries in portrait).
 - **Chapters**: four arches (an SVG clip path), each with a 320 × 180 JPEG (q 0.7) captured from the canvas ~1.6 s
   into play the first time a chapter is reached (never from the dimmed half-resolution title; `medina.v1.thumb.<id>`),
   else the chapter's palette; the glyph; checkpoint pips (the registry's `cps`, FULL_GAME §2–5, replaced by the

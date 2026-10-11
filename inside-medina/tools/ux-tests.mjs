@@ -9,6 +9,8 @@
 //              deepened once (a resting title's redraws never deepen it again), still half after a quality change;
 //              a page shown again wakes the title, hiding it rests it; the chapter thumbnail comes from play
 //   pause      every pause opens on resume (after a restart too) with one focus mark, restart chapter asks first
+//   textsize   the menu text at 100, 125 and 150 % on a 1280 × 720 desktop: nothing leaves the screen, no settings
+//              value is clipped, no two blocks meet (tools/lib/layout.mjs; phones: mobile-tests)
 //   mouse      a mouse alone leaves settings and chapters (the back glyph, a click on the scene beside the sheet;
 //              a slider dragged past the sheet's edge stays), the browser's back closes the open screen
 //   chapters   chapter select by keyboard: the card covers the load, the chapter starts at the picked checkpoint
@@ -30,6 +32,7 @@ import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
 import { parseArgs, launch, ROOT } from './lib/harness.mjs';
+import { auditTextSizes } from './lib/layout.mjs';
 
 const o = parseArgs(process.argv.slice(2));
 const BASE = process.env.BASE || `http://127.0.0.1:${o.port}/`;
@@ -349,6 +352,13 @@ await scenario('pause', async () => {
   const ok = out.first === 'resume' && out.picked === 'checkpoint' && out.second === 'resume' && out.secondMarks.join() === 'resume' && out.afterEnter.mode === 'play' && !out.afterEnter.paused && !out.afterEnter.top && out.afterEnter.cp === 1
     && out.third === 'resume' && out.confirm.top === 'confirm' && out.confirm.focus === 'no' && out.afterNo.top === 'pause' && out.afterNo.cp === 1 && !errors.length;
   return [ok || `pause ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
+});
+
+await scenario('textsize', async () => {
+  const { page, errors } = await open({ url: `${BASE}?${Q}&nosave=1&chapter=souk&cp=0`, w: 1280, h: 720 });
+  await ready(page); await frames(page, 3);
+  const res = await auditTextSizes(page);
+  return [(!Object.keys(res).length && !errors.length) || `textsize ${JSON.stringify(res)} ${errors.slice(0, 2).join(' | ')}`, res];
 });
 
 await scenario('mouse', async () => {

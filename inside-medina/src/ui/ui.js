@@ -53,6 +53,9 @@ export class UI {
     this.el('card').querySelector('.cpat').style.backgroundImage = zelligeTile('rgba(255,243,220,.07)', 96);
     root.style.setProperty('--zellige-faint', zelligeTile('rgba(233,196,143,.07)', 72));
     this.focus = new FocusManager(this);
+    // the title and the pause check that their blocks fit whenever their sizes change (the menu text size, a
+    // rotation, the screen shown again)
+    this._fitRO = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { this.fitMenu(this.main); this.fitMenu(this.pause); }) : null;
     this.buildMain(); this.buildPause(); this.buildConfirm(); this.buildCredits();
     this.settings = new SettingsScreen(this);
     this.chapters = new ChaptersScreen(this);
@@ -254,6 +257,7 @@ export class UI {
   // a resize or a rotation re-resolves the automatic camera distance
   layoutChanged() {
     this.root.classList.toggle('portrait', innerHeight > innerWidth);
+    this.fitMenu(this.main); this.fitMenu(this.pause);
     if (this.game && this.S.cameraDist === 'auto') this.game.applySettings(resolveSettings({ cameraDist: 'auto' }, this), { persist: false });
     this.touch?.layout();
   }
@@ -369,6 +373,7 @@ export class UI {
       back: () => { if (this.game && this.ready) { this.sound('back'); this.game.setPaused(!this.game.paused); } },
       onOpen: () => { if (this.game?.held && this.audio && !this.menuTheme) { this.menuTheme = true; this.audio.setChapter?.({ theme: 'menu', verb: 'menu' }); } },
     });
+    this._fitRO?.observe(nav); this._fitRO?.observe(el.querySelector('.brand'));
     el.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') this.mouse = { x: e.clientX / innerWidth * 2 - 1, y: -(e.clientY / innerHeight * 2 - 1) }; });
     // a resting title (Esc, or the page was hidden) wakes on any touch or click, not only on an entry
     el.addEventListener('pointerdown', () => { const g = this.game; if (g?.paused && g.held && this.focus.top === this.main) g.setPaused(false); });
@@ -487,7 +492,23 @@ export class UI {
       nav.appendChild(b);
     });
     // every pause opens on resume (a reflex confirm never restarts or leaves)
-    this.pause = new Screen(this, { el, initial: () => nav.querySelector('[data-k="resume"]'), back: () => this.resume(), onOpen: () => { this._skipNav = true; } });
+    this.pause = new Screen(this, { el, initial: () => nav.querySelector('[data-k="resume"]'), back: () => this.resume(), onOpen: () => { this._skipNav = true; this.fitMenu(this.pause); } });
+    this._fitRO?.observe(nav); this._fitRO?.observe(el.querySelector('.where'));
+  }
+  // a menu whose blocks meet or run off the screen (large menu text on a short screen) is `tight`: the legend and
+  // the play controls give their room to the entries. Measured untight, on layout boxes (the reveal's transforms
+  // never count)
+  fitMenu(s) {
+    const el = s?.el;
+    if (!el || el.hidden) return;
+    el.classList.remove('tight');
+    const W = el.clientWidth, H = el.clientHeight, ins = this.safeInsets();
+    const B = [...el.querySelectorAll(':scope > .brand, :scope > .where, :scope > .ctl, :scope > .entries, :scope > .legend')]
+      .filter((e) => e.offsetParent !== null && e.offsetWidth && e.offsetHeight && e.childElementCount)
+      .map((e) => ({ l: e.offsetLeft, t: e.offsetTop, r: e.offsetLeft + e.offsetWidth, b: e.offsetTop + e.offsetHeight }));
+    const meet = (a, b) => a.l < b.r - 1 && b.l < a.r - 1 && a.t < b.b - 1 && b.t < a.b - 1;
+    const tight = B.some((a, i) => a.b > H - ins.b + 1 || a.t < ins.t - 1 || a.r > W + 1 || B.some((b, j) => j > i && meet(a, b)));
+    el.classList.toggle('tight', tight);
   }
   fillPause() {
     const g = this.game, el = this.pause.el, m = meta(g?.chapterId);

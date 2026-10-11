@@ -57,7 +57,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 .menu.in::before { opacity: 1; }
 .menu .brand { position: absolute; left: var(--gut); top: calc(12vh + var(--st)); }
 .wordmark { margin: 0; font-weight: 300; font-size: clamp(50px, 7.4vw, 122px); line-height: .92; letter-spacing: .32em; color: var(--ivory-hi); text-shadow: 0 2px 34px rgba(30, 15, 4, .5); }
-.tagline { margin-top: .9em; font-style: italic; font-size: calc(17px * var(--ms)); letter-spacing: .2em; color: var(--dim); padding-left: .12em; text-shadow: 0 1px 14px rgba(11, 8, 6, .75); }
+.tagline { margin-top: .9em; text-wrap: balance; font-style: italic; font-size: calc(17px * var(--ms)); letter-spacing: .2em; color: var(--dim); padding-left: .12em; text-shadow: 0 1px 14px rgba(11, 8, 6, .75); }
 .rule { display: flex; align-items: center; gap: 10px; margin-top: 26px; width: min(300px, 30vw); height: 12px; }
 .rule i { height: 1px; flex: 0 0 22px; background: var(--hair); }
 .rule i.load { flex: 1; background: linear-gradient(90deg, var(--brass) 0, var(--brass) 100%) no-repeat 0 0 / 100% 100%, var(--hair); transform-origin: left; }
@@ -70,7 +70,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 .menu.in .brand::before { opacity: 1; }
 .menu.in .brand > :nth-child(2) { transition-delay: .12s; } .menu.in .brand > :nth-child(3) { transition-delay: .22s; }
 .menu .entries { position: absolute; left: calc(var(--gut) - 30px); top: max(calc(48vh + var(--st)), calc(12vh + var(--st) + 7.4vw + 120px)); display: flex; flex-direction: column; align-items: flex-start; }
-.entry { position: relative; display: flex; align-items: center; min-height: calc(48px * var(--ms)); padding: 0 22px 0 30px; font-size: calc(26px * var(--ms)); font-weight: 300; letter-spacing: .07em; color: var(--dim); text-align: left; white-space: nowrap; opacity: 0; transform: translate3d(-16px, 0, 0); transition: opacity .55s var(--ease), transform .7s var(--ease), color .25s ease; }
+.entry { position: relative; display: flex; align-items: center; min-height: calc(30px + 18px * var(--ms)); padding: 0 22px 0 30px; font-size: calc(26px * var(--ms)); font-weight: 300; letter-spacing: .07em; color: var(--dim); text-align: left; white-space: nowrap; opacity: 0; transform: translate3d(-16px, 0, 0); transition: opacity .55s var(--ease), transform .7s var(--ease), color .25s ease; }
 .menu.in .entry { opacity: 1; transform: none; transition-delay: calc(var(--i) * 55ms + 160ms), calc(var(--i) * 55ms + 160ms), 0s; }
 .menu.out .entry { transition-duration: .25s, .3s, .2s; transition-delay: 0s; }
 .entry .lbl { position: relative; display: inline-block; transition: transform .45s var(--ease); }
@@ -95,6 +95,10 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 .menu.in .legend { opacity: 1; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend em { font-style: italic; }
+/* a menu that does not fit its screen (large menu text, a short screen): the legend and the play controls give
+   their room to the entries (ui.js fitMenu) */
+.menu.tight .legend, #pause.tight .ctl { display: none; }
+.menu.tight .entry { min-height: 44px; }
 #title .store { position: absolute; right: calc(28px + var(--sr)); bottom: calc(5vh + var(--sb)); width: 28px; height: 28px; color: var(--brass); opacity: .8; transition: opacity .6s ease; }
 #title .store svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 5; stroke-linecap: round; }
 
@@ -162,7 +166,9 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 .row .rl { font-size: calc(19px * var(--ms)); letter-spacing: .05em; color: var(--dim); transition: color .2s ease; }
 .row.focused .rl { color: var(--ivory-hi); }
 .row.off { cursor: default; } .row.off .rl, .row.off .rc { opacity: .38; }
-.row .rc { display: flex; align-items: center; font-size: calc(18px * var(--ms)); color: var(--ivory); position: relative; z-index: 1; }
+.row .rc { display: flex; align-items: center; margin-left: auto; max-width: 100%; font-size: calc(18px * var(--ms)); color: var(--ivory); position: relative; z-index: 1; }
+/* large menu text on a narrow sheet: the control takes its own line under the label, never past the list's edge */
+.row:not(.r-info) { flex-wrap: wrap; row-gap: 0; align-content: center; }
 .choice { display: inline-flex; align-items: center; gap: 6px; }
 .choice b { font-weight: 500; min-width: 6.2em; text-align: center; letter-spacing: .08em; }
 .choice i { display: inline-grid; place-items: center; width: 34px; height: 44px; font-style: normal; font-size: 22px; color: var(--brass); opacity: .45; transition: opacity .2s ease, transform .3s var(--ease); }
@@ -374,6 +380,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #cues .cue.on { opacity: .92; animation: cue .5s var(--ease); }
 @keyframes cue { 0% { opacity: 0; transform: scale(.7); } 40% { opacity: 1; transform: scale(1.08); } 100% { opacity: .92; transform: scale(1); } }
 #rotate { position: fixed; left: 50%; top: 38%; width: 78px; height: 78px; margin-left: -39px; color: var(--ivory-hi); transition: opacity .6s ease; }
+#ui.menu-open #rotate { opacity: 0; } /* a play-time hint: a pause never shows it through its scrim */
 #rotate svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; animation: rot 2.4s var(--ease-io) infinite; filter: drop-shadow(0 2px 10px rgba(0, 0, 0, .6)); }
 @keyframes rot { 0%, 25% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
 
@@ -433,24 +440,27 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 @keyframes ring { from { transform: scale(1); opacity: .9; } to { transform: scale(1.5); opacity: 0; } }
 
 /* ------------------------------------------------------------ portrait: the menu becomes a bottom sheet */
+/* phones lay the menus out in flow (a column here, a row in landscape): blocks never meet, whatever the menu text */
 @media (orientation: portrait), (max-aspect-ratio: 1/1) {
-  .menu { --gut: calc(24px + var(--sl)); }
+  .menu { --gut: calc(24px + var(--sl)); display: flex; flex-direction: column; align-items: center; box-sizing: border-box; padding: calc(8vh + var(--st)) calc(12px + var(--sr)) calc(9vh + var(--sb)) calc(12px + var(--sl)); }
   .menu::before { background: linear-gradient(0deg, rgba(11, 8, 6, .9) 0%, rgba(11, 8, 6, .72) 38%, rgba(11, 8, 6, 0) 64%), linear-gradient(180deg, rgba(11, 8, 6, .5) 0%, rgba(11, 8, 6, 0) 22%); }
-  .menu .brand { left: 0; right: 0; top: calc(8vh + var(--st)); text-align: center; display: flex; flex-direction: column; align-items: center; }
+  .menu .brand { position: relative; left: auto; right: auto; top: auto; flex: none; text-align: center; display: flex; flex-direction: column; align-items: center; }
   .wordmark { font-size: clamp(40px, 12.5vw, 76px); letter-spacing: .3em; padding-left: .3em; }
   .tagline { font-size: calc(15px * var(--ms)); }
   .rule { width: min(220px, 56vw); }
-  .menu .entries { left: 0; right: 0; top: auto; bottom: calc(9vh + var(--sb)); align-items: center; }
-  .entry { min-height: calc(52px * var(--ms)); padding: 0 34px; font-size: calc(25px * var(--ms)); flex-wrap: wrap; justify-content: center; }
+  .menu .entries { position: relative; left: auto; right: auto; top: auto; bottom: auto; flex: none; margin-top: auto; padding-top: 16px; align-self: stretch; align-items: center; }
+  .entry { box-sizing: border-box; max-width: 100%; min-height: max(52px, 1.5em); padding: 0 30px; font-size: calc(25px * var(--ms)); flex-wrap: wrap; justify-content: center; white-space: normal; text-align: center; }
+  .entry .sub { flex-wrap: wrap; row-gap: 0; }
   .entry .sub { margin-left: 0; width: 100%; justify-content: center; margin-top: -4px; }
   .entry::after { left: 34px; right: 34px; bottom: 6px; background: linear-gradient(90deg, rgba(220, 180, 111, 0), var(--brass), rgba(220, 180, 111, 0)); transform-origin: center; }
   .entry .mark { left: -24px; }
   .menu .brand::before { display: block; left: -14%; right: -14%; top: -30%; bottom: -40%; }
   .entry.focused .lbl, .entry.focused .sub { transform: none; }
   .menu .legend { display: none; }
-  #pause .where { left: 0; right: 0; top: calc(12vh + var(--st)); justify-content: center; }
+  #pause.menu { padding-top: calc(12vh + var(--st)); }
+  #pause .where { position: relative; left: auto; top: auto; flex: none; grid-template-columns: auto auto; justify-content: center; }
   #pause .entries { top: auto; }
-  #pause .ctl { left: calc(20px + var(--sl)); right: calc(20px + var(--sr)); bottom: auto; top: calc(12vh + var(--st) + 104px); max-width: 320px; margin: 0 auto; justify-content: center; gap: 12px 20px; }
+  #pause .ctl { position: relative; left: auto; right: auto; bottom: auto; top: auto; flex: none; max-width: 320px; margin: 30px auto 0; justify-content: center; gap: 12px 20px; }
   #settings .sheet { --pr: calc(20px + var(--sr)); width: 100%; padding: calc(4vh + var(--st) + 14px) var(--pr) calc(2vh + var(--sb)) calc(20px + var(--sl)); background: rgba(14, 9, 6, .94); }
   #settings .tabs { gap: 2px 18px; }
   #settings .tab { font-size: calc(17px * var(--ms)); }
@@ -462,8 +472,10 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
   #settings .calib, #settings .code { left: calc(20px + var(--sl)); right: calc(20px + var(--sr)); top: auto; width: auto; bottom: calc(10vh + var(--sb)); }
   #settings .calib { padding: 16px 20px 14px; pointer-events: none; z-index: 2; } /* placed beside the brightness row (settings.js placeCalib); taps pass through */
   #settings .calib p { margin-top: 8px; }
-  #chapters .cards { flex-wrap: wrap; gap: 18px 7vw; top: calc(12vh + var(--st)); transform: none; padding: 0 20px; }
-  .ccard { --w: min(38vw, 190px, 22vh); }
+  #chapters .cards { flex-wrap: wrap; align-content: flex-start; gap: 18px 7vw; top: calc(12vh + var(--st) - 14px); bottom: var(--sb); transform: none; padding: 14px 20px 16px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; scrollbar-width: none; }
+  #chapters .cards::-webkit-scrollbar { display: none; }
+  .ccard { --w: min(38vw, 190px, 22vh, calc(35vh - (var(--st) + var(--sb)) * .42 - 36px - 44px * var(--ms))); }
+  .ccard .lab { white-space: normal; text-wrap: balance; width: calc(var(--w) + 6vw); letter-spacing: .06em; line-height: 1.15; }
   .ccard .arch { aspect-ratio: 1 / 1.2; }
   .ccard .num { margin-top: 8px; font-size: calc(28px * var(--ms)); }
   .ccard .pips { margin-top: 6px; gap: 2px; }
@@ -479,19 +491,21 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 /* phones in landscape: the wordmark (or the chapter) on the left, the entries in a second column */
 @media (max-height: 460px) and (orientation: landscape) {
   .menu::before { background: linear-gradient(90deg, rgba(11, 8, 6, .74) 0%, rgba(11, 8, 6, .5) 45%, rgba(11, 8, 6, .62) 70%, rgba(11, 8, 6, .7) 100%); }
-  .menu .brand { top: 50%; transform: translateY(-50%); }
+  .menu { display: flex; align-items: center; column-gap: 5vw; box-sizing: border-box; padding: calc(2vh + var(--st)) calc(6vw + var(--sr)) calc(2vh + var(--sb)) var(--gut); }
+  .menu .brand { position: relative; left: auto; top: auto; flex: 0 1 auto; min-width: 0; }
   .menu .brand::before { display: block; left: -22%; right: -18%; top: -36%; bottom: -36%; }
-  .wordmark { font-size: clamp(34px, 5.6vw, 64px); }
-  .menu .entries { left: auto; right: calc(6vw + var(--sr)); top: 50%; transform: translateY(-50%); }
-  .entry { min-height: 44px; font-size: calc(21px * var(--ms)); }
+  .wordmark { font-size: clamp(28px, calc(5.6vw / var(--ms)), 64px); }
+  .menu .entries { position: relative; left: auto; top: auto; flex: 0 1 auto; min-width: 0; margin-left: auto; }
+  .entry { min-height: 44px; font-size: calc(21px * var(--ms)); flex-wrap: wrap; }
   .entry .sub { font-size: calc(14px * var(--ms)); }
   .rule { margin-top: 14px; width: min(240px, 28vw); }
   .tagline { margin-top: .6em; font-size: calc(14px * var(--ms)); }
-  #pause .where { top: 50%; transform: translateY(-50%); }
-  #pause.in .where { transform: translateY(-50%); }
+  /* pause: the chapter and the play controls in the left column, the entries on the right */
+  #pause.menu { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 1fr auto auto 1fr; }
+  #pause .where { position: relative; left: auto; top: auto; grid-area: 2 / 1; justify-self: start; }
   #pause .pg { width: 48px; height: 48px; }
-  #pause .entries { top: 50%; }
-  #pause .ctl { right: auto; left: var(--gut); bottom: auto; top: calc(50% + 52px); max-width: min(330px, 40vw); justify-content: flex-start; gap: 8px 18px; }
+  #pause .entries { top: auto; grid-area: 1 / 2 / 5 / 3; align-self: center; }
+  #pause .ctl { position: relative; right: auto; left: auto; bottom: auto; top: auto; grid-area: 3 / 1; justify-self: start; margin-top: 18px; max-width: min(330px, 40vw); justify-content: flex-start; gap: 8px 18px; }
   /* short screens: the tabs are one strip (it scrolls sideways when the menu text is large), the eyebrow gives
      its line to the options */
   #settings .sheet { padding: calc(3vh + var(--st)) var(--pr) calc(3vh + var(--sb)) calc(3.5vw + var(--sl)); width: min(640px, 66vw); }
