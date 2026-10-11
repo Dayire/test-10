@@ -148,8 +148,13 @@ export class BeamRenderer {
     this.mat.uniforms.uHC.value = hc;
     this.mat.uniforms.uMinPx.value = hc ? 3.4 : 2.2; // room for the outline on thin beams
     const reduce = g.settings?.reduceFlashing ? 0.55 : 1;
-    let nq = 0, ng = 0, best = null, bestI = 0, bestCol = null;
+    let nq = 0, ng = 0, best = null, bestI = 0, bestD = 0, bestCol = null;
     const t = g.time;
+    // the pool light goes to the brightest spot in view (nearest the view's focus among equals); a searchlight's own
+    // first leg is its cone, which already has a rig spot, and a tripwire's beam is a thread, so neither competes
+    const cr = g.camRig, lk = cr ? (cr.override ? cr.curLook : cr.look) : null;
+    const fx = lk ? lk.x : g.player.x, fy = lk ? lk.y : g.player.y + 2;
+    const rw = (g.viewHalfW || 12) + 1.5, rh = (g.viewHalfW || 12) / Math.max(0.3, g.camera?.aspect || 1.78) + 1.5;
     for (const [src, R] of sys.results) {
       if (!R.on || !R.n) continue;
       const col = src.color(g), glow = src.glow ?? 1;
@@ -157,7 +162,8 @@ export class BeamRenderer {
       for (let i = 0; i < R.n && nq < MAXQ; i++) {
         const h = R.hits[i];
         const ax = R.pts[i * 2], ay = R.pts[i * 2 + 1], bx = R.pts[i * 2 + 2], by = R.pts[i * 2 + 3];
-        if (!(i === 0 && src.hideFirst)) {
+        const drawn = !(i === 0 && src.hideFirst);
+        if (drawn) {
           // a beam that ends in a lamp behind the plane is drawn into it (§6.1)
           const bz = h.kind === TARGET && h.obj.z !== undefined && h.obj.kind === 'eye' ? h.obj.z : 0;
           const len = Math.hypot(bx - ax, by - ay);
@@ -183,7 +189,10 @@ export class BeamRenderer {
             const sz = lamp ? 0.22 : 0.85 + 0.45 * h.I;
             this.glow(ng++, px, py, pz, col, (lamp ? 0.9 : 1.5) * Math.min(1.6, h.I) * flick * reduce, sz, 0, 0.06);
           }
-          if (!lamp && h.I > bestI) { bestI = h.I; best = h; bestCol = col; }
+          if (drawn && !lamp && !(h.kind === TARGET && h.obj.kind === 'eye') && Math.abs(h.x - fx) <= rw && Math.abs(h.y - fy) <= rh) {
+            const d = Math.hypot(h.x - fx, h.y - fy), I = Math.min(1.6, h.I);
+            if (!best || I > bestI + 0.02 || (I > bestI - 0.02 && d < bestD)) { bestI = I; bestD = d; best = h; bestCol = col; }
+          }
         }
       }
     }
@@ -194,10 +203,15 @@ export class BeamRenderer {
     const P = this.pool;
     if (P) {
       if (best) {
+        const x = best.x + best.nx * 0.35, y = best.y + best.ny * 0.35 + 0.05;
+        // a spot that moves with its beam is followed; a jump to another spot fades in there (no light sliding
+        // across the room, no pop)
+        if (!P.enabled || Math.hypot(x - P.pos.x, y - P.pos.y) > 0.6) this.fadeK = 0;
+        this.fadeK = Math.min(1, (this.fadeK ?? 1) + dt * 4);
         P.enabled = true;
-        P.pos.set(best.x + best.nx * 0.35, best.y + best.ny * 0.35 + 0.05, 0.35);
+        P.pos.set(x, y, 0.35);
         this.flick += dt;
-        P.intensity = (2.4 + 1.6 * Math.min(1.5, bestI)) * (0.94 + 0.06 * Math.sin(this.flick * 11));
+        P.intensity = (2.4 + 1.6 * Math.min(1.5, bestI)) * (0.94 + 0.06 * Math.sin(this.flick * 11)) * this.fadeK * this.fadeK;
         if (P.color) P.color.copy(bestCol).lerp(this._c.setRGB(1, 0.95, 0.85), 0.2);
       } else P.enabled = false;
     }

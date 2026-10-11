@@ -402,6 +402,31 @@ export const scenarios = [
     check: (r) => (r.n > 400 && r.p95 <= 0.35 ? true : `trace ${JSON.stringify(r)}`),
   },
   {
+    // §6.5: the brightest hit spot in view is the beam's priority pool light (a searchlight's own floor spot, already
+    // lit by its rig spot, never takes it); off-screen spots never hold it
+    name: "the beam's point light warms a spot in view", cp: 0,
+    run: async ({ page }) => { await prep(page); return page.evaluate(async () => {
+      const { M, G, get } = __neg;
+      const out = [];
+      const frames = async (n) => { for (let i = 0; i < n; i++) await new Promise((r) => requestAnimationFrame(r)); };
+      for (const [cp, x, y, setup] of [[0, 4, 0, null], [3, 53, 0, () => get('M2').setState({ ...get('M2').getState(), alpha: -45 })], [6, 117, 4, () => { get('M7').setState({ x: 119.9, y: 0, alpha: -30 }); get('F2').setState({ ...get('F2').getState(), alpha: 45 }); }],
+        [8, 133, 0, null], [10, 236, 0, null], [11, 330, 0, null], [12, 475, 12, null]]) {
+        M.checkpoint(cp); setup?.(); M.photo(x, y, 1, 0.5); await frames(4);
+        const p = G.level.light.beams.pool, lk = G.camRig.look;
+        // the spots a viewer can see: every drawn leg's end (not a searchlight's cone leg)
+        const spots = [];
+        for (const [src, R] of G.level.light.results) if (R.on) R.hits.forEach((h, i) => { if (h.kind !== 0 && !(i === 0 && src.hideFirst) && src.kind !== 'lamp') spots.push([+h.x.toFixed(2), +h.y.toFixed(2)]); });
+        out.push({ cp, x, on: !!p?.enabled, px: p && +p.pos.x.toFixed(2), py: p && +p.pos.y.toFixed(2), look: +lk.x.toFixed(1), half: +G.viewHalfW.toFixed(1), near: spots.some(([sx, sy]) => Math.abs(sx - p.pos.x) < 0.5 && Math.abs(sy - p.pos.y) < 0.6) });
+      }
+      return out;
+    }); },
+    check: (r) => {
+      const bad = r.filter((o) => o.on && (Math.abs(o.px - o.look) > o.half + 2 || !o.near));
+      const lit = r.filter((o) => o.on).length;
+      return bad.length || lit < 4 ? `pool light ${JSON.stringify(r)}` : true;
+    },
+  },
+  {
     // the light census is the fixed rig's, here as in the souk (FULL_GAME §9.1)
     name: 'light census unchanged', cp: 0,
     run: async ({ page }) => page.evaluate(async () => { const lab = __medina.lights(); await __medina.loadChapter('souk', 0); const souk = __medina.lights(); await __medina.loadChapter('lab', 10); return { lab, souk, again: __medina.lights() }; }),
