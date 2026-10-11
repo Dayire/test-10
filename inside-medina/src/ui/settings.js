@@ -95,7 +95,7 @@ export class SettingsScreen {
     this.ui = ui;
     const el = this.el = document.createElement('section');
     el.id = 'settings'; el.className = 'panel-screen'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'settings');
-    el.innerHTML = `<div class="sheet"><header><div class="eyebrow"><svg viewBox="0 0 100 100">${STAR}</svg>settings</div><div class="tabs" role="tablist"></div><div class="tabline"><i></i></div></header><div class="rows" role="tabpanel"></div><div class="calib hidden" aria-hidden="true"></div><div class="code hidden"><input type="text" spellcheck="false" autocomplete="off" aria-label="save code"><div class="cmsg"></div></div><footer class="legend"></footer></div>`;
+    el.innerHTML = `<div class="sheet"><header><div class="eyebrow"><svg viewBox="0 0 100 100">${STAR}</svg>settings</div><div class="tabs" role="tablist"></div><div class="tabline"><i></i></div></header><div class="rows" role="tabpanel"></div><div class="sbar" aria-hidden="true"><i></i></div><div class="calib hidden" aria-hidden="true"></div><div class="code hidden"><input type="text" spellcheck="false" autocomplete="off" aria-label="save code"><div class="cmsg"></div></div><footer class="legend"></footer></div>`;
     ui.menus.appendChild(el);
     this.tab = 0;
     this.screen = new Screen(ui, {
@@ -115,6 +115,12 @@ export class SettingsScreen {
         return false;
       },
     });
+    // a list that runs on past its edge fades there (the scrollbar stays hidden); a tab strip that scrolls (short
+    // landscape screens, large menu text) carries its underline along
+    this.rowsEl = el.querySelector('.rows');
+    this.rowsEl.addEventListener('scroll', () => this.edges(), { passive: true });
+    el.querySelector('.tabs').addEventListener('scroll', () => this.line(), { passive: true });
+    window.addEventListener('resize', () => { if (this.isOpen) { this.edges(); this.line(); } });
     el.addEventListener('focusin', () => this.syncCalib());
     el.addEventListener('pointerover', () => queueMicrotask(() => this.syncCalib()));
     const inp = el.querySelector('.code input');
@@ -149,20 +155,35 @@ export class SettingsScreen {
       item(b, { act: () => this.setTab(i, true), adjust: (d) => this.setTab(this.tab + d, true) });
       T.appendChild(b);
     });
-    // the brass underline slides under the active tab (transform only)
-    requestAnimationFrame(() => {
-      const a = T.querySelector('.active'), line = el.querySelector('.tabline i');
-      if (!a || !line) return;
-      const r0 = T.getBoundingClientRect(), r = a.getBoundingClientRect();
-      line.style.transform = `translateX(${r.left - r0.left}px) scaleX(${Math.max(1, r.width) / 100})`;
-    });
-    const R = el.querySelector('.rows');
+    requestAnimationFrame(() => { this.line(); this.edges(); });
+    const R = this.rowsEl;
     R.innerHTML = '';
     R.dataset.tab = this.list[this.tab].id;
     this.list[this.tab].rows.forEach((row, i) => R.appendChild(this.row(row, S, i)));
+    // a tab (or the screen) opens at its first option; a redraw of the same tab keeps its place
+    if (!keepFocus) R.scrollTop = 0;
     el.querySelector('.legend').innerHTML = this.legend();
     if (focusK) { const f = R.querySelector(`[data-k="${focusK}"]`); if (f) ui.focus.set(f, { scroll: false }); }
+    this.edges();
     this.syncCalib();
+  }
+  // the brass underline slides under the active tab (transform only)
+  line() {
+    const T = this.el.querySelector('.tabs'), a = T.querySelector('.active'), line = this.el.querySelector('.tabline i');
+    if (!a || !line) return;
+    const r0 = this.el.querySelector('.tabline').getBoundingClientRect(), r = a.getBoundingClientRect();
+    line.style.transform = `translateX(${r.left - r0.left}px) scaleX(${Math.max(1, r.width) / 100})`;
+  }
+  // a list longer than its view fades at the edge it runs on past and shows a brass hairline track at its side
+  edges() {
+    const R = this.rowsEl, max = R.scrollHeight - R.clientHeight, bar = this.el.querySelector('.sbar'), on = max > 2;
+    R.classList.toggle('above', R.scrollTop > 2);
+    R.classList.toggle('below', R.scrollTop < max - 2);
+    bar.classList.toggle('on', on);
+    if (!on) return;
+    const h = R.clientHeight, th = Math.max(28, (h * h) / R.scrollHeight);
+    bar.style.top = `${R.offsetTop}px`; bar.style.height = `${h}px`; bar.style.setProperty('--th', `${th.toFixed(1)}px`);
+    bar.firstChild.style.transform = `translate3d(0, ${(((h - th) * R.scrollTop) / max).toFixed(1)}px, 0)`;
   }
 
   legend() {

@@ -129,6 +129,58 @@ async function device(dev) {
     check('controls', !ctlBad.length && paused.paused && paused.top === 'pause' && paused.hide && !pauseBad.length, { sizes: Object.fromEntries(Object.entries(ctl).map(([k, r]) => [k, [Math.round(r.x), Math.round(r.y), Math.round(r.w)]])), ctlBad, paused, pauseBad });
   }
 
+  // ------------------------------------------------------------------ settings: tabs by real taps
+  if (want('settings')) {
+    await page.goto(`${BASE}?${Q}`); await ready(page); await frames(page, 4);
+    const sb = await page.evaluate(() => { const b = document.querySelector('#title .entry[data-k="settings"]').getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
+    await tap(...centre(sb));
+    await page.waitForFunction(() => __ui.focus.top?.el.id === 'settings', null, { timeout: 30000 }); await page.waitForTimeout(700);
+    const land = W > H;
+    const look = () => page.evaluate(() => {
+      const R = document.querySelector('#settings .rows'), rb = R.getBoundingClientRect(), rows = [...R.querySelectorAll('.row')];
+      const full = rows.filter((r) => { const b = r.getBoundingClientRect(); return b.top >= rb.top - 1 && b.bottom <= rb.bottom + 1; }).map((r) => r.dataset.k);
+      const max = R.scrollHeight - R.clientHeight;
+      return { tab: document.querySelector('#settings .tab.active')?.textContent, st: Math.round(R.scrollTop), max, n: rows.length, full: full.length, first: full[0] === rows[0]?.dataset.k,
+        lines: new Set([...document.querySelectorAll('#settings .tab')].map((t) => Math.round(t.getBoundingClientRect().top))).size,
+        fade: R.classList.contains('below'), track: document.querySelector('#settings .sbar').classList.contains('on') };
+    });
+    const tabs = [await look()];
+    for (let t = 1; t < 5; t++) {
+      // the list scrolled to its end, then the next tab by a tap
+      await page.evaluate(() => { const R = document.querySelector('#settings .rows'); R.scrollTop = R.scrollHeight; }); await frames(page, 2); await page.waitForTimeout(250);
+      const end = await page.evaluate(() => { const R = document.querySelector('#settings .rows'); return { st: Math.round(R.scrollTop), above: R.classList.contains('above'), below: R.classList.contains('below') }; });
+      const tb = await page.evaluate((t) => { const b = document.querySelectorAll('#settings .tab')[t].getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; }, t);
+      await tap(...centre(tb)); await page.waitForTimeout(400);
+      tabs.push({ ...(await look()), prevEnd: end });
+    }
+    const bad = [];
+    tabs.forEach((v, i) => {
+      if (v.st !== 0 || !v.first) bad.push(`${v.tab} opens at ${v.st}`);
+      if (v.full < Math.min(v.n, land ? 5 : 7)) bad.push(`${v.tab}: ${v.full} rows in view`);
+      if (v.lines > (land ? 1 : 2)) bad.push(`${v.tab}: tabs on ${v.lines} lines`);
+      if ((v.max > 2) !== v.fade || (v.max > 2) !== v.track) bad.push(`${v.tab}: edge ${JSON.stringify(v)}`);
+      if (v.prevEnd && tabs[i - 1].max > 2 && (!v.prevEnd.above || v.prevEnd.below)) bad.push(`${tabs[i - 1].tab} end ${JSON.stringify(v.prevEnd)}`);
+    });
+    // large menu text on a short screen: the strip scrolls sideways and keeps the chosen tab and its underline in view
+    let strip = null;
+    if (land) {
+      strip = await page.evaluate(async () => {
+        __ui.setSetting('menuScale', 150); __ui.settings.setTab(4);
+        // the strip scrolls the tab into view, then the underline slides after it (wait for both)
+        const raf = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        await new Promise((r) => setTimeout(r, 300)); await raf();
+        await Promise.all(document.querySelector('#settings .tabline i').getAnimations().map((x) => x.finished));
+        const T = document.querySelector('#settings .tabs').getBoundingClientRect(), a = document.querySelector('#settings .tab.active').getBoundingClientRect();
+        const l = document.querySelector('#settings .tabline i').getBoundingClientRect();
+        const r = { a: [Math.round(a.left), Math.round(a.width)], l: [Math.round(l.left), Math.round(l.width)], T: [Math.round(T.left), Math.round(T.right)], sl: document.querySelector('#settings .tabs').scrollLeft, inStrip: a.left >= T.left - 1 && a.right <= T.right + 1, line: Math.abs(l.left - a.left) < 2 && Math.abs(l.width - a.width) < 2, lines: new Set([...document.querySelectorAll('#settings .tab')].map((t) => Math.round(t.getBoundingClientRect().top))).size };
+        __ui.setSetting('menuScale', 100);
+        return r;
+      });
+      if (!strip.inStrip || !strip.line || strip.lines !== 1) bad.push(`strip ${JSON.stringify(strip)}`);
+    }
+    check('settings', !bad.length, { bad, tabs: tabs.map((v) => `${v.tab} st${v.st} ${v.full}/${v.n}${v.fade ? ' fade' : ''}${v.track ? ' track' : ''} lines${v.lines}`), strip });
+  }
+
   // ------------------------------------------------------------------ gameplay (deterministic: the sim reads the live touch input)
   if (want('stick') || want('jump') || want('grab') || want('lens')) {
     await page.goto(`${BASE}?${Q}&autostart=1&hold=1&chapter=souk&cp=0`); await ready(page); await frames(page, 3);
