@@ -11,8 +11,9 @@
 //   jump       a tap on jump leaves the ground
 //   grab       grab held with the stick pushes the souk's first crate (two fingers at once)
 //   lens       the lens shift keeps the boy's projected position inside the play rect above the control band
-//   aim        finger aim: a touch on the scene reaches the boy as pin.aimTarget at the touched world point; with the
-//              Sunwork lab present (a gripped mirror) the mirror tilts to the touched notch
+//   aim        finger aim on the Sunwork lab's props: a tap on grab latches M2, a finger on the lock L4 tilts it to
+//              −45° (the notch buzzes), a second tap lets go; the crank K2 turns F2 onto L7 (45°); the capstan turns
+//              the heliostat onto the fortress lamp (3.2°) and the lab ends
 //   settings   (phones) the tabs sit on one line; a tab opens at its first option (after the previous one was
 //              scrolled to its end), with enough rows in view; a list that runs on fades at its edge; the focused
 //              brightness slider answers a finger (its calibration rosettes sit beside it, never over it); the save
@@ -306,46 +307,48 @@ async function device(dev) {
 
   // ------------------------------------------------------------------ finger aim
   if (want('aim')) {
+    // finger aim on the Sunwork lab's real props, with real touches: a tap on grab takes the prop (latched on touch),
+    // a finger on the scene aims it, the notch buzzes, a second tap lets go
     await page.goto(`${BASE}?${Q}&autostart=1&hold=1&chapter=lab&cp=0`); await ready(page); await frames(page, 3);
-    const lab = await page.evaluate(() => ({ light: typeof __medina.ext.light === 'function', mirrors: __medina.ext.light?.().mirrors?.length || 0 }));
-    let res;
-    if (!lab.mirrors) {
-      // the stub lab: a touch on the scene must reach the boy as the world point under the finger
-      // a point right of the controls' zone, a third of the way down: its world point on the play plane
-      const pt = await page.evaluate(() => {
-        const G = __medina.game, C = G.camera, V3 = C.position.constructor, sx = innerWidth * 0.62, sy = innerHeight * 0.34;
-        const d = new V3((sx / innerWidth) * 2 - 1, -(sy / innerHeight) * 2 + 1, 0.5).unproject(C).sub(C.position).normalize();
-        const t = -C.position.z / d.z;
-        return { want: [+(C.position.x + d.x * t).toFixed(3), +(C.position.y + d.y * t).toFixed(3)], sx, sy, hit: document.elementFromPoint(sx, sy)?.tagName };
-      });
-      await touch('start', 4, pt.sx, pt.sy); await frames(page, 2);
-      // the world point under the finger with the camera of this moment, and the boy's pin from the live input
-      const got = await page.evaluate(({ sx, sy }) => {
-        const G = __medina.game, C = G.camera, V3 = C.position.constructor;
-        const d = new V3((sx / innerWidth) * 2 - 1, -(sy / innerHeight) * 2 + 1, 0.5).unproject(C).sub(C.position).normalize();
-        const t = -C.position.z / d.z, want = [C.position.x + d.x * t, C.position.y + d.y * t];
-        const prev = G.input.state, st = G.input.poll(); G.input.state = prev;
-        const pin = G.makePin(st, true);
-        return { want: want.map((v) => +v.toFixed(3)), aim: pin.aimTarget && [+pin.aimTarget.x.toFixed(3), +pin.aimTarget.y.toFixed(3)], kind: st.pointer?.kind, active: st.pointer?.active };
-      }, pt);
-      await touch('end'); await frames(page, 2);
-      const err = got.aim ? Math.hypot(got.aim[0] - got.want[0], got.aim[1] - got.want[1]) : 99;
-      res = [got.active && got.kind === 'touch' && err < 0.05 && pt.hit === 'CANVAS', { stub: true, hit: pt.hit, ...got, err: +err.toFixed(4), note: 'lab stub: no mirror on this branch; aimTarget checked' }];
-    } else {
-      // the Sunwork lab: grip M2 (room "tilt", checkpoint 3), touch the lock L4: the mirror settles on −45°
-      await page.evaluate(() => { __medina.checkpoint(3); const m = __medina.game.level.light.get('M2'); __medina.teleport(m.body.x - (m.body.w / 2 + 0.17 + 0.03), 0, 1); });
-      const step = (n) => page.evaluate((n) => { const G = __medina.game; for (let i = 0; i < n; i++) __medina.sim(1 / 120, () => { const s = G.input.poll(); G.input.state = window.__simPrev || { ...s, jump: false, grab: false, y: 0 }; window.__simPrev = s; return s; }); }, n);
-      await step(60);
-      const gr = await page.evaluate(() => __ui.touch.rects().grab);
-      await touch('start', 3, ...centre(gr)); await frames(page, 1); await step(6); await touch('end'); await frames(page, 1); await step(30);
-      const pt = await page.evaluate(() => { const G = __medina.game; const V = new (G.camera.position.constructor)(56.23, 5.8, 0).project(G.camera); return { sx: (V.x * 0.5 + 0.5) * innerWidth, sy: (-V.y * 0.5 + 0.5) * innerHeight }; });
-      await touch('start', 4, pt.sx, pt.sy); await frames(page, 2);
-      await step(120);
-      const got = await page.evaluate(() => { const G = __medina.game; const m = __medina.ext.light().mirrors.find((q) => q.id === 'M2'); return { alpha: m.alpha, notch: m.notch, settled: m.settled, grip: !!G.player.grip, aim: G.player.aimAt, aiming: __ui.touch.aiming, hit: null }; });
-      await touch('end'); await frames(page, 2);
-      res = [got.grip && Math.round(got.alpha) === -45, { lab: true, ...got }];
-    }
-    check('aim', res[0], res[1]);
+    const step = (n) => page.evaluate((n) => { const G = __medina.game; for (let i = 0; i < n; i++) __medina.sim(1 / 120, () => { const s = G.input.poll(); G.input.state = window.__simPrev || { ...s, jump: false, grab: false, y: 0 }; window.__simPrev = s; return s; }); }, n);
+    const at = (x, y) => page.evaluate(([x, y]) => { const G = __medina.game; const V = new (G.camera.position.constructor)(x, y, 0).project(G.camera); const sx = (V.x * 0.5 + 0.5) * innerWidth, sy = (-V.y * 0.5 + 0.5) * innerHeight; return { sx, sy, hit: document.elementFromPoint(sx, sy)?.tagName }; }, [x, y]);
+    const tapGrab = async () => { const gr = await page.evaluate(() => __ui.touch.rects().grab); await touch('start', 3, ...centre(gr)); await frames(page, 1); await step(6); await touch('end'); await frames(page, 1); await step(30); };
+    const held = () => page.evaluate(() => { const p = __medina.game.player; return { grip: !!p.grip?.mirror, state: p.state, latch: p.latch, aiming: __ui.touch.aiming }; });
+    // the finger stays on the world point while the camera settles (re-projected every quarter second of play)
+    const aim = async (x, y, read, n = 150) => {
+      let pt = await at(x, y); await touch('start', 4, pt.sx, pt.sy); await frames(page, 2);
+      for (let k = 0; k < n; k += 30) { await step(30); await frames(page, 1); pt = await at(x, y); await touch('move', 4, pt.sx, pt.sy); }
+      const r = await page.evaluate(read); await touch('end'); await frames(page, 2); await step(10); return { ...r, hit: pt.hit };
+    };
+    const out = { mirrors: await page.evaluate(() => __medina.ext.light?.().mirrors?.length || 0) };
+    // M2 (room "tilt", checkpoint 3): touch the lock L4, the tray settles on −45° and the notch buzzes
+    await page.evaluate(() => { __medina.checkpoint(3); const m = __medina.game.level.light.get('M2'); __medina.teleport(m.body.x - (m.body.w / 2 + 0.17 + 0.03), 0, 1); const h = __ui.input.haptics; h.count = 0; h.last = null; });
+    await step(60); await tapGrab();
+    out.m2 = { took: await held() };
+    Object.assign(out.m2, await aim(56.23, 5.8, () => { const m = __medina.ext.light().mirrors.find((q) => q.id === 'M2'), h = __ui.input.haptics; return { alpha: m.alpha, settled: m.settled, buzz: h.count, last: h.last }; }));
+    await tapGrab(); await frames(page, 2);
+    out.m2.let = await held();
+    // the crank K2 (checkpoint 6): touch the lock L7, the crank tray F2 turns to 45°
+    await page.evaluate(() => { __medina.checkpoint(6); __medina.game.player.spawn(117.65, 4.0, 1); });
+    await step(40); await tapGrab();
+    out.k2 = { took: await held() };
+    Object.assign(out.k2, await aim(125.3, 4.95, () => ({ alpha: __medina.game.level.light.get('F2').alpha })));
+    await tapGrab(); await frames(page, 2);
+    out.k2.let = await held();
+    // the capstan (checkpoint 12): touch toward the fortress lamp (a ray leaving H at −173.6°), the heliostat
+    // turns onto 3.2° and the light answers the fortress (the lab ends)
+    await page.evaluate(() => { __medina.checkpoint(12); const c = __medina.game.level.light.get('capstan'); __medina.teleport(c.standX, c.y, 1); });
+    await step(40); await tapGrab();
+    out.cap = { took: await held() };
+    const th = -173.6 * Math.PI / 180;
+    Object.assign(out.cap, await aim(478 + 8 * Math.cos(th), 14.5 + 8 * Math.sin(th), () => ({ alpha: +__medina.game.level.light.get('H').alpha.toFixed(2) }), 360));
+    await step(600); // the eye holds 0.5 s, the fortress goes out over 2.4 s
+    out.cap.end = await page.evaluate(() => __medina.events().some((e) => e.name === 'chapterEnd' && e.data.id === 'lab'));
+    const ok = out.mirrors > 0
+      && out.m2.took.grip && out.m2.took.latch && out.m2.took.aiming && Math.round(out.m2.alpha) === -45 && out.m2.buzz > 0 && out.m2.last === 'notch' && !out.m2.let.grip && !out.m2.let.latch && !out.m2.let.aiming
+      && out.k2.took.state === 'crank' && out.k2.took.latch && Math.round(out.k2.alpha) === 45 && out.k2.let.state !== 'crank'
+      && out.cap.took.state === 'capstan' && Math.abs(out.cap.alpha - 3.2) < 0.6 && out.cap.end;
+    check('aim', ok, out);
   }
   // ------------------------------------------------------------------ a touch-screen laptop: a mouse and fingers
   if (want('hybrid')) {
