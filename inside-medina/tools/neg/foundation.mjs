@@ -461,6 +461,43 @@ export const scenarios = [
     },
   },
   {
+    // geometry is wound outward on the low tier's lighter build and at full detail: the souk built both ways, every
+    // front-sided batch triangle's winding against its vertex normals (a mirrored piece, such as a box given a reversed
+    // extent, is wound inward and culled: the hero alley's stairs once were, see-through on low)
+    name: 'lite geometry faces outward', cp: 0,
+    run: ({ page }) => page.evaluate(async () => {
+      const M = __medina, G = M.game, rs = G.world.rs;
+      const census = () => {
+        let tris = 0, inward = 0, area = 0; const where = {};
+        G.root.traverse((o) => {
+          if (!o.isMesh || !o.name.startsWith('batch:') || o.material.side !== 0) return;
+          const p = o.geometry.attributes.position.array, n = o.geometry.attributes.normal?.array;
+          if (!n || o.geometry.index) return;
+          for (let i = 0; i < p.length; i += 9) {
+            const ax = p[i + 3] - p[i], ay = p[i + 4] - p[i + 1], az = p[i + 5] - p[i + 2], bx = p[i + 6] - p[i], by = p[i + 7] - p[i + 1], bz = p[i + 8] - p[i + 2];
+            const cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
+            if (cx * cx + cy * cy + cz * cz < 1e-12) continue;
+            tris++;
+            // facing away from every one of its vertex normals by more than 60°: a mirrored piece faces straight
+            // against them, while a fold in a deformed surface (a sack's flattened base) only leans past them
+            const f = Math.hypot(cx, cy, cz), cos = (j) => (cx * n[j] + cy * n[j + 1] + cz * n[j + 2]) / (f * (Math.hypot(n[j], n[j + 1], n[j + 2]) || 1));
+            if (Math.max(cos(i), cos(i + 3), cos(i + 6)) < -0.5) {
+              inward++; area += f / 2; const k = `${o.material.name}@${Math.round(p[i] / 10) * 10}`; where[k] = +((where[k] || 0) + f / 2).toFixed(5);
+            }
+          }
+        });
+        return { tris, inward, area: +area.toFixed(5), where: Object.entries(where).sort((a, b) => b[1] - a[1]).slice(0, 6) };
+      };
+      const lite = { on: rs.q.lite, ...census() };
+      rs.q.lite = false; await G.loadChapter('souk', 0, { reason: 'select' });
+      const full = { on: rs.q.lite, ...census() };
+      rs.q.lite = lite.on; await G.loadChapter('souk', 0, { reason: 'select' });
+      return { lite, full };
+    }),
+    // by area: a sack's pinched ends hold a few slivers (16 cm² in all); one mirrored 5 cm box would be 150 cm²
+    check: (r) => (r.lite.on && !r.full.on && r.lite.tris > 0 && r.lite.area < 0.005 && r.full.area < 0.005 ? true : `geometry wound inward: ${JSON.stringify(r)}`),
+  },
+  {
     // restart chapter is a fresh start: prepare(0) runs again over the initial snapshot (it used to be skipped,
     // so a chapter whose prepare(0) moves anything restarted, and then respawned, in the built state)
     name: 'restart chapter equals a fresh start', chapter: 'lab', cp: 0,
