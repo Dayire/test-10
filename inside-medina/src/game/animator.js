@@ -10,6 +10,29 @@ const sat = (x) => Math.max(0, Math.min(1, x));
 const smooth = (x) => { x = sat(x); return x * x * (3 - 2 * x); };
 const lerp = (a, b, t) => a + (b - a) * t;
 
+// two-bone reach: after the FK pose is applied, turn the elbow so shoulder → wrist spans the distance to the
+// target, then swing the shoulder so the wrist lands on it; the result is blended over the FK pose by w
+const _s = new THREE.Vector3(), _e = new THREE.Vector3(), _w = new THREE.Vector3(), _t = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3();
+const _q = new THREE.Quaternion(), _qw = new THREE.Quaternion(), _qp = new THREE.Quaternion(), _qS = new THREE.Quaternion(), _qE = new THREE.Quaternion();
+function reachArm(S, E, W, T, w, palm = 0.05) {
+  _qS.copy(S.quaternion); _qE.copy(E.quaternion);
+  S.getWorldPosition(_s); E.getWorldPosition(_e); W.getWorldPosition(_w);
+  const l1 = _s.distanceTo(_e), l2 = _e.distanceTo(_w);
+  // the wrist stops a palm short of the hold
+  _t.subVectors(T, _s); const dt = _t.length();
+  _t.multiplyScalar(Math.max(0, dt - palm) / Math.max(dt, 1e-6)).add(_s);
+  const d = Math.min(l1 + l2 - 1e-3, Math.max(Math.abs(l1 - l2) + 1e-3, _s.distanceTo(_t)));
+  const inner = Math.acos(Math.max(-1, Math.min(1, (l1 * l1 + l2 * l2 - d * d) / (2 * l1 * l2))));
+  E.rotation.x = -(Math.PI - inner); // the elbow bends about its x (0 = a straight arm)
+  S.updateWorldMatrix(false, true);
+  W.getWorldPosition(_w);
+  _q.setFromUnitVectors(_a.subVectors(_w, _s).normalize(), _b.subVectors(_t, _s).normalize());
+  S.getWorldQuaternion(_qw); S.parent.getWorldQuaternion(_qp);
+  S.quaternion.copy(_qp.invert().multiply(_q.multiply(_qw)));
+  if (w < 1) { S.quaternion.slerpQuaternions(_qS, S.quaternion.clone(), w); E.quaternion.slerpQuaternions(_qE, E.quaternion.clone(), w); }
+  S.updateWorldMatrix(false, true);
+}
+
 function blankPose() {
   const j = {};
   for (const k of JOINTS) j[k] = [0, 0, 0];
@@ -60,7 +83,7 @@ export class Animator {
 
   // ctx: { speed, vx, vy, grounded, climbT, hangSwing, pushDir, crawlSpeed, deathT, deathKind, climbSpeed }
   update(dt, ctx) {
-    this.time += dt;
+    this.time += dt; this._dt = dt;
     const P = this.target;
     // reset target
     for (const k of JOINTS) { const a = P.joints[k]; a[0] = a[1] = a[2] = 0; }
@@ -99,8 +122,14 @@ export class Animator {
         P.joints.spine[0] += this.lean;
         break;
       }
-      case 'push': this.push(P, this.phase, ctx); break;
-      case 'pull': this.pull(P, this.phase, ctx); break;
+      case 'push': this.push(P, this.phase, ctx); if (ctx.tilt) this.tiltArms(P, ctx); break;
+      case 'pull': this.pull(P, this.phase, ctx); if (ctx.tilt) this.tiltArms(P, ctx); break;
+      case 'crank': this.crank(P, ctx); break;
+      case 'capstan': this.capstan(P, ctx); break;
+      case 'reach': this.reach(P, ctx); break;
+      case 'sit': this.sit(P, ctx); break;
+      case 'shieldEyes': this.shieldEyes(P, ctx); break;
+      case 'asleep': this.asleep(P, ctx); break;
       case 'crawl': this.crawl(P, this.phase, ctx); break;
       case 'air': this.air(P, ctx); break;
       case 'hang': this.hang(P, ctx); break;
@@ -149,8 +178,37 @@ export class Animator {
     const legAvg = (o.hipL[0] + o.hipR[0]) * 0.5;
     o.skirt[0] = legAvg * 0.55 + this.skirtSwing;
     const spread = Math.abs(o.hipL[0] - o.hipR[0]);
-    this.rig.j.skirt.scale.set(1 + spread * 0.05, 1, 1 + spread * 0.35);
+    // lying on his back the robe lies flat on the stones (its depth is the vertical then)
+    const lie = st === 'asleep' ? (this.lying || 0) : 0;
+    this.rig.j.skirt.scale.set(1 + spread * 0.05 + 0.12 * lie, 1, (1 + spread * 0.35 * (1 - lie)) * (1 - 0.55 * lie));
+    if (lie) o.skirt[0] = lerp(o.skirt[0], 0.1, lie);
     this.rig.apply(this.out);
+    this.reach2(ctx.hands, dt);
+  }
+
+  // hands on a prop (ctx.hands {a, b}: world points, the player gives them for a mirror's rim, a crank, the
+  // capstan's bar): two-bone IK over the pose, eased in and out; each hand takes the nearer point. A hold that
+  // moves with its prop is followed exactly; a new hold (a re-grip, the next capstan bar) is glided to
+  reach2(H, dt) {
+    const fresh = (this.ikW || 0) < 0.05;
+    this.ikW = (this.ikW || 0) + ((H ? 1 : 0) - (this.ikW || 0)) * (1 - Math.exp(-12 * dt));
+    if (H) {
+      if (!this.ikA) { this.ikA = H.a.clone(); this.ikB = H.b.clone(); this.ikPa = H.a.clone(); this.ikPb = H.b.clone(); }
+      const k = 1 - Math.exp(-18 * dt), carry = Math.max(0.05, 2.5 * dt);
+      const follow = (ik, h, pv) => {
+        if (fresh) ik.copy(h);
+        else { _t.subVectors(h, pv); if (_t.length() < carry) ik.add(_t); ik.lerp(h, k); }
+        pv.copy(h);
+      };
+      follow(this.ikA, H.a, this.ikPa); follow(this.ikB, H.b, this.ikPb);
+    }
+    if (this.ikW < 0.01 || !this.ikA) return;
+    const R = this.rig, J = R.j;
+    R.root.updateMatrixWorld(true);
+    J.shoulderL.getWorldPosition(_s); J.shoulderR.getWorldPosition(_e);
+    const swap = _s.distanceTo(this.ikA) + _e.distanceTo(this.ikB) > _s.distanceTo(this.ikB) + _e.distanceTo(this.ikA);
+    reachArm(J.shoulderL, J.elbowL, J.wristL, swap ? this.ikB : this.ikA, this.ikW);
+    reachArm(J.shoulderR, J.elbowR, J.wristR, swap ? this.ikA : this.ikB, this.ikW);
   }
 
   // ---- poses -------------------------------------------------------------
@@ -297,9 +355,124 @@ export class Animator {
     P.pelvisY = -0.06 * t;
   }
 
+  // ---- Sunwork poses (FULL_GAME §6.3) ------------------------------------
+  // hands up on a mirror's rim while gripping it: the arms reach the rim's height, and each notch is a small shove
+  // a rim above his shoulders: he stands tall on his toes, chest up, to reach it
+  tiltArms(P, ctx) {
+    const J = P.joints, T = ctx.tilt;
+    const rim = THREE.MathUtils.clamp(T.rim ?? 0.9, 0.55, 1.7);
+    const lift = THREE.MathUtils.clamp((rim - 0.75) * 1.9, 0, 1.6);
+    const shove = Math.max(0, 1 - (T.age ?? 9) / 0.16) * (T.dir || 0);
+    const sh = -1.25 - lift - shove * 0.25;
+    J.shoulderL = [sh, 0, 0.16]; J.shoulderR = [sh - 0.05, 0, -0.16];
+    J.elbowL[0] = -0.35 + lift * 0.15 - shove * 0.2; J.elbowR[0] = -0.3 + lift * 0.15 - shove * 0.2;
+    J.spine[0] = Math.min(J.spine[0], 0.35 - lift * 0.12); J.chest[0] = -0.05 * lift;
+    J.neck[0] = -0.25 - lift * 0.12; J.head[0] = -0.1 - lift * 0.1;
+    const up = smooth((rim - 1.1) / 0.3);
+    if (up > 0) {
+      for (const k of ['hipL', 'hipR']) J[k][0] = lerp(J[k][0], k === 'hipL' ? -0.12 : 0.08, up);
+      J.kneeL[0] = lerp(J.kneeL[0], 0.05, up); J.kneeR[0] = lerp(J.kneeR[0], 0.03, up);
+      J.ankleL[0] = lerp(J.ankleL[0], 0.42, up); J.ankleR[0] = lerp(J.ankleR[0], 0.38, up);
+      J.spine[0] = lerp(J.spine[0], 0.1, up); J.chest[0] -= 0.08 * up;
+      P.pelvisY = lerp(P.pelvisY, 0.045, up); P.pelvisZ = lerp(P.pelvisZ, 0.03, up);
+    }
+  }
+
+  // two hands on a crank's wheel, following its knob; the torso twists into each turn
+  crank(P, ctx) {
+    const J = P.joints;
+    const a = ctx.crankA || 0;
+    const s = Math.sin(a), c = Math.cos(a);
+    J.spine[0] = 0.32; J.spine[1] = 0.14 * s; J.chest[0] = 0.06; J.chest[1] = 0.1 * s;
+    J.neck[0] = -0.3; J.head[0] = -0.12;
+    J.shoulderL = [-1.35 + 0.32 * s, 0, 0.2 + 0.08 * c]; J.shoulderR = [-1.35 - 0.32 * s, 0, -0.2 + 0.08 * c];
+    J.elbowL[0] = -0.55 - 0.3 * c; J.elbowR[0] = -0.55 + 0.3 * c;
+    J.hipL = [-0.45, 0, 0.08]; J.hipR = [0.22, 0, -0.06]; J.kneeL[0] = 0.55; J.kneeR[0] = 0.32;
+    J.ankleL[0] = -0.12; J.ankleR[0] = 0.05;
+    J.pelvis = [0, 0.1 * s, 0];
+    P.pelvisY = -0.06;
+  }
+
+  // leaning into a capstan bar, stepping as it turns
+  capstan(P, ctx) {
+    const v = THREE.MathUtils.clamp((ctx.capstanV || 0) / 6, -1, 1);
+    this.phase = (this.phase + Math.abs(v) * 1.8 * (this._dt || 0) + 1) % 1;
+    const s = this.phase * TAU, J = P.joints;
+    J.spine[0] = 0.62; J.chest[0] = 0.12; J.neck[0] = -0.5; J.head[0] = -0.18;
+    J.shoulderL = [-1.15, 0, 0.12]; J.shoulderR = [-1.2, 0, -0.12]; J.elbowL[0] = -0.4; J.elbowR[0] = -0.38;
+    const m = Math.abs(v);
+    J.hipL[0] = -0.75 + 0.3 * Math.sin(s) * m; J.hipR[0] = 0.05 + 0.3 * Math.sin(s + Math.PI) * m;
+    J.kneeL[0] = 0.75 + 0.2 * Math.max(0, Math.cos(s)) * m; J.kneeR[0] = 0.35 + 0.25 * Math.max(0, Math.cos(s + Math.PI)) * m;
+    J.ankleL[0] = 0.15; J.ankleR[0] = 0.3;
+    P.pelvisY = -0.09; P.pelvisZ = -0.06;
+  }
+
+  // reaching up and forward (taking the tray from its pedestal, setting it in the heliostat's ring)
+  reach(P, ctx) {
+    this.idle(P);
+    const J = P.joints;
+    const t = ctx.poseT ?? 1;
+    const up = smooth(t / 0.45), hold = 1 - smooth((t - 1.1) / 0.4);
+    const k = up * (0.35 + 0.65 * hold);
+    J.shoulderR = [lerp(0.08, -1.75, k), 0, lerp(-0.1, -0.12, k)]; J.elbowR[0] = lerp(-0.2, -0.25, k);
+    J.shoulderL = [lerp(0.05, -1.35, k * 0.8), 0, lerp(0.1, 0.18, k)]; J.elbowL[0] = lerp(-0.15, -0.45, k);
+    J.spine[0] = lerp(J.spine[0], 0.18, k); J.chest[0] = -0.08 * k; J.neck[0] = lerp(-0.02, -0.35, k); J.head[0] = lerp(0.04, -0.2, k);
+    J.ankleL[0] = -0.12 * k; J.ankleR[0] = -0.2 * k; P.pelvisY += 0.015 * k;
+  }
+
+  // sitting on a parapet, hands on the stone, legs hanging
+  sit(P, ctx) {
+    const J = P.joints, t = ctx.poseT ?? 2;
+    const k = smooth(t / 1.2);
+    const b = Math.sin(this.time * 1.3) * 0.015;
+    J.hipL[0] = lerp(0, -1.5, k); J.hipR[0] = lerp(0, -1.42, k);
+    J.kneeL[0] = lerp(0.05, 1.35 + Math.sin(this.time * 0.9) * 0.08 * k, k); J.kneeR[0] = lerp(0.05, 1.5, k);
+    J.ankleL[0] = 0.25 * k; J.ankleR[0] = 0.2 * k;
+    J.spine[0] = lerp(0.03, 0.12, k) + b; J.chest[0] = 0.04 * k; J.neck[0] = lerp(-0.02, -0.08, k); J.head[0] = lerp(0.04, -0.12, k);
+    J.shoulderL = [lerp(0.05, 0.35, k), 0, lerp(0.1, 0.32, k)]; J.shoulderR = [lerp(0.08, 0.3, k), 0, lerp(-0.1, -0.32, k)];
+    J.elbowL[0] = -0.12; J.elbowR[0] = -0.15;
+    P.pelvisY = -(this.rig.spec.thigh * 0.95) * k; P.pelvisZ = -0.05 * k;
+  }
+
+  // a lamp-keeper blinded by the sun: recoil, the free arm over the hood, the lantern arm thrown out
+  shieldEyes(P, ctx) {
+    const J = P.joints, t = ctx.poseT ?? 1;
+    const k = smooth(t / 0.18), w = Math.sin(this.time * 17) * 0.03;
+    J.spine[0] = lerp(0, -0.28, k) + w; J.chest[0] = -0.12 * k; J.neck[0] = 0.25 * k; J.head[0] = -0.35 * k;
+    J.shoulderL = [lerp(0, -2.5, k), 0, lerp(0.1, 0.65, k)]; J.elbowL[0] = lerp(-0.2, -2.1, k);
+    J.shoulderR = [lerp(0, -0.6, k), 0, lerp(-0.1, -0.9, k)]; J.elbowR[0] = -0.4 * k;
+    J.hipL[0] = -0.35 * k; J.hipR[0] = 0.25 * k; J.kneeL[0] = 0.55 * k; J.kneeR[0] = 0.35 * k;
+    P.pelvisY = -0.08 * k; P.pelvisZ = 0.06 * k;
+  }
+
+  // a dart: the knees buckle (a), then he falls back flat on the ground (b): on his back, head turned aside, one
+  // knee raised, the arms out on the stones. Lying, the pelvis is a torso's half depth above the floor
+  asleep(P, ctx) {
+    const J = P.joints, t = ctx.poseT ?? 3, S = this.rig.spec;
+    const a = smooth(t / 0.4), b = smooth((t - 0.35) / 0.7);
+    J.hipL[0] = -1.4 * a + 0.9 * b; J.hipR[0] = -1.2 * a + 1.3 * b; J.kneeL[0] = 2.2 * a - 1.1 * b; J.kneeR[0] = 2.1 * a - 2.1 * b;
+    J.ankleL[0] = 0.2 * b; J.ankleR[0] = 0;
+    J.spine[0] = 0.5 * a - 0.5 * b; J.chest[0] = 0; J.neck[0] = 0.4 * a - 0.25 * b; J.head = [0.05 * b, 0.5 * b, 0.25 * b];
+    J.shoulderL = [0.4 * a - 0.1 * b, 0, 0.5 * a + 0.75 * b]; J.shoulderR = [0.3 * a + 0.1 * b, 0, -0.4 * a - 0.15 * b];
+    J.elbowL[0] = -0.4 + 0.1 * b; J.elbowR[0] = -0.3;
+    J.pelvis = [-1.5 * b, 0, 0.08 * b];
+    P.pelvisY = lerp(-0.42 * a, S.chestR * S.torsoDepth + 0.03 - S.hipH, b);
+    this.lying = b;
+  }
+
   dead(P, ctx) {
     const J = P.joints;
     const t = ctx.deathT || 0;
+    if (ctx.deathKind === 'sunset') {
+      // the last light goes: a slow kneel, head bowed, into the dark
+      const a = smooth(t / 1.1), b = smooth((t - 0.8) / 0.9);
+      J.hipL[0] = -1.15 * a; J.hipR[0] = 0.15 * a + 0.2 * b; J.kneeL[0] = 1.9 * a; J.kneeR[0] = 1.6 * a + 0.5 * b;
+      J.ankleL[0] = -0.5 * a; J.ankleR[0] = 0.6 * a;
+      J.spine[0] = 0.25 * a + 0.35 * b; J.chest[0] = 0.12 * b; J.neck[0] = 0.35 * a + 0.2 * b; J.head[0] = 0.25 * b;
+      J.shoulderL = [-0.15 * a, 0, 0.12 + 0.1 * b]; J.shoulderR = [-0.25 * a - 0.2 * b, 0, -0.12]; J.elbowL[0] = -0.3; J.elbowR[0] = -0.5 * b;
+      P.pelvisY = -0.36 * a - 0.08 * b;
+      return;
+    }
     if (ctx.deathKind === 'fall') {
       J.spine[0] = 1.45; J.neck[0] = 0.2; J.hipL[0] = -0.4; J.kneeL[0] = 0.8; J.hipR[0] = 0.2; J.kneeR[0] = 0.3;
       J.shoulderL = [-2.4, 0, 0.9]; J.shoulderR = [-0.3, 0, -1.2]; J.elbowL[0] = -0.4;

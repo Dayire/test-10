@@ -40,6 +40,9 @@ export class Player {
     this.events = [];
     this.tune = { ...P }; // per-instance tuning (assists change coyote and buffer)
     this.z = 0; this.fvx = 0;
+    // Sunwork: a latched (sticky) grip, the notch-repeat timer of a tilt, the jump an up-press buffered
+    this.latch = false; this.latchFresh = false; this.latchBlock = false; this.tilt = { dir: 0, t: 0, last: 0, age: 9 }; this.upJump = false;
+    this.gripT = 0; this.aimAt = null;
   }
 
   emit(name, data) { this.events.push([name, data]); }
@@ -55,6 +58,7 @@ export class Player {
     this.prev.set(x, y); this.cur.set(x, y);
     this.yaw = this.targetYaw(); this.yawVel = 0;
     this.scripted = null; this.z = 0; this.fvx = 0; this.pushing = 0;
+    this.latch = false; this.latchFresh = false; this.latchBlock = false; this.tilt.dir = 0; this.tilt.t = 0; this.tilt.age = 9; this.upJump = false; this.gripT = 0; this.aimAt = null;
     const g = this.phys.groundUnder(b, 0.05);
     this.grounded = !!g; this.groundObj = g;
     if (!g) this.state = 'air';
@@ -62,8 +66,9 @@ export class Player {
 
   die(kind) {
     if (this.dead) return;
+    if (this.lever) { try { this.lever.release(this); } catch { /* gone */ } this.lever = null; }
     this.dead = true; this.state = 'dead'; this.deathKind = kind; this.deathT = 0;
-    this.grip = null; this.hang = null; this.vine = null;
+    this.grip = null; this.hang = null; this.vine = null; this.latch = false;
     this.body.vx = 0;
     this.emit('death', kind);
   }
@@ -72,7 +77,12 @@ export class Player {
   step(dt, inp) {
     const b = this.body;
     this.prev.set(b.x, b.y);
-    this.jumpBuf = inp.jumpPressed || (inp.y > 0.6 && inp.upPressed && !this.nearVine()) ? this.tune.buffer : Math.max(0, this.jumpBuf - dt);
+    // an up-press buffers a jump only when the boy holds nothing: never while gripping a crate or a mirror, in
+    // the lever, crank or capstan states, or while grab is held on something he can take (FULL_GAME §6.3)
+    const upJump = !inp.jumpPressed && inp.y > 0.6 && inp.upPressed && !this.holding(inp) && !this.nearVine();
+    if (inp.jumpPressed || upJump) { this.jumpBuf = this.tune.buffer; this.upJump = upJump; }
+    else this.jumpBuf = Math.max(0, this.jumpBuf - dt);
+    this.aimAt = inp.aimTarget || null;
     if (this.scripted) { this.scripted(dt, this); this.cur.set(b.x, b.y); return; }
     switch (this.state) {
       case 'ground': this.stepGround(dt, inp); break;
@@ -82,7 +92,7 @@ export class Player {
       case 'climb': this.stepClimb(dt, inp); break;
       case 'lever': this.stepLever(dt, inp); break;
       default: if (this.lever) this.stepLever(dt, inp); break;
-      case 'dead': this.deathT += dt; this.stepDeadFall(dt); break;
+      case 'dead': this.deathT += dt; this.stepDeadFall(dt); this.deathTint(); break;
     }
     this.cur.set(b.x, b.y);
   }
@@ -90,6 +100,61 @@ export class Player {
   standFree(x = this.body.x, y = this.body.y) {
     return this.phys.free(x - P.w / 2, y, x + P.w / 2, y + P.h, this.body);
   }
+
+  // holding something, or about to (grab held next to a crate, a mirror or an interactable)
+  holding(inp) {
+    if (this.grip || this.lever || this.state === 'lever' || this.state === 'crank' || this.state === 'capstan') return true;
+    if (!inp.grab || this.state !== 'ground') return false;
+    return !!(this.crateAdjacent(this.facing) || this.game.interactNear(this.body.x, this.body.y, this.facing));
+  }
+
+  // what grab holds or would take now, for the touch grab button's icon:
+  // 'mirror' | 'crank' | 'capstan' | 'crate' | 'lever' | null
+  reachable() {
+    const kindOf = (it) => (it.playerState === 'crank' || it.playerState === 'capstan' ? it.playerState : 'lever');
+    if (this.lever) return kindOf(this.lever);
+    if (this.grip) return this.grip.mirror ? 'mirror' : 'crate';
+    if (this.dead || this.state !== 'ground' || this.crawling) return null;
+    const b = this.body, it = this.game.interactNear(b.x, b.y, this.facing);
+    if (it) return kindOf(it);
+    const c = this.crateAdjacent(this.facing);
+    return c ? (c.mirror ? 'mirror' : 'crate') : null;
+  }
+
+  // grips that latch: the grab-toggle setting, or touch on a mirror, crank or capstan (tap to take, tap to let go)
+  sticky(target) {
+    if (this.game.settings?.grabMode === 'toggle') return true;
+    return this.game.input?.lastDevice === 'touch' && !!(target?.mirror || target?.sunwork);
+  }
+  // is the grip still held this step? (a latched grip lets go on the next grab press; that press, however long it
+  // is held, never takes anything again: latchBlock lasts until grab is released)
+  held(inp) {
+    if (!this.latch) return !!inp.grab;
+    if (this.latchFresh) { if (!inp.grab) this.latchFresh = false; return true; }
+    if (inp.grabPressed) { this.latch = false; this.latchBlock = !!inp.grab; return false; }
+    return true;
+  }
+  take(target) {
+    this.latch = this.sticky(target); this.latchFresh = this.latch;
+    // an up-press that buffered a jump just before the grab must not throw him off what he took
+    if (this.upJump) { this.jumpBuf = 0; this.upJump = false; }
+    this.gripT = 0; this.tilt.dir = 0; this.tilt.t = 0;
+  }
+
+  // vertical input on a gripped mirror or a crank: one notch at once, then one every 0.22 s while held.
+  // Returns -1 / 0 / +1 (up raises the far rim: +α when facing right; invertTilt flips it)
+  notchInput(inp, dt, facing = this.facing) {
+    const T = this.tilt;
+    const want = Math.abs(inp.y) > 0.6 && Math.abs(inp.y) > 1.2 * Math.abs(inp.x) ? Math.sign(inp.y) : 0;
+    T.age += dt;
+    if (!want) { T.dir = 0; T.t = 0; return 0; }
+    if (want !== T.dir) { T.dir = want; T.t = 0.22; T.age = 0; return this.tiltSign(want, facing); }
+    T.t -= dt;
+    if (T.t > 0) return 0;
+    T.t += 0.22; T.age = 0;
+    return this.tiltSign(want, facing);
+  }
+  tiltSign(y, facing) { return y * (facing || 1) * (this.game.settings?.invertTilt ? -1 : 1); }
 
   nearVine() {
     const b = this.body;
@@ -99,8 +164,8 @@ export class Player {
 
   stepGround(dt, inp) {
     const b = this.body;
-    // ground check
-    const g = this.phys.groundUnder(b, 0.04);
+    // ground check (a gripped crate or mirror keeps him on the floor down a kerb: he steps down, never falls)
+    const g = this.phys.groundUnder(b, this.grip ? P.stepUp : 0.04);
     if (!g) {
       this.state = 'air'; this.coyote = this.tune.coyote; this.fallStartY = b.y; this.grip = null; this.setCrawl(false);
       return this.stepAir(dt, inp);
@@ -118,21 +183,39 @@ export class Player {
       if (v) { this.enterVine(v); return; }
     }
     // levers and other interactables
-    if (inp.grab && !this.grip) {
+    if (inp.grab && !this.grip && !this.latchBlock) {
       const it = this.game.interactNear(b.x, b.y, this.facing);
-      if (it) { this.lever = it; this.state = it.playerState || 'lever'; it.grab(this); b.vx = 0; return; }
+      if (it) { this.lever = it; this.state = it.playerState || 'lever'; this.take(it); it.grab(this); b.vx = 0; return; }
     }
+    if (!inp.grab) this.latchBlock = false;
     // crawl
     const wantCrawl = inp.y < -0.5;
     if (wantCrawl && !this.crawling && !this.grip) this.setCrawl(true);
     if (!wantCrawl && this.crawling && this.phys.free(b.x - P.w / 2, b.y, b.x + P.w / 2, b.y + P.h, b)) this.setCrawl(false);
 
-    // grip crates
-    if (inp.grab && !this.grip && !this.crawling) {
+    // grip crates (and mirror stands: the same body contract)
+    if (inp.grab && !this.grip && !this.crawling && !this.latchBlock) {
       const c = this.crateAdjacent(this.facing);
-      if (c) { this.grip = c; this.emit('grip'); }
+      if (c) { this.grip = c; this.take(c); this.emit('grip'); c.mirror?.gripped?.(true, this); }
     }
-    if (this.grip && (!inp.grab || !this.grip.grounded || Math.abs(this.grip.y - b.y) > 0.2)) { this.grip = null; }
+    if (this.grip) {
+      const g = this.grip;
+      const away = g.anchored && inp.x !== 0 && Math.sign(inp.x) !== this.facing && Math.abs(inp.x) > 0.5; // walking away lets an anchored mirror go
+      if (!this.held(inp) || !g.grounded || Math.abs(g.y - b.y) > 0.2 || away || !g.enabled) {
+        if (this.latch && inp.grab) this.latchBlock = true; // a latched grip that slipped with grab down: no retake
+        this.latch = false; this.grip = null; g.mirror?.gripped?.(false, this);
+      }
+    }
+    // a gripped mirror tilts with vertical input or follows the pointer (finger aim)
+    let tilting = false;
+    const m = this.grip?.mirror;
+    if (m) {
+      this.gripT += dt;
+      tilting = Math.abs(inp.y) > 0.6 && Math.abs(inp.y) > 1.2 * Math.abs(inp.x);
+      const d = this.notchInput(inp, dt);
+      if (d) m.nudge?.(d, this);
+      else if (inp.aimTarget && !tilting) m.aimAt?.(inp.aimTarget, this);
+    }
 
     const mag = Math.abs(inp.x);
     let target = 0;
@@ -140,7 +223,7 @@ export class Player {
     this.pushing = 0;
     if (this.grip) {
       const toward = Math.sign(inp.x) === this.facing;
-      target = inp.x === 0 ? 0 : (toward ? P.push : P.pull) * Math.sign(inp.x);
+      target = inp.x === 0 || tilting ? 0 : (toward ? P.push : P.pull) * Math.sign(inp.x);
     } else if (inp.x !== 0) {
       if (Math.sign(inp.x) !== this.facing && Math.abs(b.vx) < 0.6) this.facing = Math.sign(inp.x);
       else if (Math.sign(inp.x) !== this.facing && Math.abs(b.vx) >= 0.6) { /* skid then turn */ }
@@ -152,7 +235,7 @@ export class Player {
 
     // jump
     if (this.jumpBuf > 0 && !this.crawling) {
-      if (this.grip) this.grip = null;
+      if (this.grip) { this.grip.mirror?.gripped?.(false, this); this.grip = null; this.latch = false; }
       if (this.phys.free(b.x - P.w / 2, b.y + 0.1, b.x + P.w / 2, b.y + P.h + 0.2, b)) { this.jump(); return; }
     }
     this.moveGroundX(b.vx * dt);
@@ -396,10 +479,32 @@ export class Player {
   }
 
   // held interactable (lever; later cranks and capstans)
+  // held interactable: the lever (Chapter I), cranks and the capstan. Release grab (or tap again when latched)
+  // to let go; from a crank or the capstan only the jump button jumps (never an up-press)
   stepLever(dt, inp) {
-    const lv = this.lever;
-    if (!inp.grab) { lv.release(this); this.lever = null; this.state = 'ground'; return; }
+    const lv = this.lever, b = this.body;
+    const sun = this.state === 'crank' || this.state === 'capstan';
+    const jump = sun && this.jumpBuf > 0 && !this.upJump;
+    if (!this.held(inp) || jump) {
+      if (this.latch && inp.grab) this.latchBlock = true; // (the releasing tap sets it in held())
+      lv.release(this); this.lever = null; this.state = 'ground'; this.latch = false;
+      if (jump && this.phys.free(b.x - P.w / 2, b.y + 0.1, b.x + P.w / 2, b.y + P.h + 0.2, b)) this.jump();
+      return;
+    }
+    this.gripT += dt;
     lv.drive(inp, dt, this);
+  }
+
+  // the colour the screen dims to (FULL_GAME §3.2: the sunset clock's death goes to indigo): the chapter's
+  // L.deathColor(kind), held on the game's fade colour once the fade to dark has begun (black otherwise). The
+  // final pass mixes the fade colour in display space as it is given (requests/L.md #8): while it does, the colour
+  // is handed over display-encoded, so the screen ends on its own hex, not near black
+  deathTint() {
+    const g = this.game, c = g.level?.deathColor?.(this.deathKind);
+    if (c === undefined || c === null || g.fadeTarget !== 1 || !g.fadeColor) return;
+    if (this.fadeEncoded === undefined) { const f = g.world?.rs?.post?.mFinal?.fragmentShader; this.fadeEncoded = typeof f === 'string' && f.includes('p = mix(p, uFadeColor, uFade)'); }
+    g.fadeColor.set(c);
+    if (this.fadeEncoded) g.fadeColor.convertLinearToSRGB();
   }
 
   stepDeadFall(dt) {
@@ -412,19 +517,23 @@ export class Player {
   // animator state and cross-fade time for the current controller state
   animState() {
     let st = 'ground';
+    const pose = this.scripted ? this.game.cinema?.pose : null;
     switch (this.state) {
       case 'air': st = 'air'; break;
       case 'hang': st = 'hang'; break;
       case 'climbUp': st = 'climbUp'; break;
       case 'climb': st = 'climb'; break;
       case 'lever': st = 'lever'; break;
+      case 'crank': st = 'crank'; break;
+      case 'capstan': st = 'capstan'; break;
       case 'dead': st = 'dead'; break;
       default:
-        if (this.crawling) st = 'crawl';
+        if (pose === 'reach' || pose === 'sit' || pose === 'insert') st = pose === 'insert' ? 'reach' : pose;
+        else if (this.crawling) st = 'crawl';
         else if (this.grip) st = (Math.sign(this.body.vx) === this.facing || Math.abs(this.body.vx) < 0.05) ? 'push' : 'pull';
         else if (this.pushing > 0) st = 'push';
     }
-    const fade = { ground: 0.12, air: 0.1, hang: 0.08, climbUp: 0.06, climb: 0.15, crawl: 0.2, push: 0.2, pull: 0.2, lever: 0.2, dead: 0.1 }[st] || 0.15;
+    const fade = { ground: 0.12, air: 0.1, hang: 0.08, climbUp: 0.06, climb: 0.15, crawl: 0.2, push: 0.2, pull: 0.2, lever: 0.2, crank: 0.22, capstan: 0.25, reach: 0.3, sit: 0.5, dead: 0.1 }[st] || 0.15;
     return { st, fade };
   }
 
@@ -432,15 +541,37 @@ export class Player {
   animContext(lookYaw = null) {
     const b = this.body;
     const speed = this.scripted ? b.vx : (this.state === 'climb' ? 0 : b.vx);
+    const m = this.grip?.mirror, lv = this.lever;
+    const hands = this.handTargets();
     return {
       speed: Math.abs(speed), vx: b.vx, vy: b.vy, grounded: this.state === 'ground', facing: this.facing,
       climbT: this.climbT, hangSwing: this.state === 'hang' ? Math.sin(this.hangT * 3) * Math.exp(-this.hangT * 2) : 0,
-      climbSpeed: this.climbSpeed || 0, deathT: this.deathT, deathKind: this.deathKind, leverT: this.lever?.t ?? 0,
+      climbSpeed: this.climbSpeed || 0, deathT: this.deathT, deathKind: this.deathKind, leverT: lv?.t ?? 0,
       lookYaw,
       // a scripted walk's waypoint pose ('reach', 'sit'...) and its age in seconds (DepthWalk)
       pose: (this.scripted && this.game.cinema?.pose) || null, poseT: this.game.cinema?.poseT ?? 0,
+      // Sunwork: hands on a mirror's rim (tilt: seconds since the last notch, the rim height to reach), a crank
+      // wheel's angle, the capstan's turning speed
+      tilt: m ? { age: this.tilt.age, dir: this.tilt.dir, rim: m.rimHeight?.(this) ?? 0.5 } : null,
+      crankA: this.state === 'crank' ? (lv?.turn ?? 0) : 0, capstanV: this.state === 'capstan' ? (lv?.speed ?? 0) : 0,
+      // where the hands hold the prop (world points; the animator reaches them with two-bone IK)
+      hands,
     };
   }
+  handTargets() {
+    const H = this._hands || (this._hands = { a: new THREE.Vector3(), b: new THREE.Vector3() });
+    const it = this.grip?.mirror || ((this.state === 'crank' || this.state === 'capstan') ? this.lever : null);
+    return it?.handHolds?.(this, H.a, H.b) && !this.dead ? H : null;
+  }
+  // his shoulders as last drawn (world) and how far a hand reaches from one (arm and palm): props pick holds he
+  // can reach
+  shoulders() {
+    const J = this.game.rig?.j; if (!J?.shoulderL) return null;
+    const S = this._sh || (this._sh = [new THREE.Vector3(), new THREE.Vector3()]);
+    J.shoulderL.getWorldPosition(S[0]); J.shoulderR.getWorldPosition(S[1]);
+    return S;
+  }
+  armReach() { const S = this.game.rig?.spec; return S ? S.upperArm + S.foreArm + 0.05 : 0.43; }
 
   targetYaw() {
     const side = Math.PI / 2;
@@ -448,6 +579,9 @@ export class Player {
       case 'hang': case 'climbUp': return this.facing * side;
       case 'climb': return Math.PI * Math.sign(this.yaw || 1);
       case 'lever': return this.lever ? this.lever.dir * side : this.facing * side;
+      // working a crank or the capstan he turns a little into the prop (both stand behind the play plane)
+      case 'crank': return (this.lever?.faceDir ?? this.facing) * (side + 0.1);
+      case 'capstan': return (this.lever?.faceDir ?? this.facing) * (side + 0.3);
       default: return this.facing * (side - 0.2);
     }
   }

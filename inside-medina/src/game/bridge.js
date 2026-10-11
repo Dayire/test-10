@@ -26,6 +26,14 @@ export class Drawbridge {
     game.add(grp);
     this.mesh = grp;
     this.moving = false;
+    // the plank as light sees it (a raised bridge throws a shadow; FULL_GAME §3.2 II-D2)
+    this.lightPlank = { x: 0, y: 0, r: this.len / 2, alpha: 0, enabled: true, kind: 'bridge' };
+    this.place();
+  }
+  place() {
+    const a = this.angle, P = this.lightPlank;
+    P.x = this.x1 - Math.cos(a) * this.len / 2; P.y = this.y + Math.sin(a) * this.len / 2;
+    P.alpha = 180 - a * 180 / Math.PI;
   }
   step(dt) {
     const down = this.source() > 0.9;
@@ -34,6 +42,7 @@ export class Drawbridge {
     const sp = down ? 1.6 : 1.2;
     this.angle += Math.sign(target - this.angle) * Math.min(Math.abs(target - this.angle), sp * dt);
     this.solid.enabled = this.angle < 0.06;
+    this.place();
     const moving = Math.abs(this.angle - prev) > 1e-5;
     if (moving && !this.moving) this.game.sfx('bridgeStart', this.x0);
     if (!moving && this.moving) this.game.sfx(this.angle < 0.01 ? 'bridgeSlam' : 'gateStop', this.x0);
@@ -42,7 +51,7 @@ export class Drawbridge {
   }
   render() { this.mesh.rotation.z = -this.angle; }
   getState() { return { angle: this.angle }; }
-  setState(s) { this.angle = s.angle; this.solid.enabled = this.angle < 0.06; }
+  setState(s) { this.angle = s.angle; this.solid.enabled = this.angle < 0.06; this.place(); }
 }
 
 // Rope ladder unrolled by a lever: becomes a climbable zone
