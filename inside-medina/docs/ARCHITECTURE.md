@@ -28,7 +28,9 @@ rooms land); chapter packages replace their own `index.js` and never edit it, an
 user deletes it.
 P owns `src/render/{post,renderer,sky,lighting,atmosphere,glsl,fx,shafts}.js` and `src/core/audio.js`;
 the engine calls their newer APIs only through optional chaining. Since the first integration pass (FULL_GAME §12)
-the integrator owns the frozen files and P's finished ones, and applies `docs/requests/*.md` to them.
+the integrator owns the frozen files and P's finished ones, and applies `docs/requests/*.md` to them; since the
+second (L and U merged) it owns L's and U's finished files too. The Sunwork contracts are in §13 and
+`docs/systems/light.md`, the shell's in `docs/systems/ux.md`.
 
 ## 3. Boot
 
@@ -36,17 +38,28 @@ the integrator owns the frozen files and P's finished ones, and applies `docs/re
 
 1. `storage.init()` (`?nosave=1` keeps everything in memory), `save.load()`.
 2. Device class (FULL_GAME §8.4): coarse pointer with `deviceMemory ≤ 4` or `hardwareConcurrency ≤ 4` → low tier, texture scale 0.5, pool 4; other coarse pointers → medium, 0.5, 4; desktop → high, 1, 6. The pool size is fixed here and never follows the tier.
-3. `createWorld(canvas, {tier, texScale, bake: false})`, GLB overrides, `SESSION_SURFACES`, `new Game(...)`, `game.initOnce({pool})`, the `hooks.card` / `hooks.credits` stubs from `ui.js`, saved settings.
+3. The shell first (U): `window.__ui` and `Input` (with the touch layer and haptics), the main menu interactive before
+   the world exists (`__boot.menu`; continue, new journey and chapters wait for the chapter with a turning rosette, and
+   a choice made meanwhile is taken when it is ready). Then `createWorld(canvas, {tier, texScale, bake: false})`, GLB
+   overrides (never in the artifact), `world.prebake(SESSION_SURFACES)` (the boy's surfaces: their targets exist at once
+   and are drawn with the first chapter's own, `loader.pendingBake`), `new Game(...)`, `game.initOnce({pool})`, the
+   shell attached (`hooks.card`, `hooks.credits`, `hooks.hint`, the settings it keeps), then the loop: it runs before
+   the chapter load, so the menus and the progress keep moving. `nextFrame()` waits for a presented frame before each
+   long synchronous step, so the splash and the menu reach the compositor.
 4. Where to start: `?chapter=` / `?cp=` (`?cp=` alone: the souk), else the save's `{chapter, cp}` (FULL_GAME §7.1: the
    title shows the save's place; a new player gets the souk), else the souk. Booting never writes the save.
    `game.loadChapter(id, cp, {reason: 'boot', onProgress})` paints the loading bar (bake slices, build sections, compile).
    `world.bakeSlice` is 200 ms on a software rasteriser (SwiftShader: every present is expensive), 33 ms on desktop
    GPUs and 16 ms on touch devices (about one surface per frame, so input and menus stay responsive).
-5. The loop: `rs.beginFrame?.(now)` (false skips the frame), `rs.trackFrame(ms, {paused, hidden})`, `game.frame(dt)`.
+5. The loop: `rs.beginFrame?.(now)` (false skips the frame), `rs.trackFrame(ms, {paused, hidden})`, `game.frame(dt)`,
+   `ui.afterFrame(canvas)`. `ui.beforeRender(post.params)` runs just before `rs.render` (it deepens the vignette under
+   the menus after the look has written its own).
 
-Lifecycle: `visibilitychange` (hidden) pauses and saves, `pagehide` saves, `resize` redraws a paused freeze-frame,
-`webglcontextlost` pauses, `webglcontextrestored` → `game.recoverContext()` (re-bakes every surface into its own
-targets, rebuilds the env map, reloads the chapter at its checkpoint).
+Lifecycle: `visibilitychange` (hidden) pauses play (the player comes back to the pause menu) and rests the title, and
+saves; `pagehide` saves; `blur` in play and a pad disconnect pause; `resize` redraws a paused freeze-frame and lays the
+shell out; the screen wake lock is held in play only; `webglcontextlost` pauses and shows the lantern card,
+`webglcontextrestored` → `game.recoverContext()` (re-bakes every surface into its own targets, rebuilds the env map,
+reloads the chapter at its checkpoint).
 
 | URL parameter | Effect |
 |---|---|
@@ -55,18 +68,22 @@ targets, rebuilds the env map, reloads the chapter at its checkpoint).
 | `?autostart=1` | skip the title and every intro (test contract) |
 | `?hold=1` | requestAnimationFrame never advances the simulation; only `__medina.sim` does (determinism) |
 | `?nosave=1` | saves stay in memory |
+| `?unlock=1` | every chapter selectable in the chapter select |
+| `?nosw=1` | no service worker (the hosted build registers one) |
 | `?tier= ?tex= ?pool= ?noauto=1` | quality tier, texture scale, pool size, no auto quality |
 | `?debug=1` | state overlay |
 
-`window.__boot` holds boot timestamps; `game.loader.stats` the last load's phase timings
+`window.__boot` holds boot timestamps (`start, menu, world, overrides, init, chapter`); `window.__ui` is the shell
+(tests); `game.loader.stats` the last load's phase timings
 (`cover, import, unload, prebake, build, merge, fx, bake, compile, render`).
 
 ## 4. Chapters
 
 ### 4.1 Registry (`src/chapters/index.js`)
 
-`CHAPTERS` lists `{id, n, numeral, glyph, label, next, exit, tone, dev?, load}` for `souk`, `sundown`, `night`,
-`dawn` and `lab` (dev only: hidden from menus and the chain). `meta(id)` reads the metadata without loading;
+`CHAPTERS` lists `{id, cps, n, numeral, glyph, label, next, exit, tone, dev?, load}` for `souk`, `sundown`, `night`,
+`dawn` and `lab` (dev only: hidden from menus and the chain); `cps` is the chapter's checkpoint count (FULL_GAME §2–5),
+which the chapter select draws before the chapter was built on this device. `meta(id)` reads the metadata without loading;
 `getChapter(id)` imports the module lazily and merges it. `exit` is the colour the screen fades to when the
 chapter ends; `tone` colours its card. `PLAYABLE` excludes dev chapters.
 
@@ -103,7 +120,8 @@ a script moves or lowers. The skyline's rows 3 and 4 and its domes are the far s
 L = { entities[], systems[], interactables[], triggers[], checkpoints[], cameraKeys[], killZones[],
       lanterns[], lightSources[], shaftSpots[], dustRegions[] (non-empty), flockSpots[], covers[], hints[],
       credits?, bounds: {x0, x1, y0, y1}, shadowExtent?, finale?: DepthWalkConfig,
-      prepare(cp, game), mix(x, game), safeZone(x), lookTarget(player), extraState(), onComplete?(game) }
+      prepare(cp, game), mix(x, game), safeZone(x), lookTarget(player), extraState(), onComplete?(game),
+      deathColor?(kind) }
 ```
 
 - **Entities**: optional `id`, `prestep()`, `step(dt)`, `render(alpha, dt)`, `dispose()`, `liveUnderTitle`; mandatory `getState()` / `setState(s)`.
@@ -115,6 +133,11 @@ L = { entities[], systems[], interactables[], triggers[], checkpoints[], cameraK
 - **Kill zones** `{x0, x1, y0, y1, kind}`: the boy dies (`kind`) when his feet enter one.
 - `prepare(cp, game)` solves what precedes checkpoint `cp` (called for every start, including 0); `extraState()` is the chapter's part of `__medina.state().extra`.
 - Lanterns `{mesh, phase, lit}` get a glow sprite unless `lit === false`; `lightSources` `{pos, intensity, phase}` become pool sources.
+- `hints` `[{x0, x1, y0?, y1?, after, glyph, unless(game)}]`: the wordless hint zones (glyphs `jump grab up down crawl
+  tilt crank aim turn`); a zone's glyph shows after `after` seconds in it unless `unless` holds, and a context hint for
+  the same verb waits while it counts down (`docs/systems/ux.md`, HUD).
+- `deathColor(kind)`: the colour the screen dims to on that death (the sunset clock's indigo `#0b1026`); black when it
+  returns nothing.
 
 Coordinates are chapter local (FULL_GAME §1.2): x right, y up, ground y 0, play plane z 0.
 
@@ -200,6 +223,9 @@ checkpoint snapshot and spawn, the cinematic stopped; respawn and the title use 
 mix back in unless the player muted it). A respawn returns to `intro` when the title is up. Dev chapters
 (`def.dev`) never write the save (`game.saving` is false): no `begin`, checkpoint, death or play-time writes.
 
+A death fades to `L.deathColor?.(kind)` (black by default) after 1.6 s and respawns at 2.35 s. Fade colours are
+`THREE.Color`s (linear); the final pass display-encodes them, so the screen ends on the colour's own hex.
+
 **Settings** `applySettings(s, {persist})` merges into `game.settings` and saves (debounced 500 ms):
 
 | Key | Default | Applied by |
@@ -216,6 +242,13 @@ mix back in unless the player muted it). A respawn returns to `intro` when the t
 | `fpsCap, renderScale, dynres` | null, 100, true | `rs.applySettings?.(s)` |
 | `volumes{}` | {} | `audio.setVolumes?.(v)` |
 | `hints, invertTilt, aimSnap, grabMode, crawlMode` | first, false, true, hold, hold | stored for U and L; `input.applySettings?.(s)` |
+| the shell's: `touchStick, touchSize, touchOpacity, leftHanded, vibration, soundCues, menuScale` | floating, M, 45, false, low, false, 100 | the shell, `Input`, the haptics |
+| `highContrast, reduceFlashing` | false | the shell; L's beams, locks, tripwires and cones read `game.settings`; `rs` caps bloom, flares, rays and dirt |
+| `batterySaver, motionBlur` | false | `rs.applySettings` (30 fps, 0.75 scale, no DOF; blur on ultra only) |
+
+The shell (`ui.setSetting(k, v)`) persists a value as chosen and hands the resolved one to `applySettings(..., {persist:
+false})`: `cameraDist: 'auto'` is stored as `auto` and applied as `close` on a portrait phone, `normal` elsewhere;
+`timeScale` is stored as 100 / 85 / 70. Defaults by device class: `defaultSettings(deviceClass)` (`src/ui/settings.js`).
 
 **Hooks** `game.hooks = {frame: [fn(dt, game)], card: fn(meta, opts) → Promise<{hide()}>, credits: fn(lines) → Promise, hint: fn(id, game)}`.
 
@@ -346,10 +379,17 @@ use `distPortrait` and a 52° horizontal field-of-view floor (46° in landscape)
 ## 9. Input (`src/core/input.js`)
 
 `poll()` → `{x, y, jump, grab, pause, any, pointer}`; edges `jumpPressed, grabPressed, pausePressed,
-anyPressed`; `pointer = {x, y (NDC), active, pressed, released, kind}` (left mouse or a touch on the canvas);
-`nav = {up, down, left, right, confirm, back}` edges with repeat (400 ms, then 120 ms); `lastDevice`,
-`keyLabels`, `override` (scripted input). The on-screen controls (`#touch`, z-index 5) sit under `#ui` (z-index 6), so
-the card, pause, credits and loading screens cover them; hiding them in menus is U's (FULL_GAME §7.5).
+anyPressed` compare with the raw previous poll, so the game zeroing `state` / `prev` while a menu is open
+(`setMenuOpen`) never turns a held key into a new press; `pointer = {x, y (NDC), active, pressed, released, kind}`
+(left mouse or a touch on the canvas that no control took); `nav = {up, down, left, right, confirm, back, prev, next,
+pause}` edges with repeat (directions after 400 ms, then every 120 ms); `lastDevice` (`keyboard | gamepad | touch`,
+`input.on('device', fn)`), `input.on('padDisconnect', fn)`, `padKind(id)` (`xbox | ps | nintendo` from the vendor id),
+`keyLabels` (the player's layout letters), `override` (scripted input), `touchUI` (the touch layer), `haptics`
+(`src/core/haptics.js`: notches, locks, ropes, slams, landings and deaths, off / low / full), the crawl toggle
+(`crawlMode: 'toggle'`: a down-press where the boy could crouch latches until up, a jump, another down, leaving the
+ground or taking hold; `input.context()` says where he could). Touch drives the layer only with fingers and pens; a
+mouse on a touch-screen laptop reaches the scene. The touch layer is the first child of `#ui`, so the card, the menus
+and the loading screen cover it (`docs/systems/ux.md`).
 
 ## 10. Saves (`src/core/storage.js`, `src/core/save.js`)
 
@@ -377,7 +417,11 @@ counts), ext{}`. `window.__info()` adds the state to `info()`.
 | `node tools/cycle.mjs [--cycles 3] [--path souk,lab,souk,sundown,souk]` | memory flat, programs stable, light census constant, no page or console errors |
 | `node tools/perf.mjs [--tiers low,medium,high] [--checks \| --only checks \| --only path] [--path 0]` | the §8.5 budget at the six Chapter I spots and the hero alley per tier, through the finale, and along the souk bot's whole path (a frame every 0.5 s of game time: the ladder unrolled, the bridge lowered, the guard chasing); each the heaviest frame (every shadow map refreshed + main pass); and the presentation checks; exits 1 when a spot or the path is over its tier's budget, the bot fails, a check fails or is pending, or the page reports an error |
 | `node tools/probe.mjs "<query>" "<js>"`, `tools/tour.mjs`, `tools/shot.mjs` | ad hoc evaluation and screenshots; all take `--port`, `BASE=` and `--chapter` |
-| `npm test`, `npm run test:souk`, `npm run test:foundation`, `npm run cycle` | the suites above |
+| `node tools/light-unit.mjs`; `node tools/playtest.mjs --chapter lab`; `node tools/negative.mjs --chapter lab` | Sunwork: the pure tracer's maths and the traced hits of §3–5 (Node only), the lab bot through twelve rooms (`tools/bots/lightlib.js` is injected before the chapter bot), the lab negatives (`docs/systems/light.md`) |
+| `node tools/ux-tests.mjs`; `node tools/mobile-tests.mjs` | the shell: menus by keyboard, pad, mouse; storage, settings, hints, the artifact and the hosted build; phones with real touches (finger aim on the lab's props) (`docs/systems/ux.md`) |
+| `npm test` | the souk bot and negatives, the foundation suite, the light unit tests, the lab bot and negatives, ux and mobile tests (stops at the first failure, exit 1) |
+| `npm run test:all` | `npm test`, then the audio tests, `perf.mjs --checks`, `cycle.mjs` and both builds |
+| `npm run test:souk`, `test:foundation`, `test:lab`, `test:ux`, `test:mobile`, `cycle` | one suite each |
 
 The harness (`tools/lib/harness.mjs`) runs one headless Chromium on SwiftShader with the low-cost URL
 (`autostart, tex 0.1, tier low, noauto, nosave, hold`). Bots are step lists `{name, input(s, G), until(s, G),
@@ -406,6 +450,21 @@ screenshots).
 | `contextLost`, `contextRestored` | `{}`, `{id, cp}` |
 | `loadError` | `{id, cp, message}` (the load promise rejects too) |
 
+Sunwork events (L; haptics, hints and tests read them):
+
+| Event | Data |
+|---|---|
+| `notch` | `{id, notch, alpha, aim?}` (a tray stepped one notch; `aim` when the finger or mouse set it) |
+| `lockOpen` | `{id, degree}` |
+| `ropeSnap` | `{id}` |
+| `alarm` | `{id, by}` (a tripwire or a lamp raised it) |
+| `dart` | `{id, at}` |
+| `dazzle`, `lampDazzled` | `{id, sec}` |
+| `lampFixate` | `{id}` |
+| `guardStun`, `guardAsleep` | `{x, sec}`, `{x}` |
+| `mirrorLost`, `mirrorHome` | `{id, x}`, `{id}` |
+| `clock` | `{id, on, duration?, expired?}` |
+
 Chapters and entities may emit their own through `game.emit(name, data)`.
 
 **Sound names** (`audio.play(name, x, data)`; unknown names fall through silently):
@@ -416,4 +475,30 @@ Chapters and entities may emit their own through `game.emit(name, data)`.
 | Mechanisms | `crateImpact`, `plateDown`, `plateUp`, `gateStart`, `gateStop`, `gateSlam`, `bridgeStart`, `bridgeSlam`, `lever`, `ladder` |
 | Lamps and guards | `alarm`, `dart`, `shout`, `guardStep`, `guardVault`, `guardFrustrated`, `grabbed` |
 | World | `wings` |
-| Reserved (FULL_GAME §9.4) | `mirrorGrip`, `notch`, `mirrorRoll`, `crank`, `capstan`, `lockCharge`, `lockOpen`, `boltShut`, `ropeSmoulder`, `ropeSnap`, `counterweight`, `dazzle`, `fixate`, `turret`, `dartGuard`, `guardStun`, `guardSleep`, `tripHum`, `plankCreak`, `plankFall`, `dyeSplash`, `lift`, `liftStop`, `hatch`, `trayPick`, `trayInsert`, `sunsetTick`, `lampsOn`, `lampsOff`, `answeredLight` |
+| Sunwork (L) | `mirrorGrip`, `notch {notch, stop, steps}`, `mirrorRoll {speed}`, `crank`, `capstan`, `lockCharge {level, degree}`, `lockOpen {degree, bolt?, hold?}`, `boltShut`, `ropeSmoulder {heat}`, `ropeSnap`, `counterweight`, `dazzle`, `fixate`, `turret`, `dartGuard`, `guardStun`, `guardSleep`, `tripHum`, `sunsetTick {urgency}`, `answeredLight`; stingers `lockOpen`, `ropeSnap`, `dazzle` |
+| Reserved (FULL_GAME §9.4) | `plankCreak`, `plankFall`, `dyeSplash`, `lift`, `liftStop`, `hatch`, `trayPick`, `trayInsert`, `lampsOn`, `lampsOff`, `drum` (C4: the visual sound cues listen for it) |
+
+## 13. Sunwork (L, `src/game/light/**`)
+
+The light mechanic is a chapter system: `new LightSystem(game, kit)` joins `L.systems` and owns its children (it
+steps, snapshots by id and renders them; never add them to `L.entities`); `prepare(cp)` sets solved states through
+each child's `setState`. Light is 2D in the play plane, traced every second fixed step against the colliders the boy
+collides with; mirrors turn in 15° notches (θr = 2α − θi), each reflection keeps 95 %.
+
+- **Entities**: sources `SunRay`, `MoonRay`, `BeamLamp`, `SearchlightSource`; `Mirror` (`wheeled | anchored | crank |
+  continuous`), `Crank`, `Capstan`; targets `SunLock` (latch, hold, bolt), `Photocell`, `LampEye`, `Sensor` (tripwire
+  and dart turret), `BurnRope`, `Occluder`; time `Terminator`, `SunClock`, `Hatch`. Gates, hatches and bridges stay
+  ordinary entities driven by `source()` closures.
+- **What blocks light**: enabled solids unless `Solid.light === 'pass'`, bodies unless `Body.light === 'pass'`, mirror
+  trays (both faces reflect; `oneSided`), `Occluder` boxes, any entity's `lightPlank` / `lightBox` (a raised
+  drawbridge). A `Gate` is a lattice and lets light through by default (`light: 'block'` for a solid door).
+- **Player states** (§6.3): a mirror is gripped like a crate (its stand is a `Body` with `owner`; `anchored` stands never
+  move); `crank` and `capstan` are interactable states (`playerState`); vertical input steps one notch, then one every
+  0.22 s; `pin.aimTarget` (finger or mouse) aims the tray (`Mirror.aimAt`, `settings.aimSnap`); an up-press never
+  buffers a jump while he holds anything; latched grips (`grabMode: 'toggle'`, or touch on a mirror, crank or capstan)
+  take on a tap and let go on the next. `player.reachable()` names what grab would hold (the touch grab icon).
+- **Searchlights** (§6.4, one rule): lit = seen, through the 2D line of sight against every light blocker; `dazzle`,
+  `fixate`, `mode 'watch'`; the cone and every beam live on `LAYERS.BEAMS` with `softFade` (P's soft pass) and end
+  with the fog chunk.
+- **Test API**: `__medina.ext.light()` (beams, targets, mirrors, lamps, stats, `trace`, `solve`). Details, the lab's
+  twelve rooms and the measured results: `docs/systems/light.md`.
