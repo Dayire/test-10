@@ -178,7 +178,10 @@ export class Animator {
     const legAvg = (o.hipL[0] + o.hipR[0]) * 0.5;
     o.skirt[0] = legAvg * 0.55 + this.skirtSwing;
     const spread = Math.abs(o.hipL[0] - o.hipR[0]);
-    this.rig.j.skirt.scale.set(1 + spread * 0.05, 1, 1 + spread * 0.35);
+    // lying on his back the robe lies flat on the stones (its depth is the vertical then)
+    const lie = st === 'asleep' ? (this.lying || 0) : 0;
+    this.rig.j.skirt.scale.set(1 + spread * 0.05 + 0.12 * lie, 1, (1 + spread * 0.35 * (1 - lie)) * (1 - 0.55 * lie));
+    if (lie) o.skirt[0] = lerp(o.skirt[0], 0.1, lie);
     this.rig.apply(this.out);
     this.reach2(ctx.hands, dt);
   }
@@ -422,16 +425,19 @@ export class Animator {
     P.pelvisY = -0.08 * k; P.pelvisZ = 0.06 * k;
   }
 
-  // a dart: the knees buckle and he folds onto the ground, asleep
+  // a dart: the knees buckle (a), then he falls back flat on the ground (b): on his back, head turned aside, one
+  // knee raised, the arms out on the stones. Lying, the pelvis is a torso's half depth above the floor
   asleep(P, ctx) {
-    const J = P.joints, t = ctx.poseT ?? 3;
+    const J = P.joints, t = ctx.poseT ?? 3, S = this.rig.spec;
     const a = smooth(t / 0.4), b = smooth((t - 0.35) / 0.7);
-    J.hipL[0] = -1.4 * a + 0.6 * b; J.hipR[0] = -1.2 * a + 0.5 * b; J.kneeL[0] = 2.2 * a - 1.2 * b; J.kneeR[0] = 2.1 * a - 1.0 * b;
-    J.spine[0] = 0.5 * a - 0.2 * b; J.neck[0] = 0.4 * a + 0.3 * b; J.head[0] = 0.2 * b;
-    J.shoulderL = [0.4 * a - 1.2 * b, 0, 0.5 * a + 0.6 * b]; J.shoulderR = [0.3 * a + 0.2 * b, 0, -0.4 * a - 0.9 * b];
-    J.elbowL[0] = -0.4; J.elbowR[0] = -0.3;
-    J.pelvis = [-1.45 * b, 0, 0.15 * b];
-    P.pelvisY = -0.42 * a - (this.rig.spec.hipH - 0.62) * b;
+    J.hipL[0] = -1.4 * a + 0.9 * b; J.hipR[0] = -1.2 * a + 1.3 * b; J.kneeL[0] = 2.2 * a - 1.1 * b; J.kneeR[0] = 2.1 * a - 2.1 * b;
+    J.ankleL[0] = 0.2 * b; J.ankleR[0] = 0;
+    J.spine[0] = 0.5 * a - 0.5 * b; J.chest[0] = 0; J.neck[0] = 0.4 * a - 0.25 * b; J.head = [0.05 * b, 0.5 * b, 0.25 * b];
+    J.shoulderL = [0.4 * a - 0.1 * b, 0, 0.5 * a + 0.75 * b]; J.shoulderR = [0.3 * a + 0.1 * b, 0, -0.4 * a - 0.15 * b];
+    J.elbowL[0] = -0.4 + 0.1 * b; J.elbowR[0] = -0.3;
+    J.pelvis = [-1.5 * b, 0, 0.08 * b];
+    P.pelvisY = lerp(-0.42 * a, S.chestR * S.torsoDepth + 0.03 - S.hipH, b);
+    this.lying = b;
   }
 
   dead(P, ctx) {

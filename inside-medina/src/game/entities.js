@@ -462,6 +462,7 @@ export class Guard {
     this.facing = 1;
     // lantern in right hand + light
     this.lantern = lanternMesh(game.mats, { s: 1.1, chain: 0.02 });
+    this.lanternDrop = -new THREE.Box3().setFromObject(this.lantern).min.y; // hang point to the bottom of its base
     this.lantern.position.set(0, -0.07, 0.01);
     this.rig.j.wristR.add(this.lantern);
     // the lantern's light is a priority source in the shared light pool
@@ -572,11 +573,17 @@ export class Guard {
       // lantern arm held forward
       this.rig.j.shoulderR.rotation.x = -0.5 + Math.sin(this.t * 9) * 0.1; this.rig.j.elbowR.rotation.x = -0.9;
     }
-    // the lantern hangs plumb from the hand whatever the arm is doing
-    this.rig.j.wristR.updateWorldMatrix(true, false);
-    this.rig.j.wristR.getWorldQuaternion(this._wq).invert();
+    // the lantern hangs plumb from the hand whatever the arm is doing; it never sinks through the floor: a hand
+    // that drops lower (asleep, he lies on the stones) sets it down upright beside him
+    const W = this.rig.j.wristR;
+    W.updateWorldMatrix(true, false);
+    W.getWorldQuaternion(this._wq).invert();
     this.lantern.quaternion.copy(this._wq);
     this.lantern.rotateZ(Math.sin(this.t * 6.5) * 0.12 * Math.min(1, Math.abs(this.body.vx) / 2));
+    const hp = this._hp || (this._hp = new THREE.Vector3());
+    W.localToWorld(hp.set(0, -0.07, 0.01));
+    const floor = y + this.lanternDrop + 0.005;
+    if (hp.y < floor) { hp.y = floor; W.worldToLocal(hp); this.lantern.position.copy(hp); } else this.lantern.position.set(0, -0.07, 0.01);
     if (this.light) {
       this.lantern.updateWorldMatrix(true, false);
       this.lantern.localToWorld(this.light.pos.set(0, this.lantern.userData.glowY, 0.08));
