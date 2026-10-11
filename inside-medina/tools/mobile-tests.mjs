@@ -215,8 +215,11 @@ async function device(dev) {
     const topId = () => page.evaluate(() => __ui.focus.top?.el.id || null);
     const tapSel = async (sel) => { const r = await rect(sel); if (!r) return false; await tap(...centre(r)); await page.waitForTimeout(500); return true; };
     const out = { bad: [] };
+    // a screen's reveal slides it in: measure once its transitions have run (they take longer on a loaded machine)
+    const still = (sel) => page.waitForFunction((sel) => { const s = document.querySelector(sel); return !!s && !document.getAnimations().some((a) => a instanceof CSSTransition && a.playState === 'running' && s.contains(a.effect?.target)); }, sel, { timeout: 10000, polling: 100 }).catch(() => {});
     const leave = async (from, entry, screen) => {
       await tapSel(`#${from} .entry[data-k="${entry}"]`);
+      await still(`#${screen}`);
       const opened = await topId(), b = await rect(`#${screen} .back`);
       out.bad.push(...judge(b ? [{ k: `${screen} back`, ...b }] : [{ k: `${screen}: no back`, x: -1, y: -1, w: 0, h: 0 }]));
       await tapSel(`#${screen} .back`);
