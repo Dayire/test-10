@@ -355,7 +355,9 @@ await scenario('mouse', async () => {
   const click = async (sel) => { const c = await box(sel); if (!c) return false; await page.mouse.click(c[0], c[1]); await frames(page, 3); await page.waitForTimeout(500); return true; };
   const out = {};
   await click('#title .entry[data-k="settings"]'); out.open = await top(page);
-  out.backShown = await page.evaluate(() => { const b = document.querySelector('#settings .back').getBoundingClientRect(); return b.width >= 44 && b.height >= 44 && document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)?.closest('.back') !== null; });
+  // the glyph is the topmost thing under its centre once the sheet has come in (the reveal runs longer on a loaded
+  // machine than the half second the clicks wait)
+  out.backShown = await waitFor(page, () => { const b = document.querySelector('#settings .back').getBoundingClientRect(); return b.width >= 44 && b.height >= 44 && document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)?.closest('.back') !== null; }, null, 10000).then(() => true, () => false);
   await click('#settings .back'); out.byGlyph = await top(page);
   // a click on the scene beside the sheet
   await click('#title .entry[data-k="settings"]');
