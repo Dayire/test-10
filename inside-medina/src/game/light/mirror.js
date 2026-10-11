@@ -283,7 +283,7 @@ export class Crank {
     _c.setFromMatrixPosition(w.matrixWorld); _c.z += 0.03; // just in front of the rim
     _u.set(1, 0, 0); _v.set(0, 1, 0);
     if (this.gripW === null) this.gripW = this.wheel;
-    let [pa, pb] = S ? apart(ringAngle(S[0]), ringAngle(S[1]), 50 * DEG) : [Math.PI - 0.5, Math.PI + 0.5];
+    const [pa, pb] = S ? apart(ringAngle(S[0]), ringAngle(S[1]), 50 * DEG) : [Math.PI - 0.5, Math.PI + 0.5];
     const reach = player.armReach?.() ?? 0.43;
     const place = () => { const d = this.wheel - this.gripW; ringAt(pa + d, wr, a); ringAt(pb + d, wr, b); };
     place();
