@@ -606,6 +606,7 @@ Horizontal rays exist only above T. Each pool lantern and glow sprite goes out a
 | East wall | 172–172.4: sill 0–0.6, window 0.6–1.8, wall 1.8–16 |
 | Floor 1 | x 160–169.5, y 3.7–4.0 (the hole 169.5–172 is on the right) |
 | Roof | x 158–160 and 162–174, y 11.7–12.0; **Hatch** x 160–162 (solid until open) |
+| Rafter | light-blocking solid x 162.5–169.0, y 9.0–9.3 (without it C1 at −60° alone sends a 150° leg from (170.8, 6.0) into L_TOP: 12 of the 1727 wrong settings would light the lock) |
 | Ray | horizontal, y 1.2, through the east window |
 | Wheeled M | starts at x 166, α 0 (edge-on; the ray passes to the west wall) |
 | Kerb | 171.15–171.3 → M centre **170.8** |
@@ -620,7 +621,7 @@ Horizontal rays exist only above T. Each pool lantern and glow sprite goes out a
   2. C1 to −45°: left along y 6.0, over the boy's head on floor 1 (5.16).
   3. C2 to −45°: straight up to L_TOP, hitting (161.2, 11.05).
   - Cranks can be set in any order.
-- **Checks (tracer):** the boy on ladder 1 (x 169.9) and on floor 1 never blocks a leg. L_TOP latches and the hatch swings open.
+- **Checks (tracer):** the boy on ladder 1 (x 169.9) and on floor 1 never blocks a leg. L_TOP latches and the hatch swings open. With the rafter, all 1727 wrong settings stay dark (`tools/light-unit.mjs`, the `IV-D minaret chain` fixture).
 
 **P4 (E). The heliostat (finale).**
 
@@ -664,12 +665,13 @@ Gameplay stays strictly 2D: deterministic, unit-testable, and using the physics 
 **What blocks light:**
 - Enabled solids, including one-way cloth (shade), unless the solid has `light:'pass'`.
 - Solid bodies (crates, mirror stands).
-- Mirror trays (one-sided: the back face blocks).
+- Mirror trays (both faces reflect; `oneSided: true` makes the back face block). II-B2 starts on the underside at +30° and IV-A1's crank is solved on its underside.
 - The boy's body (0.34 × 1.16, or 0.56 tall when crawling).
 - Guard bodies.
-- Light-only `Occluder` boxes.
+- Light-only `Occluder` boxes, and any entity's light-only plank or box (a raised drawbridge).
 
-Ladders and vines let light through.
+Ladders, vines and lattice gates let light through (a `Gate` is a lattice portcullis: `light: 'pass'` by default,
+`light: 'block'` for a solid door; a lifted solid gate would cut the II-C2 window ray and hold G6 open).
 
 ### 6.2 Entities (all in `src/game/light/`, owned by WP-L)
 
@@ -684,7 +686,7 @@ Ladders and vines let light through.
 | `Sensor` (tripwire) | `from, to, lamp?, darkT 0.2, turret:true` | A BeamLamp-to-sensor line. Dark > 0.2 s → `alarm(occluder)`: horn, turret fixes, the slaved searchlight `fixate(occluder)`, dart after 1.05 s. A dart on the boy is `die('shot')`; on a guard, `stun(Infinity)`; on anything else it is harmless. Alarm clears 4 s after the line is restored. | `{alarm, t}` |
 | `BurnRope` | box, `need 1.6, burnT 1.5, cool 0.5/s, onBurnt` | Sums the I of all beams hitting it. Smoke, then embers (P particles). | `{heat, burnt}` |
 | `Occluder` | box; animatable | Blocks light only | `{y0, y1}` |
-| `LampEye` | circle r 0.8 (1.5 for the fortress) at a lamp | Reflected hit ≥ 0.1 s → `lamp.dazzle(7)` or `onHit()` | — |
+| `LampEye` | circle r 0.8 (1.5 for the fortress) at a lamp; `face` (deg) for an eye behind a window | Reflected hit ≥ 0.1 s → `lamp.dazzle(7)` or `onHit()`; with `face` only light travelling toward that face counts (the IV-E fortress lamp looks east). While its lamp is blind it neither fires nor re-arms. | — |
 | `Terminator` | `T(t or x)` | (a) Gameplay: `clipByTerminator` sources die below T. (b) Visual: an invisible shadow-caster slab (`colorWrite:false`, `castShadow:true`, 60 × 2 m in light space). Every frame it is placed along −sunDir at 0.4 × the sun shadow camera's distance from the camera focus, top at T + D·tan(sun elevation). Its shadow line on the facades sits at T. Zero shader cost. | `{T}` |
 | `SunClock` | `duration, T0, rate, onExpire` | Drives Terminator T over time and the LookDirector time blend; `assist` +50 % duration | `{t, running}` |
 | `Crank` | handle (x, y), mirror, `dir` | Interactable. Player state `crank`. | via the mirror |
@@ -695,8 +697,8 @@ Ladders and vines let light through.
 
 | Class | Change |
 |---|---|
-| `Searchlight` (`entities.js:185-284`) | Unified detection (§6.4); `reflectable`; `dazzle(sec)`; `fixate(target, {while})`; `mode: 'sweep' \| 'watch'`. Acquires a rig spot from F's light rig instead of owning a SpotLight. |
-| `Guard` (`entities.js:287-394`) | `stun(sec)` (shield-eyes pose; `Infinity` gives the asleep collapse); `onLight` stun rule (I ≥ 0.8, 1.2 s, 2 s immunity); auto step-up ≤ 0.26 instead of a 0.34 s vault for stairs (`:344-348`). The real `getState` is done by F. |
+| `Searchlight` (`entities.js:185-284`) | Unified detection (§6.4); `reflectable`; `dazzle(sec)`; `fixate(target, {while})`; `mode: 'sweep' \| 'watch'`. Acquires a rig spot from F's light rig instead of owning a SpotLight. After a dazzle (7 s, assist 10.5 s) the beam settles back onto the street over 0.9 s while the sweep runs on away from the rest that blinded it, still blind; the eye re-arms only once the lamp sees again, and it sees the boy again within one sweep cycle. |
+| `Guard` (`entities.js:287-394`) | `stun(sec)` (shield-eyes pose; `Infinity` gives the asleep collapse, the body dropping to 0.45 m); `onLight` stun rule (daylight only: sun or moon rays, direct or reflected, I ≥ 0.8, 1.2 s, 2 s immunity; a searchlight's or a tripwire's own beam never stuns); auto step-up ≤ 0.26 instead of a 0.34 s vault for stairs (`:344-348`). The real `getState` is done by F. |
 | `Lever` | Becomes an interactable (F did the plumbing) |
 
 ### 6.3 Input and player states (no new buttons)
