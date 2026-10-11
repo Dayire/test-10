@@ -499,6 +499,23 @@ export const scenarios = [
     check: (r) => (r.lite.on && !r.full.on && r.lite.tris > 0 && r.lite.area < 0.005 && r.full.area < 0.005 ? true : `geometry wound inward: ${JSON.stringify(r)}`),
   },
   {
+    // requests/L.md #9: the yaw spring is stepped exactly, so a phone that drops to 5 fps (frames of 0.1 s, the loop's
+    // clamp) turns the boy cleanly; the explicit step diverged below about 19 fps (yawVel 1e16, NaN wrists)
+    name: 'the boy turns cleanly at 5 fps', cp: 0,
+    run: ({ page }) => page.evaluate(() => {
+      const G = __medina.game, root = G.rig.root, pl = G.player, out = [];
+      const wrists = () => { const v = []; for (const [k, o] of Object.entries(G.rig.j)) if (/^wrist/.test(k)) { const p = o.getWorldPosition(o.position.clone()); v.push(p.x, p.y, p.z); } return v; };
+      for (const f of [-1, 1, -1]) {
+        pl.facing = f;
+        let max = 0;
+        for (let i = 0; i < 60; i++) { G.frame(0.1); max = Math.max(max, Math.abs(root.rotation.y)); }
+        out.push({ f, yaw: +root.rotation.y.toFixed(4), target: +pl.targetYaw().toFixed(4), max: +max.toFixed(3), vel: +(pl.yawVel || 0).toFixed(5), finite: wrists().length >= 6 && wrists().every(Number.isFinite) && Number.isFinite(root.rotation.y) });
+      }
+      return out;
+    }),
+    check: (r) => (r.every((o) => o.finite && o.max <= Math.PI + 1e-6 && Math.abs(o.yaw - o.target) < 0.01 && Math.abs(o.vel) < 0.01) ? true : `the turn at 5 fps: ${JSON.stringify(r)}`),
+  },
+  {
     // the library's materials multiply their albedo by the vertex colour: a raw geometry without one renders black
     // whatever the material says (the searchlight's brass housing, the lever's knob, the plate's rim once did)
     name: 'every vertex-coloured mesh has colours', cp: 0,
