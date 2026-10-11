@@ -381,8 +381,8 @@ function buildHeroAlley(game, K, L) {
   const KR = K.with(new THREE.Matrix4().makeRotationY(-Math.PI / 2).premultiply(new THREE.Matrix4().makeTranslation(xr, 0, 0)));
   // local x -> +z world ... x_local = z_world ; choose range for z_world in [-14.5, -1.8]
   arcade(KR, { x0: -14.6, x1: -1.6, z: 0, y0: 2.2, span: 2.2, pierW: 0.7, pierD: 0.6, hs: 2.4, upper: 3.2, mat: 'plasterPeach', galleryDepth: 2.6 });
-  // podium under the raised arcade
-  const pod = boxMM(-14.6, 0, -3.4, -1.6, 2.2, 0.05); shadeByHeight(pod, { base: 0, grime: 1.4, grimeAmt: 0.35 }); KR.add(pod, 'plasterPeach');
+  // podium under the raised arcade; its end stands 2 cm proud of the facade line it meets (flush, the two faces z-fought)
+  const pod = boxMM(-14.6, 0, -3.4, -1.58, 2.2, 0.05); shadeByHeight(pod, { base: 0, grime: 1.4, grimeAmt: 0.35 }); KR.add(pod, 'plasterPeach');
   stairs(KR, { x0: -5.2, x1: -11.2, y0: 0, y1: 2.2, z0: -0.2, z1: 1.2, mat: 'limestone', rail: true, railSide: 'front' });
   ivyCurtain(KR, { x0: -14, x1: -2, y: 10.2, z: 0.1, maxLen: 6.5, seed: 63, flowers: 1.0, density: 2.2, scale: 1.8 });
   // striped red awning on the right, seen from below like the reference
