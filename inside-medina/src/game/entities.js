@@ -495,7 +495,12 @@ export class Guard {
     this.anim.setState('ground', 0.01);
     this.game.sfx('shout', b.x);
   }
-  deactivate() { this.state = 'hidden'; this.rig.root.visible = false; if (this.light) this.light.enabled = false; this.body.enabled = false; }
+  // hidden, he is back home as built: a hidden guard's snapshot never depends on an earlier chase
+  deactivate() {
+    const b = this.body; b.x = this.home.x; b.y = this.home.y; b.vx = 0; b.vy = 0; this.prev.set(b.x, b.y); this.lie(false);
+    this.state = 'hidden'; this.t = 0; this.facing = 1; this.vault = null; this.stunT = 0; this.immune = 0; this.prevState = 'chase';
+    this.rig.root.visible = false; if (this.light) this.light.enabled = false; b.enabled = false;
+  }
   dispose() { if (this.light) this.game.lightPool?.remove(this.light); }
   prestep() { this.prev.set(this.body.x, this.body.y); }
   // Sunwork (FULL_GAME §6.2): stun(sec) stops him with his eyes shielded, then 2 s of immunity; Infinity is the
