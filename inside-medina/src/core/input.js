@@ -48,6 +48,8 @@ export class Input {
     this._raw = { jump: false, grab: false, pause: false, any: false };
     this.override = null; // scripted input for tests / cutscenes
     this.touch = { x: 0, y: 0, jump: false, grab: false };
+    this.touchTaps = new Set(); // touch buttons pressed since the last poll (taps, like keys)
+    this._claimed = new WeakSet(); // pointer events a touch control took (never a scene press)
     this.lastDevice = 'keyboard';
     this.pad = null; // { kind, id, index } of the pad last used
     this.pointer = { x: 0, y: 0, active: false, pressed: false, released: false, kind: 'mouse' };
@@ -102,6 +104,8 @@ export class Input {
     for (const f of this.listeners.device) f(d);
   }
   get touchCapable() { return !!this.touchUI; }
+  touchTap(k) { this.touchTaps.add(k); }
+  claim(e) { this._claimed.add(e); }
 
   // settings: crawl hold / toggle here; the touch layer and haptics take theirs
   applySettings(S = {}) {
@@ -112,7 +116,7 @@ export class Input {
 
   // everything held lets go (blur, hidden page, a menu opening over play)
   clear() {
-    this.keys.clear(); this.taps.clear();
+    this.keys.clear(); this.taps.clear(); this.touchTaps.clear();
     this.touch.x = 0; this.touch.y = 0; this.touch.jump = false; this.touch.grab = false;
     this.touchUI?.release?.();
     const P = this._ptr;
@@ -156,8 +160,8 @@ export class Input {
       nav.up ||= gy > 0.5; nav.down ||= gy < -0.5; nav.left ||= gx < -0.5; nav.right ||= gx > 0.5;
       nav.confirm ||= B[0]; nav.back ||= B[1]; nav.prev ||= B[4]; nav.next ||= B[5]; nav.pause ||= B[9];
     }
-    const t = this.touch;
-    if (t.x) x = t.x; if (t.y) y = t.y; jump = jump || t.jump; grab = grab || t.grab;
+    const t = this.touch, tt = this.touchTaps;
+    if (t.x) x = t.x; if (t.y) y = t.y; jump = jump || t.jump || tt.has('jump'); grab = grab || t.grab || tt.has('grab');
     // crawl toggle: a down-press where the boy could crouch (on the ground, his hands free) latches it; up, a jump,
     // another down-press, leaving the ground or taking hold of something lets it go. Menu navigation never reaches
     // it: an open menu drops the latch, and a down held across the menu closing is not a new press.
@@ -173,7 +177,7 @@ export class Input {
     if (this.override) ({ x, y, jump, grab } = { x: 0, y: 0, jump: false, grab: false, ...this.override });
     this.prev = this.state;
     const any = !!(x || y || jump || grab || this.keys.size || this.taps.size);
-    this.taps.clear();
+    this.taps.clear(); tt.clear();
     const P = this._ptr, ptr = this.pointer;
     ptr.active = P.down; ptr.pressed = P.pressed; ptr.released = P.released; P.pressed = false; P.released = false;
     this.navEdges(nav);
@@ -206,22 +210,31 @@ export class Input {
   // a menu that opens in the middle of a press must not see that press as a new edge
   holdNav() { const now = performance.now(); for (const k of NAV) if (this._navT[k]) this._navT[k].next = now + 400; }
 
-  // the scene pointer: left mouse or a touch on the canvas (not on the controls)
+  // the scene pointer: left mouse or a touch on the canvas (not on the controls). A mouse that moves or presses
+  // while the touch layer is up (a touch-screen laptop) takes the device back, so the layer steps away.
   _setupPointer() {
     const P = this._ptr;
-    const onScene = (e) => e.target && e.target.tagName === 'CANVAS';
+    const onScene = (e) => e.target && e.target.tagName === 'CANVAS' && !this._claimed.has(e);
+    let mx = null, travel = 0;
+    const mouse = (e) => {
+      if (e.pointerType !== 'mouse' || this.lastDevice !== 'touch') { mx = null; travel = 0; return; }
+      if (e.type === 'pointerdown') return this.setDevice('keyboard');
+      if (mx) travel += Math.hypot(e.clientX - mx.x, e.clientY - mx.y);
+      mx = { x: e.clientX, y: e.clientY };
+      if (travel > 8) { mx = null; travel = 0; this.setDevice('keyboard'); }
+    };
     const setPos = (e) => {
       const r = e.target && e.target.tagName === 'CANVAS' ? e.target.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth || 1, height: window.innerHeight || 1 };
       this.pointer.x = ((e.clientX - r.left) / Math.max(1, r.width)) * 2 - 1;
       this.pointer.y = -(((e.clientY - r.top) / Math.max(1, r.height)) * 2 - 1);
     };
     window.addEventListener('pointerdown', (e) => {
-      if (e.pointerType === 'touch') this.setDevice('touch');
+      if (e.pointerType === 'touch') this.setDevice('touch'); else mouse(e);
       if (!onScene(e) || (e.pointerType === 'mouse' && e.button !== 0) || P.down) return;
       P.id = e.pointerId; P.down = true; P.pressed = true; this.pointer.kind = e.pointerType || 'mouse';
       setPos(e);
     });
-    window.addEventListener('pointermove', (e) => { if (P.down && e.pointerId === P.id) setPos(e); else if (!P.down && e.pointerType === 'mouse' && onScene(e)) setPos(e); });
+    window.addEventListener('pointermove', (e) => { mouse(e); if (P.down && e.pointerId === P.id) setPos(e); else if (!P.down && e.pointerType === 'mouse' && onScene(e)) setPos(e); });
     const up = (e) => { if (P.down && e.pointerId === P.id) { P.down = false; P.released = true; P.id = null; } };
     window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
   }

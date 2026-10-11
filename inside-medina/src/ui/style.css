@@ -360,6 +360,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #touch { --ts: 1; --top: .45; --a: var(--top); position: fixed; inset: 0; z-index: 0; pointer-events: none; transition: opacity .5s ease, visibility 0s linear 0s; }
 #touch.idle { --a: .25; }
 #touch.away { opacity: 0; }
+#touch.away, #touch.away * { pointer-events: none !important; } /* a keyboard, a pad or a mouse: every pointer reaches the scene (touch.js routes the first touch back) */
 #touch.hide { opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility 0s linear .25s; }
 #touch .tzone { position: absolute; left: 0; top: 18%; bottom: 0; width: 45%; pointer-events: auto; touch-action: none; }
 #touch[data-hand="left"] .tzone { left: auto; right: 0; }

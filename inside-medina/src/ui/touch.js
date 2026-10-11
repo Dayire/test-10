@@ -5,8 +5,9 @@ import { icon } from './glyphs.js';
 // vertical at 0.55 with hysteresis and a 200 ms dominant-axis lock; inside a vine's reach a diagonal of 35° or
 // more counts as up. Jump (84 px, hit zone 1.4×) bottom right, grab (72 px) up-left of it with a context icon
 // (✋ crate or lever, ☼ mirror, crank or capstan), ⏸ in the top corner. Every control follows its own pointer,
-// everything lets go on blur and when the page hides, and the layer fades out when a keyboard or a pad is used
-// and to 25 % after 5 s idle. Left-handed mirrors the layout. A touch anywhere else reaches the scene (finger aim).
+// everything lets go on blur and when the page hides, and the layer fades out when a keyboard, a pad or a mouse is
+// used (and then lets every pointer through to the scene) and to 25 % after 5 s idle. Only fingers and pens drive
+// it. Left-handed mirrors the layout. A touch anywhere else reaches the scene (finger aim).
 const SIZE = { S: 0.85, M: 1, L: 1.2 };
 const SUN_KINDS = new Set(['mirror', 'crank', 'capstan']);
 
@@ -28,25 +29,28 @@ export class TouchControls {
     this.btn = { jump: null, grab: null };
     this.idle = 0; this.visible = true; this.ctx = null;
     const T = input.touch;
+    // fingers and pens only: a mouse (a touch-screen laptop) never drives the layer and passes through to the scene
+    const finger = (e) => e.pointerType !== 'mouse';
     const capture = (node, e) => { try { node.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ } };
     // the stick
-    const down = (e) => {
-      if (this.stick || !this.visible) return;
-      e.preventDefault();
-      capture(e.currentTarget, e);
+    const down = (e, node = e.currentTarget) => {
+      if (!finger(e) || this.stick || !this.visible) return false;
       const R = this.radius();
       let cx = e.clientX, cy = e.clientY;
-      if (this.S.touchStick === 'fixed' || this.aiming) { const c = this.fixedCentre(); if (Math.hypot(cx - c.x, cy - c.y) > R * 1.8) return; cx = c.x; cy = c.y; }
+      if (this.S.touchStick === 'fixed' || this.aiming) { const c = this.fixedCentre(); if (Math.hypot(cx - c.x, cy - c.y) > R * 1.8) return false; cx = c.x; cy = c.y; }
       else {
         // the base stays whole inside the safe area (a thumb by the notch or the home bar)
         const s = this.ui.safeInsets();
         cx = Math.max(s.l + R + 8, Math.min(innerWidth - s.r - R - 8, cx)); cy = Math.max(s.t + R + 8, Math.min(innerHeight - s.b - R - 8, cy));
       }
+      e.preventDefault();
+      capture(node, e);
       this.stick = { id: e.pointerId, cx, cy, nx: 0, ny: 0, yOn: false, axis: 'x', axisT: 0 };
       this.stickEl.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
       this.el.classList.add('sticking');
       this.move(e);
       this.touched();
+      return true;
     };
     this.zone.addEventListener('pointerdown', down);
     this.stickEl.addEventListener('pointerdown', down);
@@ -55,18 +59,39 @@ export class TouchControls {
     for (const n of [this.zone, this.stickEl]) { n.addEventListener('pointermove', mv); n.addEventListener('pointerup', up); n.addEventListener('pointercancel', up); n.addEventListener('lostpointercapture', up); }
     window.addEventListener('pointermove', mv, { passive: false });
     window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
-    // the buttons: each holds while its own pointer is down
+    // the buttons: each holds while its own pointer is down; a press shorter than a frame still reaches the next poll
+    const press = {};
     const hold = (sel, k) => {
       const b = el.querySelector(sel);
-      b.addEventListener('pointerdown', (e) => { e.preventDefault(); capture(b, e); this.btn[k] = e.pointerId; T[k] = true; b.classList.add('down'); this.touched(); });
+      press[k] = (e) => { if (!finger(e)) return false; e.preventDefault(); capture(b, e); this.btn[k] = e.pointerId; T[k] = true; input.touchTap?.(k); b.classList.add('down'); this.touched(); return true; };
+      b.addEventListener('pointerdown', (e) => press[k](e));
       const rel = (e) => { if (this.btn[k] === e.pointerId) { this.btn[k] = null; T[k] = false; b.classList.remove('down'); } };
       b.addEventListener('pointerup', rel); b.addEventListener('pointercancel', rel); b.addEventListener('lostpointercapture', rel);
       b.addEventListener('click', (e) => e.preventDefault());
     };
     hold('.tjump', 'jump'); hold('.tgrab', 'grab');
+    // ⏸ acts when its own finger lifts on it (a finger that slides off cancels, like a button)
     const pz = el.querySelector('.tpause');
-    pz.addEventListener('pointerdown', (e) => { e.preventDefault(); this.touched(); });
-    pz.addEventListener('click', (e) => { e.preventDefault(); ui.requestPause(); });
+    press.pause = (e) => { if (!finger(e)) return false; e.preventDefault(); capture(pz, e); this.pzId = e.pointerId; pz.classList.add('down'); this.touched(); return true; };
+    pz.addEventListener('pointerdown', (e) => press.pause(e));
+    const pzUp = (e) => {
+      if (this.pzId !== e.pointerId) return;
+      this.pzId = null; pz.classList.remove('down');
+      const r = pz.getBoundingClientRect(), m = r.width * 0.25;
+      if (e.type === 'pointerup' && e.clientX >= r.left - m && e.clientX <= r.right + m && e.clientY >= r.top - m && e.clientY <= r.bottom + m) ui.requestPause();
+    };
+    pz.addEventListener('pointerup', pzUp); pz.addEventListener('pointercancel', pzUp); pz.addEventListener('lostpointercapture', pzUp);
+    pz.addEventListener('click', (e) => e.preventDefault());
+    // while a keyboard, a pad or a mouse is in use the layer is away and lets every pointer through (style.css);
+    // the first touch after that brings it back and goes to the control under it, not to the scene
+    window.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch' || !this.visible || !el.classList.contains('away')) return;
+      input.setDevice('touch');
+      const c = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('#touch .tzone, #touch .tstick, #touch .tbtn');
+      if (!c) return;
+      const ok = c === this.zone ? down(e, this.zone) : c === this.stickEl ? down(e, this.stickEl) : c.classList.contains('tjump') ? press.jump(e) : c.classList.contains('tgrab') ? press.grab(e) : press.pause(e);
+      if (ok) input.claim?.(e);
+    }, true);
     this.layout();
     window.addEventListener('resize', () => this.layout());
   }
@@ -126,10 +151,12 @@ export class TouchControls {
   release() {
     if (this.stick) this.releaseStick();
     for (const k of ['jump', 'grab']) { this.btn[k] = null; this.input.touch[k] = false; }
+    this.pzId = null; this.input.touchTaps?.clear();
     this.el.querySelectorAll('.down').forEach((b) => b.classList.remove('down'));
   }
   touched() { this.idle = 0; this.el.classList.remove('idle'); this.input.setDevice('touch'); }
-  deviceChanged(d) { this.el.classList.toggle('away', d !== 'touch'); }
+  // another device took over: the layer fades away and nothing it held stays held
+  deviceChanged(d) { const away = d !== 'touch'; this.el.classList.toggle('away', away); if (away) this.release(); }
   setVisible(v) {
     if (v === this.visible) return;
     this.visible = v;

@@ -13,6 +13,14 @@
 //   lens       the lens shift keeps the boy's projected position inside the play rect above the control band
 //   aim        finger aim: a touch on the scene reaches the boy as pin.aimTarget at the touched world point; with the
 //              Sunwork lab present (a gripped mirror) the mirror tilts to the touched notch
+//   settings   (phones) the tabs sit on one line; a tab opens at its first option (after the previous one was
+//              scrolled to its end), with enough rows in view; a list that runs on fades at its edge
+// A touch-screen laptop (touch events, a fine mouse pointer, 1280 × 720) runs one check:
+//   hybrid     the mouse never drives the hidden touch layer: a drag on the left reaches the scene as the pointer
+//              (no stick, no walk, no lens shift, the device stays keyboard), a click in the top-left corner does not
+//              pause; the first real touch brings the layer back and grips the stick under it (the boy walks, the
+//              scene pointer stays free); a mouse move sends the layer away again; a jump tap whose press and lift
+//              land between two frames still jumps
 import { devices } from 'playwright';
 import { parseArgs, launch } from './lib/harness.mjs';
 
@@ -23,6 +31,7 @@ const DEVICES = [
   { name: 'iPhone 13 portrait', d: devices['iPhone 13'], viewport: { width: 390, height: 844 }, insets: { top: 47, bottom: 34, left: 0, right: 0 } },
   { name: 'iPhone 13 landscape', d: devices['iPhone 13 landscape'], viewport: { width: 844, height: 390 }, insets: { top: 0, bottom: 21, left: 47, right: 47 } },
   { name: 'Pixel 7', d: devices['Pixel 7'], viewport: { width: 412, height: 915 }, insets: { top: 26, bottom: 0, left: 0, right: 0 } },
+  { name: 'touch laptop', hybrid: true, d: {}, viewport: { width: 1280, height: 720 }, insets: { top: 0, bottom: 0, left: 0, right: 0 } },
 ].filter((x) => !o.device || x.name.toLowerCase().includes(String(o.device).toLowerCase()));
 const only = o.only ? String(o.only).split(',') : null;
 const browser = await launch();
@@ -32,8 +41,10 @@ const frames = (page, n = 2) => page.evaluate((n) => new Promise((r) => { const 
 const ready = (page) => page.waitForFunction(() => window.__ready === true && window.__medina && window.__medina.game.mode !== 'loading', null, { timeout: 300000, polling: 100 });
 
 async function device(dev) {
-  const ctx = await browser.newContext({ ...dev.d, viewport: dev.viewport, screen: dev.viewport, hasTouch: true, isMobile: true });
+  const ctx = await browser.newContext({ ...dev.d, viewport: dev.viewport, screen: dev.viewport, hasTouch: true, isMobile: !dev.hybrid });
   const page = await ctx.newPage();
+  // a touch laptop's primary pointer is its fine mouse (emulated touch alone would report a coarse one)
+  if (dev.hybrid) await page.addInitScript(() => { const mm = window.matchMedia.bind(window); window.matchMedia = (q) => (/\(pointer:\s*coarse\)/.test(q) ? { matches: false, media: q, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false } : mm(q)); });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(m.text()); });
@@ -66,9 +77,9 @@ async function device(dev) {
   const check = (name, ok, evidence) => {
     if (only && !only.some((s) => name.includes(s))) return;
     results.push({ name: `${dev.name}: ${name}`, ok });
-    console.log(`${ok ? 'PASS' : 'FAIL'}  ${`${dev.name}: ${name}`.padEnd(34)} ${JSON.stringify(evidence)?.slice(0, 420)}`);
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${`${dev.name}: ${name}`.padEnd(34)} ${JSON.stringify(evidence)?.slice(0, 900)}`);
   };
-  const want = (n) => !only || only.some((s) => n.includes(s));
+  const want = (n) => (dev.hybrid ? n === 'hybrid' : n !== 'hybrid') && (!only || only.some((s) => n.includes(s)));
 
   // ------------------------------------------------------------------ menus over the title, then play by a tap
   if (want('menus') || want('controls')) {
@@ -217,6 +228,48 @@ async function device(dev) {
       res = [got.grip && Math.round(got.alpha) === -45, { lab: true, ...got }];
     }
     check('aim', res[0], res[1]);
+  }
+  // ------------------------------------------------------------------ a touch-screen laptop: a mouse and fingers
+  if (want('hybrid')) {
+    await page.goto(`${BASE}?${Q}&autostart=1&chapter=souk&cp=0`); await ready(page);
+    await page.waitForFunction(() => __medina.game.mode === 'play', null, { timeout: 60000 }); await frames(page, 4);
+    const hit = (x, y) => page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e?.tagName === 'CANVAS' ? 'canvas' : (e?.className?.baseVal ?? e?.className) || e?.tagName; }, [x, y]);
+    const ctl = await page.evaluate(() => __ui.touch.rects());
+    const st = () => page.evaluate(() => ({ dev: __ui.input.lastDevice, away: __ui.touch.el.classList.contains('away'), stick: !!__ui.touch.stick, tx: __ui.input.touch.x, ptr: __ui.input.pointer.active, kind: __ui.input.pointer.kind, safe: !!__medina.game.camRig.safeRect, paused: __medina.game.paused, top: __ui.focus.top?.el.id || null }));
+    const out = { fine: await page.evaluate(() => !!window.__ui?.touch && !matchMedia('(pointer: coarse)').matches) };
+    out.before = { ...(await st()), zone: await hit(300, 400), jump: await hit(...centre(ctl.jump)), pause: await hit(...centre(ctl.pause)) };
+    // the mouse: a drag on the left of the scene, then a click where the hidden ⏸ sits
+    await page.evaluate(() => __medina.teleport(4, 0, 1)); await frames(page, 3);
+    const x0 = await page.evaluate(() => __medina.state().x);
+    await page.mouse.move(300, 400); await page.mouse.down(); await page.mouse.move(380, 400, { steps: 4 }); await frames(page, 3);
+    out.drag = await st();
+    await page.waitForTimeout(800); await frames(page, 2);
+    out.drag.dx = +(await page.evaluate((x0) => Math.abs(__medina.state().x - x0), x0)).toFixed(2);
+    await page.mouse.up(); await frames(page, 2);
+    await page.mouse.click(...centre(ctl.pause)); await frames(page, 4);
+    out.click = await st();
+    // the first touch: the layer comes back and the stick spawns under the thumb
+    const x1 = await page.evaluate(() => __medina.state().x);
+    await touch('start', 1, 300, 450); await frames(page, 1); await touch('move', 1, 360, 450); await frames(page, 3);
+    out.touch = { ...(await st()), base: await page.evaluate(() => { const b = __ui.touch.base.getBoundingClientRect(); return [Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2)]; }) };
+    await page.waitForTimeout(800); await frames(page, 2);
+    out.touch.dx = +(await page.evaluate((x1) => __medina.state().x - x1, x1)).toFixed(2);
+    await touch('end'); await frames(page, 3);
+    // a mouse move: the layer steps away and the scene takes the pointer again
+    await page.mouse.move(600, 300); await page.mouse.move(640, 320, { steps: 4 }); await frames(page, 2);
+    out.mouseBack = { ...(await st()), zone: await hit(300, 400) };
+    // a jump tap whose press and lift land between two frames (also the first touch after the mouse)
+    await page.evaluate(() => __medina.teleport(4, 0, 1)); await frames(page, 6);
+    await page.evaluate(() => { const G = __medina.game; window.__y0 = window.__ymax = G.player.y; G.hooks.frame.push(() => { window.__ymax = Math.max(window.__ymax, G.player.y); }); });
+    await touch('start', 2, ...centre(ctl.jump)); await touch('end');
+    await page.waitForTimeout(600); await frames(page, 6);
+    out.tap = await page.evaluate(() => ({ dy: +(window.__ymax - window.__y0).toFixed(2), dev: __ui.input.lastDevice }));
+    const ok = out.fine && out.before.dev === 'keyboard' && out.before.away && out.before.zone === 'canvas' && out.before.jump === 'canvas' && out.before.pause === 'canvas'
+      && out.drag.dev === 'keyboard' && !out.drag.stick && out.drag.tx === 0 && out.drag.ptr && out.drag.kind === 'mouse' && out.drag.dx < 0.2 && !out.drag.safe
+      && !out.click.paused && !out.click.top
+      && out.touch.dev === 'touch' && !out.touch.away && out.touch.stick && out.touch.tx > 0.5 && !out.touch.ptr && Math.abs(out.touch.base[0] - 300) < 3 && Math.abs(out.touch.base[1] - 450) < 3 && out.touch.dx > 0.5
+      && out.mouseBack.dev === 'keyboard' && out.mouseBack.away && out.mouseBack.zone === 'canvas' && out.tap.dy > 0.4 && out.tap.dev === 'touch';
+    check('hybrid', ok, out);
   }
   if (errors.length) check('no page errors', false, errors.slice(0, 4));
   await ctx.close();
