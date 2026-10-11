@@ -4,6 +4,10 @@
 //          [--out file.json] [--compare before.json] [--checks | --only checks] [--shots dir] [--w 640 --h 360]
 // The table runs on any build (also the pre-presentation tree, for the "before" column); the checks
 // use the new RenderSystem API and are skipped on builds without it.
+// The §8.5 gate takes the heaviest frame at every spot: every shadow map refreshed (as on a 30 fps frame or after
+// a camera snap), over a full sweep of the courtyard lamp wherever its spot is lit, plus every frame of the
+// chapter's finale (the DepthWalk). Low and medium run at 640 × 360 and again as a phone in landscape (844 × 390,
+// the widest view); an explicit --w / --h runs that viewport alone.
 import { chromium } from 'playwright';
 import fs from 'fs';
 
@@ -17,13 +21,16 @@ const out = arg('out', null), compare = arg('compare', null), checks = arg('chec
 const shots = arg('shots', null);
 const pick = arg('check', null) ? String(arg('check')).split(',') : null; // run only these checks
 const want = (k) => !pick || pick.includes(k);
-const W = +arg('w', 640), H = +arg('h', 360);
+const W = +arg('w', 640), H = +arg('h', 360), PHONE = [844, 390];
+const views = (tier) => (arg('w', null) || arg('h', null) || !['low', 'medium'].includes(tier) ? [[W, H]] : [[W, H], PHONE]);
 // FULL_GAME §8.5: draw calls (shadow + main) and triangles per frame, per tier
 const BUDGET = { low: { calls: 130, tris: 400e3 }, medium: { calls: 180, tris: 550e3 }, high: { calls: 240, tris: 700e3 }, ultra: { calls: 280, tris: 900e3 } };
 const SPOTS = [
   { name: 'souk', x: 9, y: 0 }, { name: 'raised', x: 24, y: 1.5 }, { name: 'rooftops', x: 54.8, y: 3.1 },
   { name: 'courtyard', x: 97, y: 0 }, { name: 'balcony', x: 126, y: 4.3 }, { name: 'chase', x: 166, y: 0 },
+  { name: 'alley', x: 186.4, y: 0 },
 ];
+const SWEEP = 9; // lamp aims from end to end of its sweep
 if (shots) fs.mkdirSync(shots, { recursive: true });
 
 const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'] });
@@ -98,6 +105,31 @@ function installHooks() {
   // flock visibility for both the per-bird groups (old) and the instanced flock (new)
   P.flock = (v) => { const F = G.flock; if (!F) return; if (F.group) F.group.visible = v; else for (const b of F.birds) b.g.visible = v && b.state !== 'gone'; };
   P.flockReset = () => G.flock && G.flock.reset();
+  // the heaviest frame: every shadow map refreshed, rendered synchronously by the game's own render (the lamp, the
+  // camera and the characters update; the sim does not step, so nothing detects or dies)
+  P.forced = (dt = 1 / 60) => { rs.shadows?.invalidate?.(); G.render(dt, 1); return P.last; };
+  // and over a full sweep of the courtyard lamp, wherever its spot is lit: n aims from one end to the other
+  P.sweep = (n) => {
+    const sl = G.level?.searchlight, list = [P.forced(), P.forced()];
+    if (!sl?.spot || !sl.enabled) return list;
+    const keep = sl.aim.x;
+    for (let i = 0; i < n; i++) { sl.aim.x = sl.x0 + (sl.x1 - sl.x0) * i / (n - 1); list.push(P.forced()); }
+    sl.aim.x = keep; P.forced();
+    return list;
+  };
+  // the chapter's finale from its checkpoint, every 0.5 s of it (the camera given that time to follow, then a
+  // frame with every map refreshed), up to its end; last thing on a page (the chapter ends)
+  P.finale = (cp) => {
+    const M = window.__medina, list = [];
+    if (!G.level?.finale) return list;
+    M.checkpoint(cp); M.finale();
+    for (let i = 0; i < 60 && G.mode === 'finale'; i++) {
+      M.sim(0.5, { x: 0 }); G.render(0.25, 1); G.render(0.25, 1);
+      const f = P.forced();
+      if (G.mode === 'finale') list.push({ ...f, z: +(G.player.z || 0).toFixed(1) });
+    }
+    return list;
+  };
   // worst case: every bird of the level standing in view (and inside the sun's shadow frustum)
   P.flockGather = () => {
     const F = G.flock; if (!F) return 0;
@@ -118,6 +150,11 @@ async function collect(page, n) {
   return page.evaluate(() => window.__perf.frames.slice());
 }
 const avg = (fs, k) => fs.reduce((a, f) => a + f[k], 0) / fs.length;
+// the heaviest of forced frames: shadow + main calls and triangles (each its own maximum)
+const heaviest = (list) => ({
+  frames: list.length, calls: Math.max(0, ...list.map((f) => f.shadowCalls + f.mainCalls)), tris: Math.max(0, ...list.map((f) => f.shadowTris + f.mainTris)),
+  shadowCalls: Math.max(0, ...list.map((f) => f.shadowCalls)), mainCalls: Math.max(0, ...list.map((f) => f.mainCalls)),
+});
 const round = (v) => Math.round(v * 10) / 10;
 
 async function measureSpot(page, s) {
@@ -130,7 +167,9 @@ async function measureSpot(page, s) {
   const off = await collect(page, Math.max(4, frames - 2));
   await page.evaluate(() => window.__perf.flock(true));
   const upd = on.filter((f) => f.shadowUpdates > 0), upd60 = s60.filter((f) => f.shadowUpdates > 0);
+  const worst = heaviest(await page.evaluate((n) => window.__perf.sweep(n), SWEEP));
   return {
+    worst,
     shadowCalls: round(avg(on, 'shadowCalls')), shadowCallsPerUpdate: upd.length ? round(avg(upd, 'shadowCalls')) : 0,
     shadowCalls60: round(avg(s60, 'shadowCalls')), shadowUpdates60: round(upd60.length / s60.length),
     shadowCallsPerUpdate60: upd60.length ? round(avg(upd60, 'shadowCalls')) : 0, shadowTris60: Math.round(avg(s60, 'shadowTris')),
@@ -156,27 +195,32 @@ async function flockStress(page) {
 }
 
 if (only !== 'checks') {
-  for (const tier of tiers) {
-    const page = await open(`tier=${tier}`);
+  for (const tier of tiers) for (const [w, h] of views(tier)) {
+    const key = w === W && h === H ? tier : `${tier}@${w}x${h}`;
+    const page = await open(`tier=${tier}`, { w, h });
     const spots = {};
-    for (const s of SPOTS) { spots[s.name] = await measureSpot(page, s); process.stdout.write(`${tier} ${s.name} ${JSON.stringify(spots[s.name])}\n`); }
+    for (const s of SPOTS) { spots[s.name] = await measureSpot(page, s); process.stdout.write(`${key} ${s.name} ${JSON.stringify(spots[s.name])}\n`); }
     // programs after a second pass over every spot (warm-up stability)
     const p1 = await page.evaluate(() => window.__medina.game.world.rs.renderer.info.programs.length);
     for (const s of SPOTS) { await page.evaluate(({ x, y }) => window.__medina.photo(x, y, 1, 0.2), s); await collect(page, 2); }
     const p2 = await page.evaluate(() => window.__medina.game.world.rs.renderer.info.programs.length);
     const flock = await flockStress(page);
-    process.stdout.write(`${tier} flock-all-in-view ${JSON.stringify(flock)}\n`);
+    process.stdout.write(`${key} flock-all-in-view ${JSON.stringify(flock)}\n`);
     const info = await page.evaluate(() => { const rs = window.__medina.game.world.rs; return { fxaa: !!(rs.post.fxaaActive ?? rs.post.q?.fxaa), aa: rs.post.stats?.aa ?? null, msaa: rs.q.msaa, scale: rs.scale ?? rs.q.scale, w: rs.w, h: rs.h }; });
-    // §8.5 budget per frame, gated on the heaviest frame: one that refreshes the shadow maps (every frame on high
-    // and ultra, every other frame on medium's 30 Hz maps at 60 fps, every frame on low at its 30 fps target). The
-    // 60 fps average (shadow-pass calls over the frames that refresh them or not) is reported beside it
+    // the finale last: the chapter ends with it
+    const fin = await page.evaluate(() => { const G = window.__medina.game; return G.level?.finale ? window.__perf.finale(G.checkpoints.length - 1) : []; });
+    const finale = fin.length ? { ...heaviest(fin), list: fin.map((f) => `${f.shadowCalls + f.mainCalls}/${Math.round((f.shadowTris + f.mainTris) / 1000)}k@z${f.z}`).join(' ') } : null;
+    if (finale) process.stdout.write(`${key} finale ${JSON.stringify(finale)}\n`);
+    // §8.5 budget per frame, gated on the heaviest frame (every shadow map refreshed, over the lamp's sweep where it
+    // is lit, and through the finale). The 60 fps average (shadow-pass calls over the frames that refresh them or
+    // not, on the policy's own schedule) is reported beside it
     const B = BUDGET[tier], budget = {};
     for (const [k, v] of Object.entries(spots)) {
-      const calls = round((v.shadowCallsPerUpdate60 || v.shadowCalls60) + v.mainCalls), tris = Math.round((v.shadowTrisPerUpdate60 || v.shadowTris60) + v.mainTris);
       const avgCalls = round(v.shadowCalls60 + v.mainCalls), avgTris = Math.round(v.shadowTris60 + v.mainTris);
-      budget[k] = { calls, tris, avgCalls, avgTris, ok: !B || (calls <= B.calls && tris <= B.tris) };
+      budget[k] = { calls: v.worst.calls, tris: v.worst.tris, avgCalls, avgTris, ok: !B || (v.worst.calls <= B.calls && v.worst.tris <= B.tris) };
     }
-    result.tiers[tier] = { spots, programsFirstPass: p1, programsSecondPass: p2, flockAllInView: flock, info, budget };
+    if (finale) budget.finale = { calls: finale.calls, tris: finale.tris, avgCalls: null, avgTris: null, ok: !B || (finale.calls <= B.calls && finale.tris <= B.tris) };
+    result.tiers[key] = { tier, viewport: [w, h], spots, finale, programsFirstPass: p1, programsSecondPass: p2, flockAllInView: flock, info, budget };
     await page.context().close();
   }
 }
@@ -335,8 +379,9 @@ if (checks || only === 'checks') {
       const parts = []; lan.mesh.traverse((o) => { if (o.isMesh && o.userData.staticCaster) parts.push(o); });
       const until = async (f) => { for (let i = 0; i < 200 && !f(); i++) await frame(); };
       const before = { proxied: S.stats.proxied, cast: parts.filter((o) => o.castShadow).length };
-      lan.mesh.position.x += 1; S.nextScan = 0;
-      await frame(); await until(() => !S.building);
+      lan.mesh.position.x += 1;
+      // a scan reads the world matrices the last frame rendered: scan every frame until it has seen the move
+      await until(() => { S.nextScan = 0; return parts.every((o) => o.castShadow) && !S.building; });
       const after = { proxied: S.stats.proxied, cast: parts.filter((o) => o.castShadow).length };
       lan.mesh.position.x -= 1;
       const lantern = { parts: parts.length, before, after, ok: parts.length > 0 && before.cast === 0 && after.cast === parts.length && after.proxied === before.proxied - parts.length };
@@ -745,14 +790,16 @@ async function contextLoss() {
     const wait = (ms) => new Promise((res) => setTimeout(res, ms));
     // draws of merged static casters in the sun's map in one forced refresh (through whatever shadowMap the
     // renderer has then: a restore replaces it, and the proxies must still reach the new one)
+    // the same view both times: the photo's camera snap rendered by the game itself before counting
     const shadowDraws = () => {
+      M.photo(97, 0, 1, 0.2); M.game.render(1 / 60, 1); M.game.render(1 / 60, 1);
       const r = rs.renderer, rbd = r.renderBufferDirect; let n = 0;
       r.renderBufferDirect = function (cam, sc, geo, mat, obj, grp) { if (cam.isOrthographicCamera && obj.userData.shadowProxy) n++; return rbd.call(this, cam, sc, geo, mat, obj, grp); };
       try { rs.shadows.invalidate(); rs.render(M.game.scene, M.game.camera, M.game.time); } finally { r.renderBufferDirect = rbd; }
       return n;
     };
     M.photo(97, 0, 1, 0.2); await wait(600);
-    const drawsBefore = shadowDraws();
+    const drawsBefore = shadowDraws(), proxiesBefore = rs.shadows.stats?.proxies;
     const f0 = window.__frames;
     ext.loseContext(); await wait(300);
     const whileLost = { lost: rs.lost, begin: rs.beginFrame(performance.now() + 1000), frames: window.__frames - f0 };
@@ -764,7 +811,7 @@ async function contextLoss() {
     const f1 = window.__frames; await wait(1500);
     off();
     const drawsAfter = shadowDraws();
-    return { ev, whileLost, renderError, afterRestore: { lost: rs.lost, contextLost: gl.isContextLost(), framesIn1500ms: window.__frames - f1 }, shadowDraws: [drawsBefore, drawsAfter], proxies: rs.shadows.stats?.proxies, hasProxies: typeof rs.shadows.setProxies === 'function' };
+    return { ev, whileLost, renderError, afterRestore: { lost: rs.lost, contextLost: gl.isContextLost(), framesIn1500ms: window.__frames - f1 }, shadowDraws: [drawsBefore, drawsAfter], proxies: [proxiesBefore, rs.shadows.stats?.proxies], hasProxies: typeof rs.shadows.setProxies === 'function' };
   });
   await page.context().close();
   return { ...r, ok: !!r.skipped || (r.ev.lost === 1 && r.ev.restored === 1 && r.whileLost.lost && r.whileLost.begin === false && !r.renderError && !r.afterRestore.lost && !r.afterRestore.contextLost && r.afterRestore.framesIn1500ms > 0 && (!r.hasProxies || (r.shadowDraws[0] > 0 && r.shadowDraws[1] > 0 && Math.abs(r.shadowDraws[1] - r.shadowDraws[0]) <= 0.2 * r.shadowDraws[0]))) };
@@ -781,6 +828,7 @@ if (compare && fs.existsSync(compare) && Object.keys(result.tiers).length) {
     let sA = 0, sB = 0, fA = 0, fB = 0;
     for (const s of SPOTS) {
       const a = A.spots[s.name], b = B.spots[s.name];
+      if (!a || !b) continue;
       const a60 = a.shadowCalls60 ?? a.shadowCalls, b60 = b.shadowCalls60 ?? b.shadowCalls;
       sA += a60; sB += b60; fA += a.flockCalls; fB += b.flockCalls;
       console.log(` ${tier.padEnd(7)} ${s.name.padEnd(10)} ${String(a60).padStart(6)} → ${String(b60).padEnd(6)} (${a.shadowCallsPerUpdate60 ?? a.shadowCallsPerUpdate} → ${b.shadowCallsPerUpdate60 ?? b.shadowCallsPerUpdate})`.padEnd(58) +
@@ -793,10 +841,10 @@ if (compare && fs.existsSync(compare) && Object.keys(result.tiers).length) {
   }
 }
 if (Object.keys(result.tiers).length) {
-  console.log('\n§8.5 budget (calls shadow + main, triangles; the heaviest frame, a shadow refresh; [60 fps average]):');
-  for (const [tier, T] of Object.entries(result.tiers)) {
-    const B = BUDGET[tier], over = Object.entries(T.budget || {}).filter(([, v]) => !v.ok);
-    console.log(` ${tier.padEnd(7)} budget ${B ? `${B.calls} calls / ${B.tris / 1000}k tris` : 'n/a'}: ` + Object.entries(T.budget || {}).map(([k, v]) => `${k} ${v.calls}/${Math.round(v.tris / 1000)}k [${v.avgCalls}/${Math.round(v.avgTris / 1000)}k]${v.ok ? '' : ' OVER'}`).join(', ') + (over.length ? `  (FAIL ${over.length} spot${over.length > 1 ? 's' : ''} over)` : ''));
+  console.log('\n§8.5 budget (calls shadow + main, triangles; the heaviest frame: every shadow map refreshed, over the lamp\'s sweep and the finale; [60 fps average]):');
+  for (const [key, T] of Object.entries(result.tiers)) {
+    const B = BUDGET[T.tier ?? key], over = Object.entries(T.budget || {}).filter(([, v]) => !v.ok);
+    console.log(` ${key.padEnd(16)} budget ${B ? `${B.calls} calls / ${B.tris / 1000}k tris` : 'n/a'}: ` + Object.entries(T.budget || {}).map(([k, v]) => `${k} ${v.calls}/${Math.round(v.tris / 1000)}k${v.avgCalls === null ? '' : ` [${v.avgCalls}/${Math.round(v.avgTris / 1000)}k]`}${v.ok ? '' : ' OVER'}`).join(', ') + (over.length ? `  (FAIL ${over.length} spot${over.length > 1 ? 's' : ''} over)` : ''));
   }
 }
 if (Object.keys(result.checks).length) {
