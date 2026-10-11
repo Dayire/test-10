@@ -83,8 +83,9 @@ export class RenderSystem {
   }
   _configureTier() {
     const q = this.q;
-    // a new tier has a new cost: what the resolution trials learnt no longer holds
-    this.dyn.setRange(q.dyn[0], 1); this.dyn.reset(1); this.dyn.clearLimit();
+    // a new tier has a new cost: what the resolution trials learnt no longer holds (the menu background keeps its half)
+    const bg = this.menuBackground;
+    this.dyn.setRange(bg ? 0.5 : q.dyn[0], bg ? 0.5 : 1); this.dyn.reset(bg ? 0.5 : 1); this.dyn.clearLimit();
     this.shadows.configure(q);
     this.particles.budget = q.particles;
     this.post.user.dof = this.user.dof && !this.user.batterySaver;

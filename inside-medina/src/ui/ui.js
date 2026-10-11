@@ -181,9 +181,8 @@ export class UI {
   syncMenuBackground() {
     const g = this.game, rs = this.world?.rs;
     const on = !!(g && this.ready && g.held && this.focus.top && !g.suspended);
-    if (rs && on !== this._menuBg) { this._menuBg = on; this._bgTier = rs.tier; rs.setMenuBackground?.(on); }
-    // a new tier (the quality setting, or auto quality) resets the renderer's resolution range: the menu asks again
-    else if (rs && on && rs.tier !== this._bgTier) { this._bgTier = rs.tier; rs.setMenuBackground?.(false); rs.setMenuBackground?.(true); }
+    // the renderer keeps it through a tier change (the quality setting, or auto quality)
+    if (rs && on !== this._menuBg) { this._menuBg = on; rs.setMenuBackground?.(on); }
     this._dim = on;
   }
   // a deeper post vignette behind the menus over the title (never a backdrop filter): applied to the post
