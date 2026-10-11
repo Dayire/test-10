@@ -57,7 +57,7 @@ export class Input {
     this.menuOpen = false; // a menu is up: Tab moves the browser focus, nothing reaches the boy
     this.settings = { crawlMode: 'hold' };
     this.crawlLatch = false; this._down = false;
-    this.context = null; // () => ({ grounded }) from the game, for the crawl toggle
+    this.context = null; // () => ({ grounded, holding }) from the game, for the crawl toggle
     this.listeners = { device: [], padDisconnect: [] };
     this.touchUI = null; this.haptics = null;
     this._setupPointer();
@@ -158,13 +158,15 @@ export class Input {
     }
     const t = this.touch;
     if (t.x) x = t.x; if (t.y) y = t.y; jump = jump || t.jump; grab = grab || t.grab;
-    // crawl toggle: a down-press on the ground latches the crouch; up, a jump, another down-press or leaving the
-    // ground lets it go
+    // crawl toggle: a down-press where the boy could crouch (on the ground, his hands free) latches it; up, a jump,
+    // another down-press, leaving the ground or taking hold of something lets it go. Menu navigation never reaches
+    // it: an open menu drops the latch, and a down held across the menu closing is not a new press.
     const down = y < -0.6;
-    if (this.settings.crawlMode === 'toggle' && !this.override) {
-      const grounded = this.context ? !!this.context().grounded : true;
-      if (down && !this._down) this.crawlLatch = grounded ? !this.crawlLatch : false;
-      if (y > 0.6 || jump || !grounded) this.crawlLatch = false;
+    if (this.menuOpen || this.override || this.settings.crawlMode !== 'toggle') this.crawlLatch = false;
+    else {
+      const c = this.context?.() || null, free = !!c && !!c.grounded && !c.holding;
+      if (down && !this._down) this.crawlLatch = free ? !this.crawlLatch : false;
+      if (y > 0.6 || jump || !free) this.crawlLatch = false;
       if (this.crawlLatch) y = Math.min(y, -1);
     }
     this._down = down;

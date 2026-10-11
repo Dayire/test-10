@@ -78,7 +78,12 @@ export async function boot(canvas, params) {
   const game = new Game(world, input, audio, ui, P, { save });
   game.device = dev;
   game.initOnce({ pool: +(P.pool || dev.pool) });
-  input.context = () => ({ grounded: game.player.state === 'ground' });
+  // the crawl toggle latches only where the boy could crouch: in play, on the ground, his hands free (a gripped
+  // mirror stays in the ground state, and its tilt reads the same down-press)
+  input.context = () => {
+    const p = game.player;
+    return { grounded: game.mode === 'play' && !game.held && p.state === 'ground', holding: !!(p.grip || p.lever) || ['lever', 'crank', 'capstan'].includes(p.state) };
+  };
   haptics.attach(game, (fn) => soundFns.push(fn));
   soundFns.push((name, x) => ui.hints.cue(name, x));
   ui.attach({ game, audio, world });

@@ -6,6 +6,8 @@
 //   autostart  ?autostart=1 skips every menu
 //   menubg     the live title renders at 30 fps and half resolution under the menus (requests/P.md #8)
 //   chapters   chapter select by keyboard: the card covers the load, the chapter starts at the picked checkpoint
+//   crawl      crawl set to toggle: menu navigation never latches it, holding a crate (or a lab mirror) never does,
+//              a down-press in play does
 //   artifact   npm run build:artifact: one page ≤ 3 MB, run in test.html inside a sandboxed iframe, no console
 //              errors, no service worker
 //   hosted     vite build: an installable manifest (Chrome's own installability check), the service worker
@@ -262,6 +264,62 @@ await scenario('chapters', async () => {
   await ctx.close();
   const ok = cards.length === 4 && picking[0] === 'souk' && picking[1] === 2 && out.chapter === 'souk' && out.cp === 2 && out.cards.length === 1 && out.cards[0][1] === 'select' && !out.top && !errors.length;
   return [ok || `chapters ${JSON.stringify({ cards, picking, out, errors: errors.slice(0, 2) })}`, { cards, picking, ...out }];
+});
+
+await scenario('crawl', async () => {
+  // crawl set to toggle: menu navigation never latches it, a down-press in play does, and a down-press while the
+  // boy holds something (the souk's crate; a lab mirror when Sunwork is present) tilts or does nothing, never latches
+  const { page, ctx, errors } = await open({ url: `${BASE}?${Q}&autostart=1&nosave=1&chapter=souk&cp=0` });
+  await ready(page); await waitFor(page, () => __medina.game.mode === 'play');
+  const st = () => page.evaluate(() => { const G = __medina.game; return { latch: G.input.crawlLatch, y: G.input.state.y, crawling: G.player.crawling, grip: !!G.player.grip, mode: G.mode, top: __ui.focus.top?.el.id || null }; });
+  await page.evaluate(() => { __ui.setSetting('crawlMode', 'toggle'); __medina.teleport(4, 0, 1); });
+  await frames(page, 4);
+  const out = {};
+  // the pause menu: one ↓ to "restart checkpoint", confirm; the boy comes back standing
+  await key(page, 'Escape');
+  await waitFor(page, () => __ui.focus.top?.el.id === 'pause', null, 30000);
+  await key(page, 'ArrowDown');
+  out.menu = { focus: await focused(page), ...(await st()) };
+  await key(page, 'Enter');
+  await waitFor(page, () => __medina.game.mode === 'play' && !__medina.game.paused && !__ui.focus.top, null, 60000);
+  await frames(page, 8);
+  out.respawn = await st();
+  // in play the toggle works: ↓ latches the crouch, ↓ again lets it go
+  await key(page, 'ArrowDown'); await frames(page, 8);
+  out.on = await st();
+  await key(page, 'ArrowDown'); await frames(page, 8);
+  out.off = await st();
+  // holding the crate: ↓ never latches, and letting go leaves him standing
+  await page.evaluate(() => __medina.teleport(35.6, 0, 1)); await frames(page, 3);
+  await page.keyboard.down('ShiftLeft'); await page.keyboard.down('ArrowRight');
+  await waitFor(page, () => !!__medina.game.player.grip, null, 20000).catch(() => {});
+  await page.keyboard.up('ArrowRight'); await frames(page, 2);
+  await key(page, 'ArrowDown'); await frames(page, 6);
+  out.crate = await st();
+  await page.keyboard.up('ShiftLeft'); await frames(page, 8);
+  out.crateLet = await st();
+  // a gripped mirror (only when the Sunwork lab is present): one ↓ tap steps exactly one notch
+  await page.goto(`${BASE}?${Q}&autostart=1&nosave=1&chapter=lab&cp=3`); await ready(page); await waitFor(page, () => __medina.game.mode === 'play');
+  const lab = await page.evaluate(() => !!__medina.ext?.light?.()?.mirrors?.some((m) => m.id === 'M2'));
+  if (lab) {
+    await page.evaluate(() => { __ui.setSetting('crawlMode', 'toggle'); const m = __medina.game.level.light.get('M2'); __medina.teleport(m.body.x - (m.body.w / 2 + 0.2), 0, 1); });
+    await frames(page, 6);
+    await page.keyboard.down('ShiftLeft');
+    await waitFor(page, () => !!__medina.game.player.grip?.mirror, null, 20000).catch(() => {});
+    await waitFor(page, () => __medina.ext.light().mirrors.find((m) => m.id === 'M2').settled, null, 20000).catch(() => {});
+    const n0 = await page.evaluate(() => __medina.ext.light().mirrors.find((m) => m.id === 'M2').notch);
+    await key(page, 'ArrowDown'); await page.waitForTimeout(1500); await frames(page, 4);
+    const m1 = await page.evaluate(() => __medina.ext.light().mirrors.find((m) => m.id === 'M2'));
+    out.mirror = { n0, n1: m1.notch, ...(await st()) };
+    await page.keyboard.up('ShiftLeft'); await frames(page, 8);
+    out.mirrorLet = await st();
+  } else out.mirror = 'no Sunwork mirrors on this tree';
+  await ctx.close();
+  const ok = out.menu.focus === 'checkpoint' && !out.menu.latch && !out.respawn.latch && !out.respawn.crawling && out.respawn.y === 0
+    && out.on.latch && out.on.crawling && !out.off.latch && !out.off.crawling
+    && out.crate.grip && !out.crate.latch && !out.crate.crawling && !out.crateLet.latch && !out.crateLet.crawling
+    && (!lab || (Math.abs(out.mirror.n1 - out.mirror.n0) === 1 && !out.mirror.latch && !out.mirrorLet.crawling)) && !errors.length;
+  return [ok || `crawl ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
 });
 
 // ------------------------------------------------------------------ builds served from disk
