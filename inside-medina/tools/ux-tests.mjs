@@ -302,6 +302,8 @@ await scenario('chapters', async () => {
   for (let i = 0; i < 8 && (await focused(page)) !== 'chapters'; i++) await key(page, 'ArrowDown');
   await key(page, 'Enter');
   const cards = await page.evaluate(() => [...document.querySelectorAll('.ccard')].map((c) => `${c.dataset.id}${c.classList.contains('off') ? ':locked' : ''}`));
+  // a chapter never built on this device draws the registry's checkpoint count (requests/U.md #6: sundown 11)
+  const pips = await page.evaluate(() => ({ learnt: __ui.local.cps?.sundown ?? null, sundown: document.querySelectorAll('.ccard[data-id="sundown"] .pips i').length, dawn: document.querySelectorAll('.ccard[data-id="dawn"] .pips i').length }));
   // the souk: confirm opens its checkpoints, → twice picks checkpoint 2, confirm starts there behind the card
   for (let i = 0; i < 4 && (await page.evaluate(() => __ui.focus.current?.dataset.id)) !== 'souk'; i++) await key(page, 'ArrowLeft');
   await key(page, 'Enter');
@@ -312,8 +314,8 @@ await scenario('chapters', async () => {
   await waitFor(page, () => __medina.game.mode === 'play' || (__medina.game.mode === 'intro' && !__medina.game.held));
   const out = await page.evaluate(() => ({ chapter: __medina.chapter(), cp: __medina.state().cp, cards: window.__cards, top: __ui.focus.top?.el.id || null }));
   await ctx.close();
-  const ok = cards.length === 4 && picking[0] === 'souk' && picking[1] === 2 && out.chapter === 'souk' && out.cp === 2 && out.cards.length === 1 && out.cards[0][1] === 'select' && !out.top && !errors.length;
-  return [ok || `chapters ${JSON.stringify({ cards, picking, out, errors: errors.slice(0, 2) })}`, { cards, picking, ...out }];
+  const ok = cards.length === 4 && pips.learnt === null && pips.sundown === 11 && pips.dawn === 7 && picking[0] === 'souk' && picking[1] === 2 && out.chapter === 'souk' && out.cp === 2 && out.cards.length === 1 && out.cards[0][1] === 'select' && !out.top && !errors.length;
+  return [ok || `chapters ${JSON.stringify({ cards, pips, picking, out, errors: errors.slice(0, 2) })}`, { cards, pips, picking, ...out }];
 });
 
 await scenario('pause', async () => {
@@ -483,8 +485,8 @@ await scenario('hints', async () => {
     await new Promise((r) => setTimeout(r, 1600));
     return { saving: __medina.game.saving, seen: __ui.hints.seen('ctx:jump'), stored: localStorage.getItem('medina.save.v1') };
   });
-  // the Sunwork verbs are taught from context: a gripped mirror shows tilt (↑ ↓), a tilt ends it; once tilted, the
-  // mouse is shown (aim); the crank shows its own glyph
+  // the Sunwork verbs: a gripped mirror shows tilt (↑ ↓; the lab's own zone at M2, or the context hint), a tilt ends
+  // it; once tilted, the mouse is shown (aim); the crank shows its own glyph
   const labHint = () => lab.page.evaluate(() => { const h = document.querySelector('#hints .hint:not(.out)'); return h ? { glyph: h.dataset.glyph, id: __ui.hints.active?.id } : null; });
   const labWait = (g) => waitFor(lab.page, (g) => document.querySelector('#hints .hint:not(.out)')?.dataset.glyph === g, g, 20000).catch(() => {});
   await lab.page.evaluate(() => { __ui.hints.devSeen.clear(); __medina.checkpoint(3); const m = __medina.game.level.light.get('M2'); __medina.teleport(m.body.x - 0.55, 0, 1); });
@@ -496,7 +498,8 @@ await scenario('hints', async () => {
   out.tilted = { hint: await labHint(), turned: (await lab.page.evaluate(() => __medina.game.level.light.get('M2').alpha)) !== a0 };
   await labWait('aim'); out.aim = await labHint();
   await lab.page.keyboard.up('ShiftLeft'); await frames(lab.page, 4);
-  await lab.page.evaluate(() => { __medina.checkpoint(6); __medina.game.player.spawn(117.65, 4.0, 1); });
+  // (the mouse also aims a crank: that hint, once learnt, makes way for the crank's own)
+  await lab.page.evaluate(() => { __ui.hints.done(__ui.hints.active || { id: 'ctx:aim', glyph: 'aim' }); __medina.checkpoint(6); __medina.game.player.spawn(117.65, 4.0, 1); });
   await frames(lab.page, 4);
   await lab.page.keyboard.down('ShiftLeft');
   await labWait('crank'); out.crank = { ...(await labHint()), state: await lab.page.evaluate(() => __medina.game.player.state) };
@@ -506,7 +509,7 @@ await scenario('hints', async () => {
   // the souk's own zones come first (requests/U.md #7): souk:0 at the sack pile, souk:1 by the crate, souk:2 at the terrace
   const ok = out.jump?.glyph === 'jump' && out.jump.id === 'souk:0' && out.grab?.id === 'souk:1' && out.crateStep?.id === 'souk:2' && out.jump.opacity > 0.5 && out.jump.html > 20 && out.paused.hint?.opacity === 0 && out.paused.ctl === 'move jump grab climb crawl'
     && out.resumed?.glyph === 'jump' && out.resumed.opacity > 0 && !out.afterJump.hint && out.afterJump.seen && out.grab?.glyph === 'grab' && out.grab.opacity > 0.5 && !out.wall && out.crateStep?.glyph === 'jump' && out.lab.saving === false && out.lab.seen && out.lab.stored === null
-    && out.tilt?.id === 'ctx:tilt' && out.tilted.turned && out.tilted.hint?.glyph !== 'tilt' && out.aim?.id === 'ctx:aim' && out.crank?.id === 'ctx:crank' && out.crank.state === 'crank' && !errors.length;
+    && out.tilt?.glyph === 'tilt' && out.tilted.turned && out.tilted.hint?.glyph !== 'tilt' && out.aim?.id === 'ctx:aim' && out.crank?.id === 'ctx:crank' && out.crank.state === 'crank' && !errors.length;
   return [ok || `hints ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
 });
 
