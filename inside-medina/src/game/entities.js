@@ -175,6 +175,7 @@ varying vec3 vPos; varying vec3 vN; varying vec3 vW;
 void main(){ vPos = position; vN = normalize(normalMatrix * normal); vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
 const BEAM_FS = /* glsl */ `
 uniform vec3 uColor; uniform float uIntensity; uniform float uTime; uniform float uLen; uniform vec3 uFade; uniform float uHC;
+uniform float uStar; uniform sampler2D uStarMap;
 varying vec3 vPos; varying vec3 vN; varying vec3 vW;
 ${SOFT_GLSL}
 float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719))) * 43758.5453); }
@@ -191,6 +192,13 @@ void main(){
   fall *= 1. - uFade.z * smoothstep(uFade.x, uFade.y, -vPos.y);
   float dust = .75 + .5 * n3(vW * 1.3 + vec3(0., -uTime * .3, uTime * .2));
   float a = pow(core, 3.5) * fall * dust * uIntensity * softFade(.6) * softNear(2.);
+  // a pierced lantern (the lamp-keepers' star lattice on the rig's spot) throws shafts: streaks from the lamp along
+  // the cone, read off the lattice around the axis
+  if (uStar > 0.) {
+    vec2 c = normalize(vPos.xz + vec2(1e-5, 0.));
+    float lat = (texture2D(uStarMap, .5 + c * .44).r + texture2D(uStarMap, .5 + c * .31).r + texture2D(uStarMap, .5 + c * .18).r) / 3.;
+    a *= mix(1., .25 + 1.25 * lat, uStar);
+  }
   // high contrast: the cone's silhouette drawn as a line
   a += uHC * smoothstep(.72, .92, edge) * fall * uIntensity * .55 * softFade(.6) * softNear(2.);
   gl_FragColor = vec4(uColor * a, 1.);
@@ -238,7 +246,7 @@ export class Searchlight {
     cone.translate(0, -len / 2, 0);
     this.beamMat = new THREE.ShaderMaterial({
       vertexShader: BEAM_VS, fragmentShader: BEAM_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: softUniforms({ uColor: { value: new THREE.Color(1.0, 0.86, 0.62) }, uIntensity: { value: 0.35 }, uTime: game.globals.uTime, uLen: { value: len }, uFade: { value: new THREE.Vector3(len, len + 1, 0) }, uHC: { value: 0 } }),
+      uniforms: softUniforms({ uColor: { value: new THREE.Color(1.0, 0.86, 0.62) }, uIntensity: { value: 0.35 }, uTime: game.globals.uTime, uLen: { value: len }, uFade: { value: new THREE.Vector3(len, len + 1, 0) }, uHC: { value: 0 }, uStar: { value: 0 }, uStarMap: { value: game.lightRig?.cookie ?? null } }),
     });
     this.beam = new THREE.Mesh(cone, this.beamMat);
     this.beam.frustumCulled = false;
@@ -431,6 +439,9 @@ export class Searchlight {
     const reach = THREE.MathUtils.clamp(d.length() * 1.05, 8, 18);
     U.uFade.value.set(reach * 0.3, reach, blind);
     U.uHC.value = this.game.settings?.highContrast ? 1 : 0;
+    // the star lattice's shafts show in the cone wherever the rig carries that cookie (Chapter III, the lab's night)
+    const rig = this.game.lightRig;
+    U.uStarMap.value = rig?.cookie ?? null; U.uStar.value = rig && rig.cookies && rig.cookie !== rig.cookies.disc ? 1 : 0;
     d.normalize();
     this.beam.position.copy(this.origin);
     this.beam.quaternion.setFromUnitVectors(_down, d);

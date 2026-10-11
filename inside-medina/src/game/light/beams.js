@@ -182,6 +182,9 @@ export class BeamRenderer {
           this.quad(nq++, ax, ay, 0, bx, by, bz, col, bright, src.width * 0.5, fadeIn, fadeOut, i * 3.7 + (src.x || 0), soft, lamp ? wirePx : 1);
         }
         if (h.kind === NONE || ng >= MAXG) continue;
+        // a searchlight's cone leg ends in its own rig spot's pool (or in the air, blind): no sunspot of its own
+        // there (a tray still glints, a lock still shows its halo)
+        if (!drawn && h.kind !== MIRROR && h.kind !== TARGET) continue;
         const flick = 0.9 + 0.1 * Math.sin(t * 13 + i * 2.1 + bx);
         if (h.kind === MIRROR) {
           // a star glint on the tray, above the bloom threshold

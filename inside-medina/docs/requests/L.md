@@ -20,9 +20,10 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
   kind `sunset`)". The contract is already live without this change: a chapter declares `L.deathColor(kind)` (the lab
   returns `#0b1026` for `sunset`), and the dead boy's step (`Player.deathTint`) holds that colour on `game.fadeColor`
   once the fade to dark has begun, so the lab dims to indigo today. The engine-side line makes the rule the
-  engine's own (it would then cover a death whose boy is not stepping) and lets `deathTint` go.
-- **Test.** `node tools/negative.mjs --chapter lab --only "idle sunset"`: during the dying fade `game.fadeColor` is
-  `#0b1026` (asserted today); with the change, `post.params.fadeColor` is too from the first frame of the fade.
+  engine's own (it would then cover a death whose boy is not stepping) and lets `deathTint` go, together with its
+  display-encoding stopgap for #8 (land #8 first, or keep the encoding with this line while #8 is open).
+- **Test.** `node tools/negative.mjs --chapter lab --only "idle sunset"` reads the screen at the end of the dying
+  fade: about (11, 16, 38), the hex of `#0b1026` (it passes today).
 
 ## 3. `docs/ARCHITECTURE.md` (F / integrator): the Sunwork contracts
 
@@ -71,7 +72,9 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 - **Test.** With exactly this patch (applied locally, run, then reverted), `node tools/negative.mjs --suite foundation
   --only "lab end keeps"` and `--only "x-keyed look"` pass; without it they are the suite's only two failures
   (15 / 17). **Until it is applied `npm test` is red on the foundation suite after L merges**, so the integrator
-  applies it in the same step as the merge. The patch (`git apply` from the repo root):
+  applies it in the same step as the merge. Re-checked on this branch's head after the last fix round (both pass
+  with it, then reverted), and it applies with offsets to the integration branch's newer `foundation.mjs`
+  (`claude/epic-carson-edzzjb` at 9c5f053: hunks at 248, 643, 653). The patch (`git apply` from the repo root):
 
 ```diff
 --- a/inside-medina/tools/neg/foundation.mjs
@@ -143,3 +146,20 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
   still too dark until it lands.)
 - **Test.** `node tools/negative.mjs --chapter lab --only "idle sunset"` reads the screen at the end of the fade
   and expects (11, 16, 38) ± 3; it passes before and after the change.
+
+## 9. `src/game/game.js` (F, frozen): the boy's turn diverges below ~19 fps
+
+- **Change.** In `render`, step the yaw spring exactly (as `camera.js`'s `spring` does) instead of the explicit
+  update:
+  ```js
+  const w = 16, x0 = root.rotation.y - targetYaw, v0 = pl.yawVel || 0, e = Math.exp(-w * dt);
+  root.rotation.y = targetYaw + (x0 + (v0 + w * x0) * dt) * e;
+  pl.yawVel = (v0 - w * (v0 + w * x0) * dt) * e;
+  ```
+- **Reason.** `a = w²·d − 2w·v; v += a·dt; yaw += v·dt` with w = 16 is stable only while w·dt < 0.83, i.e. at
+  frames shorter than 52 ms; `frame()` clamps dt to 0.1 s, so on a device that drops under ~19 fps (a throttled
+  phone, a hitch run) the boy spins after any change of facing: measured in headless Chromium (frames of about
+  0.1 s), a turn from facing right to left took `yawVel` to 1e16 in 24 frames and the rig's arms to NaN (the
+  hand-reach probe saw NaN wrists until the yaw was reset by hand).
+- **Test.** At 5 fps (`frame(0.1)` in a loop), flip `player.facing` and render 60 frames: `root.rotation.y` stays
+  within [−π, π] and settles on the target.

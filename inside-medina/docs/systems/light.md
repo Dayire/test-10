@@ -62,8 +62,8 @@ above it, which would otherwise shut the ray that holds a sun-bolt.
 |---|---|---|
 | `SunRay` / `MoonRay` / `BeamLamp` | `x, y, angle, I, enabled (bool or fn), clipByTerminator (true: the system's terminator, or a Terminator), width, color` | `{on}` |
 | `Mirror` | `kind, x, y (floor, or the pivot for crank / continuous), alpha, r 0.4, pivotH 1.2, zone {x0, x1}, home, killY, thetaHint, range [lo, hi], oneSided, enabled, z` | `{x, y, alpha}` |
-| `Crank` | `x, y (handle floor), mirror, dir (the side he stands, -1 left)` | via the mirror |
-| `Capstan` | `x, y, mirror (continuous), dir, rate 6, magnet {alpha, window 2}, range` | via the mirror |
+| `Crank` | `x, y (handle floor), mirror, dir (the side he stands, -1 left), stand 0.42 (he is taken within the lever's 0.45 m of x + dir·0.55 and works it from x + dir·stand, where both hands reach the wheel)` | via the mirror |
+| `Capstan` | `x, y, mirror (continuous), dir, rate 6, magnet {alpha, window 2}, range, stand 0.9 (from the drum's axis: the eight bars pass in front of him)` | via the mirror |
 | `SunLock` | `x, y, r 0.35, need (0.8 gold, 0.4 silver), mode latch / hold / bolt, chargeT 0.6, decayT 0.5, metal gold / silver / iron, degree, mount (stem length to the wall), rod [[x, y, z], …], onOpen, rides {body, ox, oy}` | `{level, done}`; `value` = gate source |
 | `Photocell` | a hold-mode lock, r 0.15, chargeT 0.08, may `ride` a body | `{level, done}` |
 | `LampEye` | `x, y, z, r 0.8, lamp, onHit, hold 0.1, dazzle 7, face` (reflected light only; assist +50 %; with `face` (deg) only light travelling toward that face counts: the fortress lamp looks east, so a beam sent straight back from the west never ends the chapter). Refractory: while its lamp is `blind` (dazzled or settling) it neither fires nor re-arms; it re-arms 0.5 s after the reflection has left it once the lamp sees again | `{fired}` |
@@ -80,7 +80,8 @@ above it, which would otherwise shut the ray that holds a sun-bolt.
   never moves and walking away lets it go. **Tilt**: |y| > 0.6 and |y| > 1.2·|x| steps one notch at once, then every
   0.22 s while held; up raises the far rim (+α facing right), `settings.invertTilt` flips it. The tray turns to its
   notch in 0.15 s (`settled`). Tilting input never pushes the stand.
-- **Crank**: hold grab within 0.45 m of its stand point; ↑/↓ step notches (up is +α); state `crank`.
+- **Crank**: hold grab within 0.45 m of its stand point; ↑/↓ step notches (up is +α); state `crank`; he turns a
+  little into the wheel (both cranks and the capstan stand behind the play plane).
 - **Capstan**: ←/→ turn the continuous mirror at 6°/s; state `capstan`; the magnet pulls within ±2° once the input
   is released.
 - **The jump-buffer fix**: an up-press buffers a jump only when the boy holds nothing — never while gripping a crate
@@ -99,8 +100,12 @@ above it, which would otherwise shut the ray that holds a sun-bolt.
 - A grip survives a step down of up to 0.26 m (a kerb), so pushing a stand off a rail kerb keeps the hands on it.
 - `L.deathColor(kind)` (a chapter hook): the colour the screen dims to on that death; the dead boy holds it on
   `game.fadeColor` once the fade begins (the lab: indigo `#0b1026` for `sunset`; requests/L.md #2 moves it engine-side).
+  While the final pass mixes the fade colour raw in display space (requests/L.md #8) it is handed over
+  display-encoded, so the screen ends on the colour's own hex (11, 16, 38); the stopgap switches itself off when the
+  shader line changes.
 - `player.reachable()` → `'mirror' | 'crank' | 'capstan' | 'crate' | 'lever' | null`: what grab holds or would take
-  now (the touch grab button's icon, requests/L.md #5).
+  now (the touch grab button's icon, requests/L.md #5). `player.shoulders()` (world, as last drawn) and
+  `player.armReach()` (0.43 m: arm and palm) let props choose holds he can reach.
 - `player.animContext()` adds `tilt {age, dir, rim}`, `crankA`, `capstanV`; animator states `crank`, `capstan`,
   `reach`, `sit` (DepthWalk poses `reach` / `insert` / `sit`), the tilt overlay on push / pull, the guard's
   `shieldEyes` and `asleep`, and the `sunset` death (a slow kneel).
@@ -111,8 +116,9 @@ The lamp sees the boy when his head (0.85 h) or chest (0.5 h) is inside its cone
 cover box crosses the 3D line, and the 2D line from the lamp to the point crosses no light blocker (solids, solid
 bodies, mirror trays, guards). Chapters without a LightSystem use `physicsWorld(game)` (solids and bodies only).
 Chapter I is unchanged: its courtyard has no blocker between the lamp and the floor (the souk bot keeps its
-hash, all 13 souk negatives pass). New: `mode 'sweep' | 'watch'` (`watchAt`, `detect`), `dazzle(sec)` (aim up 8 m,
-the beam whitens, sees nothing), `fixate(target, {while})` (a 0.05 rad wedge on the target), `light.lamp(sl)`. The
+hash, all 13 souk negatives pass). New: `mode 'sweep' | 'watch'` (`watchAt`, `detect`), `power` (520; the lab's night
+lamps 200, so the lattice pool survives the bloom), `dazzle(sec)` (aim up 8 m and back toward the lamp by up to 4 m,
+clear of the walls at the end of its sweep; the beam whitens, sees nothing), `fixate(target, {while})` (a 0.05 rad wedge on the target), `light.lamp(sl)`. The
 cone is on `LAYERS.BEAMS` with `softFade` and ends with the fog chunk (requests/P.md #9). It still takes one of the
 rig's two spots near the view.
 
@@ -135,9 +141,12 @@ searchlight's or a tripwire's own beam never stuns a lamp-keeper. Steps of ≤ 0
 ## Rendering
 
 - Every traced segment is a camera-facing ribbon (one draw for all beams, 96 segments): a hot core, a dusty haze
-  and drifting motes, faded into geometry by the soft pass; its half-width never drops under 2.2 px, so thin beams
-  still read on a phone. A segment that ends in a lamp's eye is drawn to the lamp's real z. A searchlight's own
-  first segment is its cone, not a ribbon.
+  and drifting motes, faded into geometry by the soft pass; its half-width never drops under 2.2 px, in render
+  pixels and in CSS pixels (whichever is wider: a phone renders at 2× or more), so thin beams still read on a phone;
+  on a screen under 900 CSS px tall a tripwire keeps 3 px and glows 30 % more. A segment that ends in a lamp's eye
+  is drawn to the lamp's real z. A searchlight's own first segment is its cone, not a ribbon.
+- Moonlight is weak (it half-opens a gold lock), so a moon beam is drawn soft: a faint core in a wide, pale, cool
+  haze (`#9fb4e0`, 0.9 m) that dies out before the ribbon's edge, thick with slow dust.
 - Where a beam ends: a sunspot glow; on a lock, a halo ring just outside its rim, drawn behind the petals (its
   strength follows I / need) so the petals stay silhouetted against it; where it reflects: a star glint above the
   bloom threshold (one instanced draw for all three; the glint texture keeps its strength in alpha).
@@ -160,11 +169,20 @@ searchlight's or a tripwire's own beam never stuns a lamp-keeper. Steps of ≤ 0
   the sun's shadow map only (an empty draw range in every camera pass and other lights' shadow maps). With a
   `range` it is cut to that stretch of the play plane in light space, so its ends are fixed in the world (the lab's
   clock terminator shades x 146 to the night square's edge and never the square, under the moon or the dusk sun).
-- The boy's hands hold the prop: the player gives the animator world points (`handHolds`: two points on the near
-  rim of a gripped tray, the crank's knob and the rim opposite, the capstan bar crossing in front of him) and a
-  two-bone IK over the pose puts the wrists there, eased in and out.
-- `starCookie()` is the lamp-keepers' eight-point star lattice for the rig spots (`lightRig.setCookie`); the lab
-  uses it in its night rooms.
+- The boy's hands hold the prop: the player gives the animator world points (`handHolds`) chosen from his real
+  shoulders and his reach, and a two-bone IK over the pose puts the wrists there, eased in and out. A tray: each
+  hand on the rim point nearest its shoulder (0.2 m apart at least); a hand the rim is out of reach of (a tray
+  stood on end) steadies the stand by its top edge instead, with a margin both ways so it never flickers; for a rim
+  above his shoulders he stands tall on his toes. A crank: both hands on the wheel's near rim, carried round with
+  the wheel through a turn and re-gripped (past 50°, or once the tray settles). The capstan: both hands on one of
+  its eight bars at the points nearest his shoulders, kept while he reaches it, then the next bar (hand over hand).
+  A hold that moves with its prop is followed exactly; a new hold is glided to. Measured: every tray notch on
+  both sides, both cranks at every angle and the capstan idle or turning either way put each wrist a palm (0.05 m)
+  from its hold (0.066 m at most while the capstan turns).
+- `starCookie()` is the lamp-keepers' eight-point star lattice for the rig spots (`lightRig.setCookie`): four bold
+  stars across, so they read where the pool lies far off or across the stones at a slant; the lab uses it in its
+  night rooms. While the rig carries it, a searchlight's cone shows the lattice's shafts (streaks from the lamp,
+  read off the lattice around the cone's axis); with the disc cookie (Chapter I) the cone is unchanged.
 - Draw calls (chapters fill rooms with these props): the parts that move together share one mesh, a second metal is a
   vertex tint on the first (iron on a cart's wood, the engraving on the dish), the tray's axle rides the stand (a
   cylinder about z needs no turning) and small parts cast no shadow. A wheeled or anchored mirror is 3 draws (2
