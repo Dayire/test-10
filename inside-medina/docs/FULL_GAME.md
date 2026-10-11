@@ -635,6 +635,10 @@ Horizontal rays exist only above T. Each pool lantern and glow sprite goes out a
 | Target | fortress lamp LampEye (110, 8.0), r 1.5 |
 | Start | α 20°: a spot lands on the roof at 165, then sweeps across the city as he turns |
 
+- **Camera (from the lab's IV-E):** the rail cannot hold this room. Hold a shot of the whole minaret top while he climbs
+  to the roof (the rail follows the ground he climbs, so it either loses the mirror from below or the boy from above),
+  and while he works the capstan frame the mirror-to-fortress line (side-on on landscape screens, down the beam from
+  behind the mirror on an upright phone), with no facade above the beam between them. light.md "IV-E's camera".
 - **Solution α = 3.2°** (θr 186.4°). The traced hit window is α ≈ 2.5–3.6°.
 - **Magnet (fixes "only playable with assist"):** whenever |α − 3.2| ≤ 2° and the input is released, α eases to 3.2 over 0.4 s and the beam visibly snaps onto the lamp. All devices get this; it is not an assist toggle.
 - **Constraint:** no play-plane solid above the line y = 8.0 + (x − 110)·0.112 for x ∈ [111.5, 166.5]. That line is 13.38 at the west parapet (top 12.8) and 11.36 at x 140.

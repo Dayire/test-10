@@ -3,7 +3,7 @@ import * as THREE from 'three';
 // Side-scrolling rail camera. Shot parameters are key-framed along x and
 // blended with smoothstep; the focus follows the player with look-ahead and
 // a vertical dead-zone, and everything is smoothed by critically damped springs.
-// Keys may carry distPortrait (used when aspect < 1). Settings scale the rail
+// Keys may carry distPortrait and focusBiasPortrait (used when aspect < 1). Settings scale the rail
 // distance, the shake and the handheld drift. A safe rect shifts the lens so
 // the boy stays centred above on-screen controls. Scripted overrides may name
 // the point the sun's shadow map should centre on (shadowFocus).
@@ -42,7 +42,7 @@ export class CameraRig {
 
   setKeys(keys) {
     this.keys = keys.slice().sort((a, b) => a.x - b.x);
-    this.keysP = this.keys.map((k) => (k.distPortrait ? { ...k, dist: k.distPortrait } : k));
+    this.keysP = this.keys.map((k) => ({ ...k, ...(k.distPortrait ? { dist: k.distPortrait } : {}), ...(k.focusBiasPortrait !== undefined ? { focusBias: k.focusBiasPortrait } : {}) }));
   }
 
   // instant cut for a new chapter or a respawn
@@ -68,7 +68,8 @@ export class CameraRig {
 
   // scripted shot: fn(dt) -> {pos, look, fov, shadowFocus?}; weight blends in over `blend` seconds
   setOverride(fn, blend = 1.5) { this.override = fn; this.overrideTarget = 1; this.blendRate = 1 / blend; }
-  clearOverride(blend = 1.0) { this.overrideTarget = 0; this.blendRate = 1 / blend; }
+  // `only`: clear just that shot (a level's own framing never clears a cinematic that has replaced it)
+  clearOverride(blend = 1.0, only = null) { if (only && this.override !== only && this.override?._of !== only) return; this.overrideTarget = 0; this.blendRate = 1 / blend; }
 
   // lens shift: keep the play rect {x, y, w, h} (CSS px) centred; null clears it
   setSafeRect(rect) { this.safeRect = rect ? { ...rect } : null; this._viewKey = ''; this.applyView(); }

@@ -226,6 +226,17 @@ front of a wall that parts the square into two courts, LL1 on an iron arm from i
 start each room with the earlier ones solved. The lamp room is an open square (no facades in front of the
 lamp-keepers' wall), so the cones fall whole from the lamps to the street. Tripwires hum (`tripHum`) within 3 m.
 
+**IV-E's camera** (what the chapter's own heliostat needs too, FULL_GAME §5.2 P4). The rail alone cannot frame it: the
+camera follows the ground he climbs, so a look high enough for the mirror from the street puts him under the frame on
+the roof, and the fortress lamp lies 58 m from the mirror, behind the facade line (z −4). The lab holds two shots
+(camera overrides from the `heliostatShots` entity, released with `clearOverride(blend, shot)` so they never cut a
+cinematic that replaced them): the whole tower and its heliostat while he is at its foot or on its ladder (the frame
+stays, he climbs through it), and while he works the capstan the line from the heliostat to the fortress lamp: side-on
+on a landscape screen (x 414 … 483, the distance fitted to the aspect), down the beam from behind the mirror on an
+upright phone. On the roof the room's frame holds x 476 (ladder head, capstan, heliostat, the sunrise from the right).
+The street in front of the fortress stays under 6.4 m, so the beam and the lamp read over its roofs. A tap on the
+fortress lamp aims the beam within the magnet's window.
+
 ## Tests
 
 ```

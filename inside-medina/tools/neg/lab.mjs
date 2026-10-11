@@ -573,6 +573,42 @@ export const scenarios = [
     },
   },
   {
+    // IV-E's camera (light.md): the boy and the heliostat stay in the frame at the tower's foot, on its ladder and on
+    // the roof, and at the capstan the fortress lamp comes into view with them; at 16:9 and on an upright screen
+    name: 'IV-E frames the boy, the heliostat and the lamp', cp: 12, w: 640, h: 360,
+    run: async ({ page }) => {
+      await prep(page);
+      const shot = (tag) => page.evaluate(async (tag) => {
+        const { G } = __neg;
+        await new Promise((r) => { let n = 50; const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+        const p = G.player, c = G.camera, V = c.position.constructor; c.updateMatrixWorld();
+        const pr = (x, y, z = 0) => { const v = new V(x, y, z).project(c); return [+v.x.toFixed(2), +v.y.toFixed(2)]; };
+        const ins = (v) => Math.abs(v[0]) <= 0.97 && Math.abs(v[1]) <= 0.97;
+        const P = { head: pr(p.x, p.y + 1.15), feet: pr(p.x, p.y + 0.05), H: pr(478, 14.5), lamp: pr(420, 9.3, -4) };
+        return { tag, st: p.state, y: +p.y.toFixed(1), boy: ins(P.head) && ins(P.feet), H: ins(P.H), lamp: ins(P.lamp), P };
+      }, tag);
+      const out = [];
+      await page.evaluate(() => { const { G, walkTo } = __neg; G.player.spawn(463, 0, 1); walkTo(466.8); });
+      out.push(await shot('foot'));
+      await page.evaluate(() => { const { G, walkTo, until } = __neg; walkTo(467.6); until(() => G.player.y > 5, { x: 0, y: 1 }, 12); });
+      out.push(await shot('ladder'));
+      await page.evaluate(() => { const { G, until } = __neg; until(() => G.player.state === 'ground' && G.player.y > 11.9, { x: 0.4, y: 1 }, 12); until(() => G.player.x > 470, { x: 1 }, 4); });
+      out.push(await shot('roof'));
+      await page.evaluate(() => { const { G, M, get, sim } = __neg; const c = get('capstan'); M.teleport(c.standX, c.y, -1); sim(0.3, { x: 0, grab: true }); });
+      out.push(await shot('capstan'));
+      await page.setViewportSize({ width: 390, height: 844 });
+      out.push(await shot('capstan upright'));
+      await page.evaluate(() => { const { G, until } = __neg; until(() => G.player.state !== 'capstan', { x: 0, grab: false }, 2); until(() => G.player.x < 471, { x: -1 }, 4); });
+      out.push(await shot('roof upright'));
+      return out;
+    },
+    check: (r) => {
+      const bad = r.filter((s) => !s.boy || !s.H || (s.tag.startsWith('capstan') && (s.st !== 'capstan' || !s.lamp)));
+      if (r.find((s) => s.tag === 'ladder')?.st !== 'climb') return `not on the ladder ${JSON.stringify(r.map((s) => [s.tag, s.st, s.y]))}`;
+      return bad.length ? `out of frame ${JSON.stringify(bad)}` : true;
+    },
+  },
+  {
     // the light census is the fixed rig's, here as in the souk (FULL_GAME §9.1)
     name: 'light census unchanged', cp: 0,
     run: async ({ page }) => page.evaluate(async () => { const lab = __medina.lights(); await __medina.loadChapter('souk', 0); const souk = __medina.lights(); await __medina.loadChapter('lab', 10); return { lab, souk, again: __medina.lights() }; }),

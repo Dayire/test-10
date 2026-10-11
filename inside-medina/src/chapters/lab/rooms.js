@@ -51,7 +51,7 @@ export function* buildLab(game, kit) {
   // a puzzle room's frame (FULL_GAME §1.2): while the boy is between x0 and x1 the camera holds the room's centre
   // cx (keys at both ends and the middle, focusBias cx − x, no look-ahead), so the source, the tool and the target
   // share one frame; distPortrait fits the room's span inside the 52° field of a phone held upright
-  const frame = (x0, x1, cx, o) => { for (const x of [x0, (x0 + x1) / 2, x1]) cam(x, { ...o, ahead: 0, focusBias: cx - x }); };
+  const frame = (x0, x1, cx, o, cxP = cx) => { for (const x of [x0, (x0 + x1) / 2, x1]) cam(x, { ...o, ahead: 0, focusBias: cx - x, focusBiasPortrait: cxP - x }); };
   // a wall in the play plane with apertures: [y0, y1] spans of solid stone, a glowing sky in each window
   const wall = (x0, x1, spans, { mat = 'sandstone', windows = [] } = {}) => {
     for (const [y0, y1] of spans) block(x0, x1, y0, y1, { mat, coping: y0 > 0 ? null : 'limestone', ledges: false });
@@ -70,7 +70,16 @@ export function* buildLab(game, kit) {
   };
 
   // ================================================================ the street (floor, facades, far city)
-  ground(-20, 140.5); ground(144, 520);
+  ground(-20, 140.5); ground(144, 520, { z1: 1.5 });
+  // the near street (z 1.5 … 17): in the night rooms its cobbles fall into shadow toward the camera (moonlit, they
+  // were the brightest flat thing in the frame), behind a kerb line; elsewhere as before
+  for (const [x0, x1, k] of [[144, 206, 1], [206, 345, 0.3], [345, 520, 1]]) {
+    const g = boxMM(x0, -0.6, 1.5, x1, 0, 17), pos = g.attributes.position, col = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) { const v = 1 - (1 - k) * Math.min(1, (pos.getZ(i) - 1.5) / 9.5); col.set([v, v, v * (k < 1 ? 1.05 : 1)], i * 3); }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    K.add(g, 'cobbles', null, { cast: false });
+  }
+  K.add(setColor(boxMM(206, 0, 1.4, 345, 0.1, 1.62), 0x8a8478), 'limestone', null, { cast: false });
   block(-30, -4, 0, 14, { visual: false, ledges: false });
   const styles = ['peach', 'cream', 'ochre', 'white', 'blue', 'cream', 'peach', 'stone'];
   const SQ0 = 207.6, SQ1 = 257.4;
@@ -78,7 +87,9 @@ export function* buildLab(game, kit) {
   for (let x = -12, i = 0; x < 512; i++) {
     const w = 5 + r() * 4;
     const night = x > 206 && x < 345;
-    const h = (night ? 8 : 7) + r() * 6, st = styles[i % styles.length];
+    // in front of the fortress (IV-E) the street stays low, so the heliostat's beam and the lamp it must hit read
+    // over the rooftops (both lie behind the facade line there: the lamp at z −4)
+    const h = Math.min((night ? 8 : 7) + r() * 6, x > 412 && x < 466 ? 6.4 : 99), st = styles[i % styles.length];
     // the lamp room is an open square: no facade between the play plane and the lamp-keepers' wall, so the
     // cones fall whole from the lamps to the street
     for (const [a, b] of [[x, Math.min(x + w, SQ0)], [Math.max(x, SQ1), x + w]]) if (b - a > 0.4) farBuilding(a, b, FZ - 0.02, h, st, { depth: 4 });
@@ -230,7 +241,8 @@ export function* buildLab(game, kit) {
   wall(146.1, 146.9, [[2.8, 4.2], [5.0, 9.95], [10.75, 14]], { windows: [[4.2, 5.0], [9.95, 10.75]] });
   sun('W7', 146.0, 10.35); sun('W8', 146.0, 4.59);
   cam(127, { dist: 18.5, height: 3.4, lookY: 4.8, fov: 40, ahead: 0.6, focusBias: 3 });
-  frame(131, 146, 139, { dist: 18.5, distPortrait: 17, height: 3.4, lookY: 4.8, fov: 40 }); // M5 132.6 … the windows 146
+  // M5 132.6 … the windows 146; upright, the frame leans toward M5 so the boy pushing it is not on the edge
+  frame(131, 146, 139, { dist: 18.5, distPortrait: 19, height: 3.4, lookY: 4.8, fov: 40 }, 136);
   room('burn', () => { M5.setState({ x: 133.34, y: 0, alpha: -45 }); rope.setState({ heat: 1, burnt: true }); cwState.t = 2; bridge.setState({ angle: 0 }); });
   yield 0.6;
 
@@ -402,7 +414,37 @@ export function* buildLab(game, kit) {
   frame(346, 353.8, 353.5, { dist: 18, distPortrait: 16.8, height: 3.6, lookY: 5.0, fov: 40 }); // LD1 347.5 … the ray 362
   cam(358, { dist: 15, height: 2.4, lookY: 2.8, fov: 38, ahead: 2.2 });
   cam(456, { dist: 15, height: 2.4, lookY: 2.8, fov: 38, ahead: 1.6 });
-  cam(466, { dist: 20, distPortrait: 18, height: 6.0, lookY: 8.2, fov: 40, ahead: 0.6, focusBias: 1 });
+  // the heliostat's tower: from its foot a level shot holds the boy and the mirror on the roof (y −1 … 16 at 16:9),
+  // and the same lift keeps him in frame at the ladder's top (the camera follows the ground he climbs: y 11 … 28)
+  // the heliostat's tower: on the way to it the boy in the lower third and the tower to the roof; at its foot and on
+  // the ladder a held shot of the whole tower (heliostatShots below); on the roof the room's frame holds x 476: the ladder's head, the
+  // boy at the capstan, the heliostat and the sunrise coming in from the right
+  cam(462, { dist: 20, distPortrait: 17, height: 4.2, lookY: 4.8, fov: 40, ahead: 0.6, focusBias: 2 });
+  cam(467.8, { dist: 20, distPortrait: 17, height: 4.2, lookY: 4.8, fov: 40, ahead: 0.6, focusBias: 2 });
+  frame(468.6, 484, 476, { dist: 16, distPortrait: 15, height: 2.6, lookY: 2.2, fov: 40 });
+  // IV-E's held shots (camera overrides; the chapter needs the same, FULL_GAME §5.2 P4): the whole tower and its
+  // heliostat while he is at its foot or on its ladder (the frame stays, he climbs through it), and while he works the capstan the line from the heliostat to
+  // the fortress lamp, so the target is in sight when the magnet snaps: side-on on a landscape screen (x 414 … 483),
+  // down the beam from behind the mirror on an upright phone
+  const rigC = game.camRig, D2R = Math.PI / 180;
+  const minFov = (a) => Math.max(40, 2 * Math.atan(Math.tan((a < 1 ? 26 : 23) * D2R) / a) / D2R);
+  const side = (o, a, x0, x1, y0, y1, lift) => {
+    const fov = minFov(a), t = Math.tan(fov * D2R / 2), d = Math.max((y1 - y0) / 2 / t, (x1 - x0) / 2 / (t * a));
+    o.pos.set((x0 + x1) / 2, (y0 + y1) / 2 + lift, d); o.look.set((x0 + x1) / 2, (y0 + y1) / 2, 0); o.fov = fov; return o;
+  };
+  const shot = (fit) => { const o = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 40 }; return () => fit(o, game.camera.aspect || 1.78); };
+  const towerShot = shot((o, a) => (a < 1 ? side(o, a, 465.4, 480.6, -1.4, 17.2, 1) : side(o, a, 461, 486, -1.4, 17.2, 1)));
+  const aimShot = shot((o, a) => (a < 1.1 ? (o.pos.set(490, 17, 9), o.look.set(444, 8.2, -11), o.fov = minFov(a), o) : side(o, a, 414, 483, 4, 17, 2)));
+  L.entities.push({ id: 'heliostatShots', cur: null, step() {
+    const p = game.player;
+    if (this.cur && rigC.override !== this.cur && rigC.override?._of !== this.cur) this.cur = null; // replaced or reset since
+    const atTower = p.x > 465.4 && p.x < 468.8 && (p.state === 'climb' || p.state === 'climbUp' || (p.state === 'ground' && p.y < 0.6));
+    const want = game.mode !== 'play' || p.dead ? null : p.state === 'capstan' ? aimShot : atTower ? towerShot : null;
+    if (want === this.cur) return;
+    if (this.cur) rigC.clearOverride(1.2, this.cur);
+    this.cur = null;
+    if (want && (!rigC.override || rigC.overrideTarget === 0)) { rigC.setOverride(want, 1.5); this.cur = want; }
+  }, dispose() { if (this.cur) rigC.clearOverride(0.01, this.cur); }, getState: () => ({}), setState() { if (this.cur) rigC.clearOverride(0.01, this.cur); this.cur = null; } });
   yield 0.95;
 
   // ================================================================ chapter hooks
