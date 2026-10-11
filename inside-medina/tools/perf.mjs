@@ -1,6 +1,6 @@
 // Render budget table at the Chapter I tour spots (shadow vs main draw calls, triangles, post passes,
 // programs, the flock's share) plus the presentation acceptance checks (FULL_GAME §11.4 P).
-// Usage: node tools/perf.mjs [--port 5174 | BASE=url] [--tiers low,medium,high] [--frames 6]
+// Usage: node tools/perf.mjs [--port 5174 | BASE=url] [--tiers low,medium,high,ultra] [--frames 6]
 //          [--out file.json] [--compare before.json] [--checks | --only checks | --only path] [--path 0] [--shots dir] [--w 640 --h 360]
 // The table runs on any build (also the pre-presentation tree, for the "before" column); the checks
 // use the new RenderSystem API and are skipped on builds without it.
@@ -17,7 +17,7 @@ const argv = process.argv.slice(2);
 const arg = (k, d) => { const i = argv.indexOf('--' + k); return i < 0 ? d : (argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : true); };
 const port = arg('port', '5173');
 const BASE = process.env.BASE || `http://127.0.0.1:${port}/`;
-const tiers = String(arg('tiers', 'low,medium,high')).split(',');
+const tiers = String(arg('tiers', 'low,medium,high,ultra')).split(','); // §8.5: a budget at every tier
 const frames = +arg('frames', 6);
 const out = arg('out', null), compare = arg('compare', null), checks = arg('checks', false), only = arg('only', null);
 const shots = arg('shots', null);

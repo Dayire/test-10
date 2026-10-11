@@ -266,11 +266,12 @@ and ignored.
 ## Measuring (`tools/perf.mjs`)
 
 ```
-node tools/perf.mjs --port 5174 --tiers low,medium,high --out after.json --compare before.json
+node tools/perf.mjs --port 5174 --tiers low,medium,high,ultra --out after.json --compare before.json
 node tools/perf.mjs --port 5174 --only checks --shots /tmp/shots
 ```
 
-The table visits the six Chapter I tour spots and the hero alley per tier (low and medium also as a phone in
+The table visits the six Chapter I tour spots and the hero alley per tier (every tier by default, ultra included: §8.5
+sets a budget at each; low and medium also as a phone in
 landscape, 844 × 390, unless `--w`/`--h` pick one viewport) and reports shadow-pass vs main calls, triangles,
 post passes and programs, the flock's share (with and without every bird in view), and shadow calls on a
 simulated 60 fps clock (the rAF loop cannot interleave with that synchronous loop, so time-based
