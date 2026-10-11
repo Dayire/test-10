@@ -17,6 +17,7 @@ let ok = true;
 for (let k = 0; k < runs; k++) {
   const P = await openPage(browser, { url: gameUrl(o), w: o.w, h: o.h });
   await inject(P.page, 'tools/bots/lib.js');
+  if (exists('tools/bots/lightlib.js')) await inject(P.page, 'tools/bots/lightlib.js'); // the Sunwork helpers (FULL_GAME §6.8)
   await inject(P.page, `tools/bots/${o.chapter}.js`);
   const r = await P.page.evaluate(([chapter, from, to]) => {
     const lib = window.__botlib, B = lib.create();

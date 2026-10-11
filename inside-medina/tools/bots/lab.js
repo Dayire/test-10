@@ -1,12 +1,7 @@
 // The Sunwork lab bot: all twelve rooms from the first step to the heliostat (FULL_GAME §11.4 L).
-// Built on tools/bots/lib.js and tools/bots/lightlib.js (loaded here when the runner did not inject it).
+// Built on tools/bots/lib.js and tools/bots/lightlib.js (both injected by tools/playtest.mjs).
 // Steps end on entity state (locks done, mirrors settled, lamps dazzled), never on time.
 window.__bots = window.__bots || {};
-if (!window.__lightlib) {
-  const x = new XMLHttpRequest();
-  x.open('GET', new URL('tools/bots/lightlib.js?bust=' + Math.random().toString(36).slice(2), document.baseURI).href, false); x.send();
-  (0, eval)(x.responseText);
-}
 window.__bots.lab = (B) => {
   window.__lightlib.install(B);
   const { add, run, runLeft, jumpAt, hangClimb, wait, crawlTo, tick, G } = B;

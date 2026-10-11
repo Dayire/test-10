@@ -248,8 +248,9 @@ export const scenarios = [
     run: ({ page }) => page.evaluate(async () => {
       const M = __medina, G = M.game;
       const save0 = M.save();
-      M.teleport(26, 0);
-      for (let i = 0; i < 10 * 120 && G.mode === 'play'; i++) M.sim(1 / 120, { x: 1 });
+      // the lab's end: the heliostat (room 12) set on the fortress lamp
+      M.checkpoint(12); const H = G.level.light.get('H'); H.setState({ ...H.getState(), alpha: 3.2 }); M.teleport(475, 12, 1);
+      for (let i = 0; i < 10 * 120 && G.mode === 'play'; i++) M.sim(1 / 120, { x: 0 });
       const endMode = G.mode;
       await new Promise((r) => { const t0 = performance.now(); const f = () => (G.mode === 'play' || performance.now() - t0 > 15000 ? r() : setTimeout(f, 50)); f(); });
       const ev = M.events().filter((e) => ['chapterEnd', 'credits', 'chapterStart'].includes(e.name)).map((e) => `${e.name}:${e.data.id ?? ''}${e.data.dev ? ':dev' : ''}`);
@@ -642,7 +643,8 @@ export const scenarios = [
       await at(26); await G.restartChapter(); await frames(3);
       out.restart = { bakes, env: W.env === a.env, name: D.name };
       await G.loadChapter('lab', 0, { reason: 'restart' });
-      out.lab = { envs: D.envs.size };
+      const lk = G.def.look;
+      out.lab = { envs: D.envs.size, presets: new Set(Array.isArray(lk) ? lk.map((k) => k.preset) : [lk]).size };
       W.bakeEnvironment = bake;
       return out;
     }),
@@ -651,7 +653,7 @@ export const scenarios = [
       const w = r.walk;
       if (w.a !== 'dawn' || w.b !== 'sunrise' || w.c !== 'dawn' || !w.swapped || !w.back || !w.brass || w.bakes || new Set(w.progs).size !== 1 || !(w.sun[1] > w.sun[0])) return `walking the blend: ${JSON.stringify(w)}`;
       if (r.restart.bakes || !r.restart.env || r.restart.name !== 'dawn') return `restart: ${JSON.stringify(r.restart)}`;
-      if (r.lab.envs !== 1) return `the maps outlived their chapter: ${JSON.stringify(r.lab)}`;
+      if (r.lab.envs !== r.lab.presets) return `the maps outlived their chapter: ${JSON.stringify(r.lab)}`;
       return true;
     },
   },
