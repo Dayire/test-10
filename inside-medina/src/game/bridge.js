@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { worldUV, setColor } from '../assets/geom.js';
+import { worldUV, setColor, mergeChildren } from '../assets/geom.js';
 
 // Drawbridge hinged on the far side of a ravine; lowered while its source is > 0.9
 export class Drawbridge {
@@ -22,6 +22,7 @@ export class Drawbridge {
       const beam = new THREE.BoxGeometry(this.len, 0.16, 0.12); beam.translate(-this.len / 2, -0.16, z); worldUV(beam); setColor(beam, 0xffffff);
       const m = new THREE.Mesh(beam, game.mats.get('woodDark')); m.castShadow = true; grp.add(m);
     }
+    mergeChildren(grp); // planks and beams: one draw per material (the group still turns as one)
     grp.position.set(x1, y, 0);
     game.add(grp);
     this.mesh = grp;
@@ -72,6 +73,7 @@ export class RopeLadder {
       grp.add(new THREE.Mesh(g, game.mats.get('woodDark')));
     }
     grp.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    mergeChildren(grp); // ropes and rungs: one draw per material (the group still unrolls and sways as one)
     grp.position.set(x, y1, z);
     game.add(grp);
     this.mesh = grp;
