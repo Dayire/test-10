@@ -37,6 +37,10 @@ export function* buildLab(game, kit) {
   const lock = (id, x, y, o = {}) => add(new SunLock(game, { id, x, y, ...o }));
   const sun = (id, x, y, angle = 195, o = {}) => add(new SunRay({ id, x, y, angle, ...o }));
   const star = (x, y = 0) => { const m = starInlay(game.mats); m.position.set(x, y + 0.002, 0.15); game.add(m); };
+  // a puzzle room's frame (FULL_GAME §1.2): while the boy is between x0 and x1 the camera holds the room's centre
+  // cx (keys at both ends and the middle, focusBias cx − x, no look-ahead), so the source, the tool and the target
+  // share one frame; distPortrait fits the room's span inside the 52° field of a phone held upright
+  const frame = (x0, x1, cx, o) => { for (const x of [x0, (x0 + x1) / 2, x1]) cam(x, { ...o, ahead: 0, focusBias: cx - x }); };
   // a wall in the play plane with apertures: [y0, y1] spans of solid stone, a glowing sky in each window
   const wall = (x0, x1, spans, { mat = 'sandstone', windows = [] } = {}) => {
     for (const [y0, y1] of spans) block(x0, x1, y0, y1, { mat, coping: y0 > 0 ? null : 'limestone', ledges: false });
@@ -85,7 +89,7 @@ export function* buildLab(game, kit) {
   const G1 = gate('G1', 13.0, 2.6, 2.5, () => (L1.done ? 1 : 0));
   wall(12.6, 13.4, [[2.6, 5.0], [5.8, 9]], { windows: [[5.0, 5.8]] });
   sun('sun1', 13.45, 5.4);
-  cam(-6, { dist: 17.5, height: 2.6, lookY: 3.6, fov: 39, ahead: 0.6 });
+  frame(-3, 12.4, 5.15, { dist: 17.5, distPortrait: 18.6, height: 2.6, lookY: 3.6, fov: 39 }); // L1 −2.75 … the window 13.45
   room('sunlock', () => { L1.setState({ level: 1, done: true }); cloth.setState({ x0: 7.0, y0: 4.4, x1: 8.2, y1: 5.0 }); G1.setState({ open: 1 }); });
   L.hints.push({ x0: 3, x1: 12, after: 6, glyph: 'up', unless: () => L1.done });
 
@@ -98,7 +102,7 @@ export function* buildLab(game, kit) {
   const G2 = gate('G2', 30.2, 2.6, 2.5, () => (L2.done ? 1 : 0));
   wall(29.8, 30.6, [[2.6, 5.6], [6.4, 12]], { windows: [[5.6, 6.4]] });
   sun('sun2', 30.65, 6.05);
-  cam(16, { dist: 17.5, height: 2.8, lookY: 3.8, fov: 39, ahead: 0.6 });
+  frame(15, 29.8, 23.8, { dist: 17.5, distPortrait: 15.6, height: 2.8, lookY: 3.8, fov: 39 }); // L2 17.4 … the window 30.65
   room('shadow', () => { CR1.setState({ x: 21.8, y: 0 }); L2.setState({ level: 1, done: true }); G2.setState({ open: 1 }); });
   yield 0.2;
 
@@ -111,7 +115,7 @@ export function* buildLab(game, kit) {
   wall(45.6, 46.4, [[2.2, 2.4], [3.2, 12]], { windows: [[2.4, 3.2]] });
   sun('sun3', 46.45, 2.93);
   // portrait (a 52° horizontal floor): rooms whose source, tool and target span ≤ 14 m come closer on a phone
-  cam(32, { dist: 17.5, distPortrait: 15.5, height: 2.4, lookY: 2.9, fov: 39, ahead: 1.0, focusBias: 1.5 });
+  frame(32, 45.4, 39.45, { dist: 17.5, distPortrait: 16, height: 2.4, lookY: 2.9, fov: 39 }); // M1 33 … the window 46.45
   room('kerb', () => { M1.setState({ x: 40.0, y: 0, alpha: -15 }); L3.setState({ level: 1, done: true }); G3.setState({ open: 1 }); });
 
   // ================================================================ 4 TILT: an anchored mirror, tilted (II-B2)
@@ -121,7 +125,8 @@ export function* buildLab(game, kit) {
   const G4 = gate('G4', 62.0, 2.4, 2.2, () => (L4.done ? 1 : 0));
   wall(61.6, 62.4, [[2.4, 2.6], [3.4, 12]], { windows: [[2.6, 3.4]] });
   sun('sun4', 62.45, 3.20);
-  cam(48, { dist: 17.5, distPortrait: 14, height: 2.8, lookY: 3.6, fov: 39, ahead: 0.8, focusBias: 1.2 });
+  // compact (8 m from the floor spot to the window): it follows the boy, close on a phone
+  for (const x of [48, 61]) cam(x, { dist: 17.5, distPortrait: 14, height: 2.8, lookY: 3.6, fov: 39, ahead: 0.8, focusBias: 1.2 });
   room('tilt', () => { M2.setState({ x: 55.0, y: 0, alpha: -45 }); L4.setState({ level: 1, done: true }); G4.setState({ open: 1 }); });
   L.hints.push({ x0: 53.5, x1: 55, after: 3, glyph: 'tilt', unless: (g) => L4.done || g.player.grip?.mirror !== M2 || M2.target !== 30 });
   yield 0.3;
@@ -136,7 +141,7 @@ export function* buildLab(game, kit) {
   wall(79.6, 80.4, [[2.6, 3.2], [4.0, 12]], { windows: [[3.2, 4.0]] });
   sun('sun5', 80.45, 3.732);
   vbox(68.4, 1.7, FZ, 70.0, 1.9, -0.6, 'woodDark', { base: 1.7 }); // a balcony ledge above, out of reach unless he jumped
-  cam(64, { dist: 17.5, height: 2.4, lookY: 3.0, fov: 39, ahead: 0.8, focusBias: 2 });
+  frame(63.5, 79.4, 72.3, { dist: 17.5, distPortrait: 18.3, height: 2.4, lookY: 3.0, fov: 39 }); // LJ 64.5 … the window 80.45
   room('jumpfix', () => { MJ.setState({ x: 71.0, y: 0, alpha: 0 }); LJ.setState({ level: 1, done: true }); G5.setState({ open: 1 }); });
   L.hints.push({ x0: 69.5, x1: 71, after: 3, glyph: 'up', unless: (g) => LJ.done || g.player.grip?.mirror !== MJ });
 
@@ -149,7 +154,9 @@ export function* buildLab(game, kit) {
   const G6 = gate('G6', 104.0, 2.4, 2.2, () => 1 - B1.level);
   wall(103.6, 104.4, [[2.4, 2.8], [3.6, 12]], { windows: [[2.8, 3.6]] });
   sun('sun6', 104.45, 3.21);
-  cam(82, { dist: 17.5, distPortrait: 14, height: 2.2, lookY: 2.6, fov: 39, ahead: 0.8, focusBias: 3 });
+  // the walk in follows him; from the bollard to the gate the frame holds the bolt, the crate and the window
+  cam(81.5, { dist: 17.5, distPortrait: 14, height: 2.2, lookY: 2.6, fov: 39, ahead: 0.8, focusBias: 3 });
+  frame(93, 103.4, 99.3, { dist: 17.5, distPortrait: 14, height: 2.2, lookY: 2.6, fov: 39 });
   room('bolt', () => { CR3.setState({ x: 95.4, y: 0 }); B1.setState({ level: 0, done: false }); G6.setState({ open: 1 }); });
   yield 0.4;
 
@@ -169,7 +176,8 @@ export function* buildLab(game, kit) {
   const G7 = gate('G7', 126.0, 2.4, 2.2, () => (L7.done ? 1 : 0));
   wall(125.6, 126.4, [[2.4, 2.6], [3.4, 12]], { windows: [[2.6, 3.4]] });
   sun('sun7', 126.45, 2.96);
-  cam(106, { dist: 18, height: 3.2, lookY: 4.6, fov: 40, ahead: 0.6, focusBias: 2 });
+  cam(105.5, { dist: 18, height: 3.2, lookY: 4.6, fov: 40, ahead: 0.6, focusBias: 2 });
+  frame(110, 125.4, 118.8, { dist: 18, distPortrait: 17.4, height: 3.2, lookY: 4.6, fov: 40 }); // the ivy 111.2 … the window 126.45
   room('crank', () => { M7.setState({ x: 119.9, y: 0, alpha: -30 }); F2.setState({ alpha: 45 }); L7.setState({ level: 1, done: true }); G7.setState({ open: 1 }); });
   yield 0.5;
 
@@ -195,13 +203,14 @@ export function* buildLab(game, kit) {
   kerb(132.1, 132.25); kerb(133.69, 133.84); star(133.34);
   wall(146.1, 146.9, [[2.8, 4.2], [5.0, 9.95], [10.75, 14]], { windows: [[4.2, 5.0], [9.95, 10.75]] });
   sun('W7', 146.0, 10.35); sun('W8', 146.0, 4.59);
-  cam(128, { dist: 18.5, height: 3.4, lookY: 4.8, fov: 40, ahead: 0.6, focusBias: 3 });
+  cam(127, { dist: 18.5, height: 3.4, lookY: 4.8, fov: 40, ahead: 0.6, focusBias: 3 });
+  frame(131, 146, 139, { dist: 18.5, distPortrait: 17, height: 3.4, lookY: 4.8, fov: 40 }); // M5 132.6 … the windows 146
   room('burn', () => { M5.setState({ x: 133.34, y: 0, alpha: -45 }); rope.setState({ heat: 1, burnt: true }); cwState.t = 2; bridge.setState({ angle: 0 }); });
   yield 0.6;
 
   // ================================================================ corridor, then 9 CLOCK: the last ray (II-E2)
   cp(147.5, 148.0, 0, 1);
-  cam(150, { dist: 14, height: 2.0, lookY: 2.4, fov: 37, ahead: 1.6 });
+  for (const x of [150, 172]) cam(x, { dist: 14, height: 2.0, lookY: 2.4, fov: 37, ahead: 1.6 });
   for (const x of [156, 164, 172]) lantern(x, 3.0, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.2 });
   cp(175.5, 175.8, 0, 1);
   // the shadow line shades the corridor and the clock tower (x 146 to the square's edge), never the night square
@@ -229,8 +238,8 @@ export function* buildLab(game, kit) {
   const G9 = gate('G9', 201.5, 5.0, 4.6, () => (L8.done ? 1 : 0), { w: 3.4, thick: 0.6 });
   add(new SunRay({ id: 'lastRay', x: 214, y: 12.0, angle: 180, clipByTerminator: term }));
   L.triggers.push(new Trigger({ id: 'dusk', x0: 205.5, x1: 212, fn: () => restoreLook() }));
-  cam(176, { dist: 19, height: 4.8, lookY: 6.4, fov: 40, ahead: 1.0, focusBias: 4 });
-  cam(196, { dist: 19, height: 4.8, lookY: 5.6, fov: 40, ahead: 0.6, focusBias: 1 });
+  cam(176, { dist: 19, distPortrait: 17.2, height: 4.8, lookY: 6.4, fov: 40, ahead: 1.0, focusBias: 4 });
+  frame(186, 200.5, 193, { dist: 19, distPortrait: 17.2, height: 4.8, lookY: 5.6, fov: 40 }); // the ivy 185.2 … L8 199.2
   room('clock', () => { L8.setState({ level: 1, done: true }); ladder9.setState({ t: 1, target: 1 }); G9.setState({ open: 1 }); clock.setState({ t: 0, running: false, expired: false, setT: 6 }); });
   yield 0.7;
 
@@ -243,9 +252,18 @@ export function* buildLab(game, kit) {
   light.lamp(S1);
   const LM1 = add(new Mirror(game, { id: 'LM1', kind: 'wheeled', x: 214.0, alpha: 0, zone: { x0: 212.3, x1: 232.5 }, thetaHint: 305 }));
   kerb(229.8, 229.95); star(229.45);
-  const LL1 = lock('LL1', 231.5, 4.1, { degree: 0 });
+  const LL1 = lock('LL1', 231.5, 4.1, { degree: 0, mount: 0.12 });
   const G10 = gate('G10', 233.0, 2.6, 2.4, () => (LL1.done ? 1 : 0), { kind: 'horseshoe' });
   block(232.6, 233.4, 2.6, 9, { mat: 'plasterBlue', coping: 'limestone' });
+  // the gateway: a wall runs back from the gate to the lamp-keepers' wall, parting the square into two courts (the
+  // bounce, the dazzle), with a limestone coping; LL1 hangs from it on an iron arm
+  vbox(232.6, 0, -8.4, 233.4, 9, FZ - 0.02, 'plasterBlue', { base: 0, grime: 2.5 });
+  vbox(232.48, 9, -8.4, 233.52, 9.16, 1.36, 'limestone', { base: 9, grimeAmt: 0.1 });
+  // limestone jambs frame the portcullis in front and behind (clear of the boy's path), merlons crown the gateway
+  for (const x of [232.4, 233.6]) for (const [z0, z1] of [[FZ - 0.02, -0.75], [0.75, 1.36]]) vbox(x - 0.12, 0, z0, x + 0.12, 2.8, z1, 'limestone', { base: 0, grimeAmt: 0.2 });
+  vbox(232.28, 2.6, 0.75, 233.72, 2.86, 1.4, 'limestone', { base: 2.6, grimeAmt: 0.15 });
+  for (const z of [1.3, -3.1, -7.5]) merlons(K, { x0: 232.5, x1: 233.5, y: 9.16, z, depth: 0.3, h: 0.5, mat: 'plasterBlue' });
+  { const arm = new THREE.CylinderGeometry(0.03, 0.03, 1.1, 6); arm.rotateZ(Math.PI / 2); arm.translate(232.05, 4.1, -0.08); K.add(setColor(arm, 0xffffff), 'iron'); }
   const S2 = E(new Searchlight(game, { id: 'S2', origin: new THREE.Vector3(246, 12, -8), x0: 234.5, x1: 254, aimY: 0.4, speed: 4.0, pause: 1.2, covers: coversB, startX: 254 }));
   light.lamp(S2, { eye: 0.8, dazzle: 7 });
   const LM2 = add(new Mirror(game, { id: 'LM2', kind: 'anchored', x: 235.25, alpha: -30, thetaHint: 225 }));
@@ -299,8 +317,8 @@ export function* buildLab(game, kit) {
   for (const x of [262.5, 288.5, 308.5]) lantern(x, 3.2, FZ + 0.02, { bracketDir: 1, light: true, intensity: 2.0 });
   cam(259, { dist: 16.5, height: 2.2, lookY: 2.4, fov: 38, ahead: 1.6 });
   cam(296, { dist: 16.5, height: 2.2, lookY: 2.6, fov: 38, ahead: 2.0 });
-  cam(311, { dist: 19, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 6 });
-  cam(342, { dist: 19, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 1 });
+  cam(311, { dist: 19, distPortrait: 17.2, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 6 });
+  cam(342, { dist: 19, distPortrait: 17.2, height: 4.6, lookY: 6.0, fov: 40, ahead: 0.8, focusBias: 1 });
   room('wire', () => { bkS.t = 6; bk.enabled = true; bk.x = 270.1; guard.setState({ state: 'asleep', x: 303.6, y: 0, vx: 0, vy: 0, t: 5, facing: 1 }); MM.setState({ x: 330.0, y: 0, alpha: -45 }); ML.setState({ level: 1, done: true }); G11.setState({ open: 1 }); });
   yield 0.85;
 
@@ -349,10 +367,10 @@ export function* buildLab(game, kit) {
     for (const sx of [-1, 1]) { const leg = new THREE.Mesh(setColor(new THREE.CylinderGeometry(0.06, 0.09, 2.6, 8), 0xffffff), game.mats.get('brassAged')); leg.position.set(478 + sx * 1.1, 13.2, -0.6); leg.rotation.z = sx * 0.45; leg.castShadow = true; game.add(leg); } }
   add(new Capstan(game, { id: 'capstan', x: 475.5, y: 12, mirror: H, dir: -1, rate: 6, magnet: { alpha: 3.2, window: 2 }, range: [-10, 40] }));
   add(new SunRay({ id: 'sunrise', x: 500, y: 14.5, angle: 180, clipByTerminator: termD }));
-  cam(346, { dist: 18, height: 3.6, lookY: 5.0, fov: 40, ahead: 0.6, focusBias: 1 });
-  cam(360, { dist: 15, height: 2.4, lookY: 2.8, fov: 38, ahead: 2.2 });
+  frame(346, 353.8, 353.5, { dist: 18, distPortrait: 16.8, height: 3.6, lookY: 5.0, fov: 40 }); // LD1 347.5 … the ray 362
+  cam(358, { dist: 15, height: 2.4, lookY: 2.8, fov: 38, ahead: 2.2 });
   cam(456, { dist: 15, height: 2.4, lookY: 2.8, fov: 38, ahead: 1.6 });
-  cam(466, { dist: 20, height: 6.0, lookY: 8.2, fov: 40, ahead: 0.6, focusBias: 1 });
+  cam(466, { dist: 20, distPortrait: 18, height: 6.0, lookY: 8.2, fov: 40, ahead: 0.6, focusBias: 1 });
   yield 0.95;
 
   // ================================================================ chapter hooks
@@ -374,6 +392,7 @@ export function* buildLab(game, kit) {
     light.setState(light.getState());
   };
   L.safeZone = (x) => (x > 306 && x < 345) || x > 431.5;
+  L.deathColor = (kind) => (kind === 'sunset' ? 0x0b1026 : null); // the last light dies: the screen dims to indigo
   L.mix = (x, g) => {
     const chase = (guard.state === 'chase' || captain.state === 'chase') && !g.player.dead;
     return {

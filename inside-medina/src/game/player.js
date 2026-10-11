@@ -92,7 +92,7 @@ export class Player {
       case 'climb': this.stepClimb(dt, inp); break;
       case 'lever': this.stepLever(dt, inp); break;
       default: if (this.lever) this.stepLever(dt, inp); break;
-      case 'dead': this.deathT += dt; this.stepDeadFall(dt); break;
+      case 'dead': this.deathT += dt; this.stepDeadFall(dt); this.deathTint(); break;
     }
     this.cur.set(b.x, b.y);
   }
@@ -493,6 +493,13 @@ export class Player {
     }
     this.gripT += dt;
     lv.drive(inp, dt, this);
+  }
+
+  // the colour the screen dims to (FULL_GAME §3.2: the sunset clock's death goes to indigo): the chapter's
+  // L.deathColor(kind), held on the game's fade colour once the fade to dark has begun (black otherwise)
+  deathTint() {
+    const g = this.game, c = g.level?.deathColor?.(this.deathKind);
+    if (c !== undefined && c !== null && g.fadeTarget === 1 && g.fadeColor) g.fadeColor.set(c);
   }
 
   stepDeadFall(dt) {

@@ -288,7 +288,8 @@ export const scenarios = [
     },
   },
   {
-    // II-E2: the idle clock kills ('sunset') when the last ray dies; the respawn resets t, T and the look
+    // II-E2: the idle clock kills ('sunset') when the last ray dies and the screen dims to indigo; the respawn resets
+    // t, T and the look
     name: 'idle sunset clock fails, respawn restores t', cp: 9,
     run: async ({ page }) => { await prep(page); return page.evaluate(() => {
       const { M, G, get, until } = __neg;
@@ -298,10 +299,12 @@ export const scenarios = [
       const c = () => G.player.dead; c.allowDeath = true;
       const t = until(c, { x: 0 }, 80);
       const kind = G.player.deathKind, clockT = get('clock').t;
-      M.sim(3.2, { x: 0 });
-      return { started, t, kind, clockT: +clockT.toFixed(2), after: { t: get('clock').t, running: get('clock').running, T: get('T').T, keys: !!G.director.xKeys, mode: G.mode, x: G.player.x } };
+      M.sim(2.0, { x: 0 });
+      const fade = { color: G.fadeColor.getHexString(), target: G.fadeTarget }; // dimming to indigo (§3.2), not black
+      M.sim(1.2, { x: 0 });
+      return { started, t, kind, clockT: +clockT.toFixed(2), fade, after: { t: get('clock').t, running: get('clock').running, T: get('T').T, keys: !!G.director.xKeys, mode: G.mode, x: G.player.x } };
     }); },
-    check: (r) => (r.started && r.kind === 'sunset' && near(r.clockT, 48.1, 0.3) && r.after.t === 0 && !r.after.running && near(r.after.T, 4) && r.after.keys && r.after.mode === 'play' ? true : `clock ${JSON.stringify(r)}`),
+    check: (r) => (r.started && r.kind === 'sunset' && near(r.clockT, 48.1, 0.3) && r.fade.target === 1 && r.fade.color === '0b1026' && r.after.t === 0 && !r.after.running && near(r.after.T, 4) && r.after.keys && r.after.mode === 'play' ? true : `clock ${JSON.stringify(r)}`),
   },
   {
     // II-E2 success: once L8 latches the sun sets over 6 s (the terminator climbs past the last ray), the clock never
