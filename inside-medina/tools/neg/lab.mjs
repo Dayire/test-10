@@ -254,6 +254,42 @@ export const scenarios = [
     check: (r) => (r.plain.dead && r.plain.kind === 'shot' && r.dazzle.shielded && !r.dazzle.dead && r.dazzle.x > 257 ? true : `dazzle ${JSON.stringify(r)}`),
   },
   {
+    // III-B2 played as a player does: tucked at LM2 when the dazzle starts, he reacts after a delay, steps back, hops
+    // over the stand and sprints out of the square (x 258). The crossing's slack is the latest start that still gets
+    // him out unseen; a human needs the reaction and the hop, which the run above (teleported past the stand) skips.
+    // Every start up to that slack must survive, and the slack must leave a player at least 3 s (6 s with assist; measured
+    // at the integration: 4 s and 7.5 s, the lamp's sweep starting again behind him)
+    name: 'the dazzle leaves time to cross', cp: 10,
+    run: async ({ page }) => { await prep(page); return page.evaluate(() => {
+      const { M, G, get, until } = __neg;
+      const one = (delay, assist) => {
+        M.checkpoint(10); G.assist = assist;
+        get('LL1').setState({ level: 1, done: true }); get('G10').setState({ open: 1 });
+        get('LM2').setState({ x: 235.25, y: 0, alpha: -45 });
+        M.teleport(234.73, 0, 1);
+        until(() => get('S2').dazzled > 0, { x: 0 }, 15);
+        const S = get('S2'); let t = 0;
+        const step = (inp) => { M.sim(1 / 120, inp); t += 1 / 120; };
+        while (t < delay && !G.player.dead) step({ x: 0 });
+        while (G.player.x > 234.2 && t < 30 && !G.player.dead) step({ x: -1 });
+        // over the stand from wherever he stands: run, jump at its face, climb if he hangs
+        while (!(G.player.x > 236.2 && G.player.state === 'ground') && t < 30 && !G.player.dead) { const p = G.player; step({ x: 1, y: p.state === 'hang' ? 1 : 0, jump: p.state === 'ground' && p.x > 234.15 && p.x < 234.7 && p.y < 0.3 }); }
+        const over = +t.toFixed(2);
+        while (G.player.x < 258 && t < 30 && !G.player.dead) step({ x: 1 });
+        const out = { delay, over, out: +t.toFixed(2), dead: G.player.dead, x: +G.player.x.toFixed(1), lamp: S.state };
+        // past the square: the lamp may not catch him on the way out
+        for (let i = 0; i < 120 && !G.player.dead; i++) step({ x: 1 });
+        out.dead = G.player.dead; G.assist = false;
+        return out;
+      };
+      // the latest start (0.5 s steps) from which he gets out; each run: start delay / over the stand / out (s)
+      const scan = (assist) => { const runs = []; let slack = -1; for (let d = 0; d <= 8; d += 0.5) { const r = one(d, assist); runs.push(`${d}/${r.over}/${r.out}${r.dead ? ` dead ${r.x}` : ''}`); if (r.dead) break; slack = d; } return { slack, runs }; };
+      const plain = scan(false), assist = scan(true);
+      return { slack: plain.slack, slackAssist: assist.slack, plain: plain.runs, assist: assist.runs };
+    }); },
+    check: (r) => (r.slack >= 3 && r.slackAssist >= 6 ? true : `crossing slack ${r.slack} s (assist ${r.slackAssist} s): ${JSON.stringify(r)}`),
+  },
+  {
     // III-B2: a dazzle lasts 7 s (10.5 s with assist) and then ends: the beam settles back onto the street without
     // a jump, the lamp sweeps away from the rest that blinded it, and it sees the boy again within one sweep cycle
     name: 'a dazzle ends and the lamp sees again', cp: 10,
