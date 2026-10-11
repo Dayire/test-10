@@ -130,11 +130,16 @@ Each entry: file, change, reason, test. Everything L ships works without them (f
 
 ## 8. `src/render/post.js` (P): a fade colour shows darker than its hex
 
-- **Change.** In the final pass, mix the fade in display space: `p = mix(p, toSRGB(uFadeColor), uFade);` (or upload
-  `P.fadeColor` converted with `.convertLinearToSRGB()` before `f.uFadeColor.value.copy(...)`).
+- **Change.** In the final pass, mix the fade in display space: `p = mix(p, toSRGB(uFadeColor), uFade);` (this form,
+  in the shader: L's stopgap below keys on the old line).
 - **Reason.** `P.fadeColor` is a `THREE.Color`, so `set('#0b1026')` stores the linear value (0.003, 0.005, 0.019), but
   the shader mixes it into `p` after `toSRGB`: the screen ends at (1, 1, 5) instead of (11, 16, 38). The sunset
   death's indigo (FULL_GAME §3.2, the lab's `L.deathColor`) and Chapter II's `#0b1026` exit fade read as black; any
   fade colour is darker than designed (Chapter I's warm-white fade is light enough to hide it).
-- **Test.** `?chapter=lab&cp=9`: walk past x 176, set the clock to its last 0.05 s, sim 2.05 s; a screen pixel is
-  about (11, 16, 38) (today (1, 1, 5)).
+- **L's stopgap.** Until this lands, `Player.deathTint` hands the death colour over display-encoded
+  (`convertLinearToSRGB()`) while the final shader still contains `p = mix(p, uFadeColor, uFade)`, so the lab's
+  sunset death already ends on (11, 15, 37). With the change above the check finds the new line and stops
+  encoding by itself; nothing else needs to move. (Chapter fades set by `game.js`, such as an exit colour, are
+  still too dark until it lands.)
+- **Test.** `node tools/negative.mjs --chapter lab --only "idle sunset"` reads the screen at the end of the fade
+  and expects (11, 16, 38) ± 3; it passes before and after the change.

@@ -290,21 +290,43 @@ export const scenarios = [
   {
     // II-E2: the idle clock kills ('sunset') when the last ray dies and the screen dims to indigo; the respawn resets
     // t, T and the look
+    // the screen dims to indigo #0b1026 (§3.2), not black: read off the screen once the fade is complete
     name: 'idle sunset clock fails, respawn restores t', cp: 9,
-    run: async ({ page }) => { await prep(page); return page.evaluate(() => {
-      const { M, G, get, until } = __neg;
-      M.teleport(177, 0, 1);
-      M.sim(0.2, { x: 0 });
-      const started = get('clock').running;
-      const c = () => G.player.dead; c.allowDeath = true;
-      const t = until(c, { x: 0 }, 80);
-      const kind = G.player.deathKind, clockT = get('clock').t;
-      M.sim(2.0, { x: 0 });
-      const fade = { color: G.fadeColor.getHexString(), target: G.fadeTarget }; // dimming to indigo (§3.2), not black
-      M.sim(1.2, { x: 0 });
-      return { started, t, kind, clockT: +clockT.toFixed(2), fade, after: { t: get('clock').t, running: get('clock').running, T: get('T').T, keys: !!G.director.xKeys, mode: G.mode, x: G.player.x } };
-    }); },
-    check: (r) => (r.started && r.kind === 'sunset' && near(r.clockT, 48.1, 0.3) && r.fade.target === 1 && r.fade.color === '0b1026' && r.after.t === 0 && !r.after.running && near(r.after.T, 4) && r.after.keys && r.after.mode === 'play' ? true : `clock ${JSON.stringify(r)}`),
+    run: async ({ page }) => {
+      await prep(page);
+      const r = await page.evaluate(() => {
+        const { M, G, get, until } = __neg;
+        M.teleport(177, 0, 1);
+        M.sim(0.2, { x: 0 });
+        const started = get('clock').running;
+        const c = () => G.player.dead; c.allowDeath = true;
+        const t = until(c, { x: 0 }, 80);
+        const kind = G.player.deathKind, clockT = get('clock').t;
+        M.sim(2.0, { x: 0 });
+        return { started, t, kind, clockT: +clockT.toFixed(2), target: G.fadeTarget, color: G.level.deathColor?.(kind) };
+      });
+      await page.waitForFunction(() => __medina.game.fade >= 0.999, null, { timeout: 60000, polling: 50 }).catch(() => {});
+      await page.evaluate(() => new Promise((res) => { let n = 3; const f = () => (n-- <= 0 ? res() : requestAnimationFrame(f)); requestAnimationFrame(f); }));
+      const png = (await page.screenshot()).toString('base64');
+      r.screen = await page.evaluate(async (b64) => {
+        const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode();
+        const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height;
+        const x = cv.getContext('2d'); x.drawImage(img, 0, 0);
+        // the median of a grid of pixels (the grain moves single pixels by a step or two)
+        const px = [];
+        for (let i = 1; i < 8; i++) for (let j = 1; j < 6; j++) px.push(Array.from(x.getImageData(Math.floor(img.width * i / 8), Math.floor(img.height * j / 6), 1, 1).data).slice(0, 3));
+        const med = (k) => px.map((p) => p[k]).sort((a, b) => a - b)[px.length >> 1];
+        return [med(0), med(1), med(2)];
+      }, png);
+      r.after = await page.evaluate(() => {
+        const { M, G, get } = __neg;
+        M.sim(1.2, { x: 0 });
+        return { t: get('clock').t, running: get('clock').running, T: get('T').T, keys: !!G.director.xKeys, mode: G.mode, x: G.player.x };
+      });
+      return r;
+    },
+    check: (r) => (r.started && r.kind === 'sunset' && near(r.clockT, 48.1, 0.3) && r.target === 1 && r.color === 0x0b1026 && near(r.screen[0], 11, 3) && near(r.screen[1], 16, 3) && near(r.screen[2], 38, 3)
+      && r.after.t === 0 && !r.after.running && near(r.after.T, 4) && r.after.keys && r.after.mode === 'play' ? true : `clock ${JSON.stringify(r)}`),
   },
   {
     // II-E2 success: once L8 latches the sun sets over 6 s (the terminator climbs past the last ray), the clock never
