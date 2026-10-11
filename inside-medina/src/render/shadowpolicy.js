@@ -23,7 +23,7 @@ let _W = new Float32Array(0), _P = _W, _I = new Uint32Array(0), _K = new Int32Ar
 const IDENTITY = new THREE.Matrix4();
 const bandOf = (z) => { let i = 0; while (i < BANDS.length && z < BANDS[i]) i++; return i; };
 const box6 = () => [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
-const _b = new THREE.Box3(), _sb = new THREE.Box3(), _fr = new THREE.Frustum(), _pm = new THREE.Matrix4();
+const _b = new THREE.Box3(), _fr = new THREE.Frustum(), _pm = new THREE.Matrix4();
 const _d = new THREE.Vector3(), _a = new THREE.Vector3(), _v = new THREE.Vector3(), _e = new THREE.Vector3();
 const SPOT_HZ = 15;
 // one material for every proxy: front faces, so the depth pass draws back faces as three does for opaque meshes
@@ -37,7 +37,7 @@ PROXY_MAT.name = 'shadowProxy';
 function proxyInFrustum(frustum) {
   const u = this.userData;
   if (!SHADOW_PASS.on || (frustum === SHADOW_PASS.sun && !u.sun) || !frustum.intersectsBox(u.box)) return false;
-  if (frustum === SHADOW_PASS.sun) { u.range = u.sunRange; return true; }
+  if (frustum === SHADOW_PASS.sun) { u.range[0] = u.sunRange[0]; u.range[1] = u.sunRange[1]; return true; }
   let a = -1, b = -1;
   for (let i = 0; i < u.subs.length; i++) if (frustum.intersectsBox(u.subs[i].box)) { if (a < 0) a = i; b = i; }
   if (a < 0) return false;

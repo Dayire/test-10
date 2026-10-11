@@ -362,6 +362,21 @@ if (checks || only === 'checks') {
       out.ok = out.softOn.medium && out.softOn.shared && out.softOn.shaftOnBeams && Object.values(emitted).every((n) => n > 0) && pv && out.shafts.moved && out.shafts.restored && out.dispose.ok && out.particlesClear.ok && out.particlesWarm.ok;
       return out;
     });
+    // medium's shadow schedule at 60 fps under the courtyard lamp: the sun's map every other frame, the lamp's at 15 Hz
+    // on frames the sun skips, never both in one frame (that is the forced worst frame, which perf gates separately)
+    if (want('schedule')) result.checks.schedule = await page.evaluate(async () => {
+      const M = window.__medina, G = M.game, rs = G.world.rs, R = rs.renderer;
+      const frame = () => new Promise((res) => { const n = window.__frames; const t = () => (window.__frames > n + 1 ? res() : requestAnimationFrame(t)); t(); });
+      rs.setTier('medium'); M.photo(97, 0, 1, 0.4); await frame(); await frame();
+      const log = []; let cur = null;
+      const sm = R.shadowMap, smr = sm.render;
+      sm.render = function (lights, ...a) { if (cur && (this.autoUpdate || this.needsUpdate)) for (const l of lights) if (l.castShadow && (l.shadow.autoUpdate || l.shadow.needsUpdate)) cur.add(l.isDirectionalLight ? 'sun' : 'spot'); return smr.call(this, lights, ...a); };
+      const now = performance.now; let t = now.call(performance); performance.now = () => t;
+      try { for (let i = 0; i < 24; i++) { t += 1000 / 60; cur = new Set(); rs.render(G.scene, G.camera, G.time + i / 60); log.push(cur); cur = null; } } finally { performance.now = now; sm.render = smr; }
+      rs.setTier('low'); await frame();
+      const sun = log.filter((f) => f.has('sun')).length, spot = log.filter((f) => f.has('spot')).length, both = log.filter((f) => f.has('sun') && f.has('spot')).length;
+      return { frames: log.length, sun, spot, both, ok: both === 0 && Math.abs(sun - 12) <= 1 && spot >= 4 && spot <= 7 };
+    });
     // the merged boy casts exactly the parts authored as casters (not his ears and nose); a levelkit lantern casts
     // through the static proxies until it moves past a sway, then on its own (a scripted lamp keeps a live shadow)
     if (want('casters')) result.checks.casters = await page.evaluate(async () => {
