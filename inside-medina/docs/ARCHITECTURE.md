@@ -93,7 +93,9 @@ chapter-lived: the unload removes them. Anything a chapter (or one of its entiti
 
 Levelkit helpers (`src/game/levelkit.js`): `FZ` (facade line −1.6), `solid, vbox, ground, block, lantern, cp,
 cam, shaft, facades, farBuilding, skyline({exclude, exclude3, excludeTrees, ...}), cypress, rubblePile,
-crateMeshStatic, kerb(x0, x1, h = 0.15), killZone(x0, x1, y0, y1, kind)`.
+crateMeshStatic, kerb(x0, x1, h = 0.15), killZone(x0, x1, y0, y1, kind), staticCaster(obj)`. `lantern(x, y, z, {...,
+staticCaster = true})` casts through the static shadow proxies (it only sways); pass `staticCaster: false` for a lamp
+a script moves or lowers. The skyline's rows 3 and 4 and its domes are the far set (`farBuilding(..., {far: true})`).
 
 ### 4.3 The level object L
 
@@ -134,9 +136,13 @@ Loads are queued: each runs after the previous one settles, in call order.
 8. FX on the root (`Shafts(root, director.sunDir, G)`, its dust, `Dust(root)`, `Flock(root, mats, L.flockSpots)`), glow sprites, pool sources;
 9. camera keys, sorted checkpoints, the initial snapshot, `L.prepare(cp)`, the checkpoint snapshot, spawn;
 10. the scene's programs are issued (hidden objects too), `world.finishBake(jobs)` draws the surfaces (each waits
-    for its own program only), then `renderer.compileAsync` with hidden objects made visible and one warm-up render.
+    for its own program only), `mats.paintPalette(renderer)` reads the far set's colours from the maps just drawn,
+    then `renderer.compileAsync` with hidden objects made visible and one warm-up render.
     On a software rasteriser shader compiles are most of a load, and this order keeps the driver busy while the
-    level is built (FULL_GAME §8.6);
+    level is built (FULL_GAME §8.6). A failure anywhere from step 6 on draws the surfaces it prepared before the error
+    goes on to the fallback (`settleBake`): `world.tex` already names them, so a later load would skip them. If even
+    that fails they are rolled back (`world.cancelBake(jobs)`: targets and programs disposed, names and the cached
+    materials holding them dropped), and the next load prepares them again;
 11. `enterChapter`: `save.begin` (not for `boot` and `title`: the title shows a place without choosing it; the boot's
     place becomes the save's when play begins from it, `beginOnPlay`), `audio.setChapter?.()`, `chapterStart`, the opening shot (title on boot), fade in, the mix faded back in (`audioIn`), card hidden, `suspended` cleared. `openingShot()`: under the title a `menuShot` whose `cp` is this checkpoint; otherwise `intro` at checkpoint 0 only. A start at a later checkpoint has no establishing shot (it would frame the wrong place): the title shows the rail camera on the boy at his checkpoint, and without the title play begins at once.
 
@@ -287,7 +293,7 @@ source takes its light at full intensity in the first frame.
 
 **Materials and surfaces**: `mats.register(defs)`, `mats.setEnv(tex, scale)`, `registerSurfaces(defs)`,
 `SURFACES`, `bakeAsync(baker, names, onProgress, out, slice)`, `world.bake(names, onProgress)`,
-`world.prebake(names)` → jobs and `world.finishBake(jobs, onProgress)` (the loader's split bake; a surface's program
+`world.prebake(names)` → jobs, `world.finishBake(jobs, onProgress)` and `world.cancelBake(jobs)` (the loader's split bake; a surface's program
 evaluates `surf()` once into the map and a float scratch target, and one shared program derives the normal and ORM
 maps, matching the old five-evaluation shader within 1/255),
 `world.useEnvironment(tex)` (the map goes to the material cache, to GLB-override templates and to every scene
@@ -296,15 +302,22 @@ uniforms stand), `world.rebuildEnvironment()` (both, then disposes the old map),
 `needs` is baked on first use with a warning.
 
 **Static batches** (`Batcher` in `src/assets/geom.js`): geometry merges by material, shadow flags and x chunk; the
-chunk width follows depth (centre z > −4: 0.6 × `chunk`; to −15: `chunk`; beyond: 2 × `chunk`), and the main pass
-culls a batch by its world box. **Lite geometry**: the loader sets `DETAIL.lite` (`setDetail`) around the build on a
-tier whose `QUALITY` entry has `lite` (low): arch outlines, extrusion curves, lathes and tubes take about half their
-segments and bevels under 3 cm become plain edges; colliders are separate, so play is unchanged, and a tier change
-mid-chapter keeps the geometry the chapter was built with. **Shadow casters**: the shadow policy merges static
-batches into proxies (and any mesh with `userData.staticCaster`, such as the hanging lanterns that only sway:
-`levelkit.staticCaster(obj)`); in the sun's pass a proxy is drawn only when its box swept along the light down to the
-chapter's lowest geometry meets the view; on low (`alphaCasters: false`) alpha-tested static batches (ivy, lattice)
-stop casting. **Characters** (`src/assets/character.js`): the rigid parts merge into one `SkinnedMesh` per material
+chunk width follows depth (`BANDS`: centre z > −4: 0.6 × `chunk`; to −15: `chunk`; beyond: 2 × `chunk`), and the main
+pass culls a batch by its world box. **The low tier** (`QUALITY.low.lite`) builds for its draw budget: `DETAIL.lite`
+(`setDetail`) around the build makes arch outlines, extrusion curves, lathes and tubes take about half their segments
+and bevels under 3 cm plain edges; the street and the play plane share 1 × `chunk` batches (`LITE_BANDS`); and geometry
+added with `{set: 'far'}` (the skyline's far rows and domes) of a plain opaque material joins the far set, one
+`farSet` material per chunk whose vertices name their source material in a palette (`mats.paletteIndex`, painted by
+`mats.paintPalette` from the smallest mip of each baked map, times the material's colour; alpha = metalness): the far
+city keeps its colours, grime, lighting, shadows and fog and loses only texture detail. Colliders are separate, so
+play is unchanged, and a tier change mid-chapter keeps the geometry the chapter was built with. **Shadow casters**:
+the shadow policy merges static batches into proxies (and any mesh with `userData.staticCaster`, such as the hanging
+lanterns that only sway: `levelkit.staticCaster(obj)`; one that later moves more than 8 cm leaves the proxies and casts
+on its own from the next scan). A proxy is a 12 m tile of x × a depth band, its triangles stored by 3 m sub-tile
+(triangles wider than 3 m go to 96 m tiles of their own), so each shadow pass draws only the run of sub-tiles it
+needs: a spot's pass those inside its frustum, the sun's those whose shadow can land in view (the box swept along the
+light down to the lowest geometry under it, tested plane by plane against the camera frustum); on low
+(`alphaCasters: false`) alpha-tested static batches (ivy, lattice) stop casting. **Characters** (`src/assets/character.js`): the rigid parts merge into one `SkinnedMesh` per material
 bound to the joints (weight 1 per vertex), so a pose is exactly the jointed one in 5-7 draws, and every casting part
 merges once more into `rig.shadowMeshes` (one per material side), the only ones drawn in the shadow passes; the joints stay
 plain groups (`rig.j`), `rig.meshes` lists the per-material meshes, and the loader disposes a chapter's bone textures.

@@ -108,19 +108,24 @@ side. Tested by the foundation scenario `LUT looks follow the time of day` (`?ch
 
 ## 10. The low tier's budget (FULL_GAME §8.5): characters and the main pass (done, I0)
 
-**Done (I0).** All three, plus four levers of the integrator's own; every Chapter I spot is now within the low and
-medium budgets, measured as the heaviest frame (a shadow refresh plus the main pass). The before/after table is in
-`docs/systems/graphics.md` ("Integration run (I0)").
-- Characters: one `SkinnedMesh` per material bound to the joints (the boy: 6 draws per pass, plus the scarf's tail).
-- Lanterns: `levelkit.staticCaster(obj)` flags the levelkit lantern and the hero alley's.
-- The main pass: instead of a far set, batches chunk by depth (0.6 × chunk wide near the play plane, 2 × in the
-  far city) and are culled by their box, not a bounding sphere that reached far outside the view: 30-40 % fewer
-  triangles on every tier for a few more draws. On low, chapters build lighter geometry (`DETAIL.lite`: half the
-  curve segments, no bevels under 3 cm) and alpha-tested static batches stop casting.
-- The sun pass draws a proxy tile only when its box swept along the light down to the chapter's lowest geometry
-  meets the view (tiles high on the rooftops fell inside the sun's frustum without their shadow reaching it).
-- The rubble pile over the crawl tunnel turned its stones about the world origin (up to 50 m into the sky); fixed,
-  which also shrank the shadow tiles it inflated.
+**Done (I0).** All three, plus levers of the integrator's own. Measured with `node tools/perf.mjs --tiers low,medium`
+as the heaviest frame at every Chapter I spot (the six tour spots, the hero alley and every frame of the finale): every
+shadow map refreshed in the same frame, over a full sweep of the courtyard lamp, at 640 × 360 and as a phone in
+landscape (844 × 390). The table is in `docs/systems/graphics.md` ("Integration run (I0)").
+- Characters: one `SkinnedMesh` per material bound to the joints (the boy: 6 draws per pass, plus the scarf's tail);
+  the shadow mesh takes only the parts authored as casters.
+- Lanterns: `levelkit.lantern()` flags its lantern with `staticCaster` (`{staticCaster: false}` for a lamp a script
+  moves), and so does the hero alley's; a flagged caster that moves more than 8 cm leaves the proxies.
+- The cheaper far set on low: the skyline's far rows and domes merge every plain opaque material into one `farSet`
+  draw per chunk (a palette of each material's mean albedo, painted after the bake), and the street and the play
+  plane share 1 × chunk batches (`LITE_BANDS`): the finale on a phone in landscape went from 145 to 114 calls.
+- On every tier batches chunk by depth and are culled by their box; on low, chapters build lighter geometry
+  (`DETAIL.lite`) and alpha-tested static batches stop casting.
+- Shadow proxies draw only the sub-tiles (3 m of x) a pass needs; triangles wider than a sub-tile get tiles of their
+  own; the sun's view test sweeps a box down to the lowest geometry under it and tests the swept shape plane by
+  plane. Medium's heaviest frame (the balcony, phone landscape) went from 655 k to 491 k triangles.
+- The rubble over the crawl tunnel is left out: its stones never showed (they turned about the world origin, which
+  also inflated the shadow tiles) and, placed where meant, read as huge floating blocks.
 
 P now merges the level's static batches into shadow-only proxies (12 m tiles × depth bands, 16-bit positions,
 `src/render/shadowpolicy.js`), culls them against the view along the sun, and on low / medium drops the ones

@@ -50,7 +50,7 @@ class, not MSAA off.
 | shadow reach (proxies behind the play plane) | 8 m | 14 m | all | all |
 | small-caster cull | on | on | off | off |
 | alpha-tested static casters (ivy, lattice) | off | on | on | on |
-| geometry built for the tier (`lite`) | lighter | full | full | full |
+| geometry built for the tier (`lite`) | lighter, far set, 2 depth bands | full | full | full |
 | DOF taps (half res) | off | 16 | 36 | 48 |
 | god rays | off | on | on | on |
 | soft beams and shafts | off (hard additive) | on | on | on |
@@ -61,10 +61,15 @@ class, not MSAA off.
 The sky is drawn after the opaques on every tier, the flock is instanced and characters carry the rim
 term on every tier. A chapter loaded on low is built with lighter geometry (`DETAIL.lite` in
 `src/assets/geom.js`: arch outlines, extrusion curves, lathes and tubes with about half their segments, no bevels
-under 3 cm; set by the chapter loader around the build), which halves its triangles; a tier change mid-chapter
-keeps the geometry the chapter was built with, as it keeps the texture scale. On every tier the static batches
-chunk by depth (0.6 × chunk near the play plane, 2 × in the far city) and are culled by their world box, the
-characters draw one skinned mesh per material, and hanging lanterns cast through the merged proxies. Without `EXT_color_buffer_half_float`/`float` (or with `?ldr`), the renderer runs the
+under 3 cm; set by the chapter loader around the build), which halves its triangles. Low also spends triangles to
+save draws: the street and the play plane share 1 × chunk batches (`LITE_BANDS`), and the far city (the skyline's
+rows 3 and 4 and its domes, added with `{set: 'far'}`) merges every plain opaque material into one `farSet` draw per
+chunk, its vertices naming their material in a 64-entry palette painted after the bake from the smallest mip of each
+baked map (times the material's colour; alpha = metalness). The far city keeps its colours, grime, lighting, shadows
+and fog and loses only texture detail, which low's half-size textures and the haze had mostly taken already. A tier
+change mid-chapter keeps the geometry the chapter was built with, as it keeps the texture scale. On every tier the
+static batches chunk by depth (0.6 × chunk near the play plane, 2 × in the far city) and are culled by their world
+box, the characters draw one skinned mesh per material, and hanging lanterns cast through the merged proxies. Without `EXT_color_buffer_half_float`/`float` (or with `?ldr`), the renderer runs the
 low tier on RGBA8 targets: every material stores `c / (1 + c)` (one line appended to `fog_fragment`) and
 the post chain decodes it, so HDR bloom and the grade survive.
 
@@ -135,8 +140,17 @@ milliseconds per frame (`rs.shadows.building`), and until then its batches cast 
 are freed once uploaded, so a restored context drops and rebuilds them (`rs.shadows.reset()`), and the shadow
 pass hook follows the new `renderer.shadowMap` three creates on a restore. A root whose set of batches or their
 visibility changes is rebuilt; set `userData.noProxy` on a batch that must keep casting on its own.
-In the sun's map a proxy also needs its shadow to land in view: its box swept along the light to below the
-ground must meet the camera frustum (3 m margin), which changes nothing on screen. On low/medium
+A tile's triangles are stored by sub-tile (3 m of x), and each shadow pass draws only the run of sub-tiles it needs
+(`onBeforeShadow` sets the draw range): a spot's pass the ones inside its frustum (the searchlight's narrow cone
+crosses a corner of most tiles it meets), the sun's the ones whose shadow can land in view. Triangles wider than a
+sub-tile (long wall faces, cornices) go to 96 m tiles of their own, so they no longer stretch a tile's box over their
+whole length. Sources are merged with their world matrix brought up to date first (a root's first frame has never been
+rendered) and snapshotted for both passes of the merge; a `staticCaster` source that later moves more than 8 cm from
+where it was merged leaves the proxies and casts on its own from the next scan.
+In the sun's map a proxy (and each sub-tile) also needs its shadow to land in view: its box swept along the light
+down to the lowest geometry under it (per 12 m column of x, over the columns the light carries it across) must meet
+the camera frustum, tested plane by plane (the swept box is the box plus a segment, so its reach along a plane's
+normal is the box's plus the segment's) with 1.5 m to spare, which changes nothing on screen. On low/medium
 (`shadowReach` 8 / 14 m) a proxy whose shadow, from its front top edge along the current sun, cannot land
 within that many metres behind the play plane stops casting into the sun's map: background roofs lose the
 shadows of buildings further back. The sun direction is read every frame, so a low sun keeps its long shadows.
@@ -234,12 +248,16 @@ node tools/perf.mjs --port 5174 --tiers low,medium,high --out after.json --compa
 node tools/perf.mjs --port 5174 --only checks --shots /tmp/shots
 ```
 
-The table visits the six Chapter I tour spots per tier and reports shadow-pass vs main calls, triangles,
+The table visits the six Chapter I tour spots and the hero alley per tier (low and medium also as a phone in
+landscape, 844 × 390, unless `--w`/`--h` pick one viewport) and reports shadow-pass vs main calls, triangles,
 post passes and programs, the flock's share (with and without every bird in view), and shadow calls on a
 simulated 60 fps clock (the rAF loop cannot interleave with that synchronous loop, so time-based
 policies are measured at a real cadence; SwiftShader frames are far slower than 33 ms). After the table it
-prints the §8.5 budget per tier and spot (shadow + main calls, triangles; the heaviest frame, with the 60 fps average
-beside it) and fails the run when a spot is over (and when a check fails or is pending). It
+prints the §8.5 budget per tier and spot (shadow + main calls, triangles) and fails the run when a spot is over (and
+when a check fails or is pending). The gate is the heaviest frame: every shadow map refreshed in one frame
+(`P.forced`: the game's own render, so the lamp, the camera and the characters update, while the sim stands still),
+over a full sweep of the courtyard lamp wherever its spot is lit (`P.sweep`, 9 aims), plus every frame of the
+chapter's finale from its last checkpoint (`P.finale`, every 0.5 s); the 60 fps average is printed beside it. It
 runs on any build, so the "before" column comes from the pre-presentation tree. The checks: FXAA on low,
 tier round trip (targets, textures, geometries, programs, post materials), programs stable after warm-up,
 frame cap (10 s of 120/144 Hz timestamps), the light state stable across frames with the soft pass on
@@ -259,36 +277,52 @@ clock `performance.now` follows, GPU timer hidden: the tier and the resolution m
 
 ### Integration run (I0)
 
-SwiftShader, 640 × 360, `tex=0.1`, `node tools/perf.mjs --tiers low,medium,high --checks`. "Before" is the merged F + P
-tree (`4c166b2`). Each cell is the heaviest frame at the spot: shadow calls of a frame that refreshes the maps (every
-frame on low at its own 30 fps and on high; every other frame on medium at 60 fps) plus the main pass, and its
-triangles; `perf.mjs` now fails a run when a spot is over its tier's budget.
+SwiftShader, `tex=0.1`, `node tools/perf.mjs --tiers low,medium,high` (low and medium at 640 × 360 and as a phone in
+landscape, 844 × 390; high at 640 × 360). Each cell is the heaviest frame at the spot, calls (shadow + main) /
+triangles: every shadow map refreshed in the same frame (as on low's own 30 fps frames, on high, and on any tier after
+a camera snap), over a full sweep of the courtyard lamp wherever its spot is lit; the finale cell is the heaviest frame
+of the whole DepthWalk, sampled every 0.5 s. `perf.mjs` fails a run when any cell is over its tier's budget.
 
-| tier | budget (calls / tris) | souk | raised | rooftops | courtyard | balcony | chase |
-|---|---|---|---|---|---|---|---|
-| low | 130 / 400 k | 151 / 393 k → **112 / 238 k** | 154 / 540 k → **112 / 236 k** | 146 / 499 k → **103 / 206 k** | 147 / 484 k → **105 / 217 k** | 181 / 668 k → **115 / 258 k** | 157 / 575 k → **117 / 237 k** |
-| medium | 180 / 550 k | 157 / 399 k → **123 / 353 k** | 159 / 545 k → **125 / 361 k** | 149 / 506 k → **114 / 389 k** | 148 / 479 k → **112 / 393 k** | 185 / 673 k → **126 / 443 k** | 162 / 580 k → **131 / 432 k** |
-| high | 240 / 700 k | 161 / 406 k → **127 / 360 k** | 162 / 549 k → **128 / 365 k** | 154 / 511 k → **119 / 395 k** | 187 / 657 k → **155 / 570 k** | 203 / 681 k → **160 / 452 k** | 172 / 588 k → **141 / 439 k** |
+| tier | budget | souk | raised | rooftops | courtyard | balcony | chase | hero alley | finale |
+|---|---|---|---|---|---|---|---|---|---|
+| low | 130 / 400 k | 97 / 210 k | 87 / 202 k | 77 / 201 k | 94 / 257 k | 108 / 289 k | 105 / 263 k | 105 / 249 k | 113 / 268 k |
+| low, 844 × 390 | 130 / 400 k | 108 / 239 k | 94 / 207 k | 96 / 252 k | 105 / 287 k | 115 / 296 k | 120 / 280 k | 111 / 254 k | 115 / 270 k |
+| medium | 180 / 550 k | 123 / 290 k | 125 / 284 k | 113 / 347 k | 128 / 453 k | 135 / 459 k | 132 / 396 k | 143 / 407 k | 149 / 413 k |
+| medium, 844 × 390 | 180 / 550 k | 132 / 296 k | 137 / 314 k | 139 / 488 k | 137 / 485 k | 146 / 493 k | 151 / 457 k | 151 / 410 k | 155 / 415 k |
+| high | 240 / 700 k | 126 / 297 k | 127 / 288 k | 118 / 353 k | 155 / 462 k | 173 / 471 k | 141 / 404 k | 146 / 411 k | 156 / 425 k |
 
-The 60 fps averages are lower still (low 95–108 calls, 172–211 k). The courtyard lamp's map refreshes at 15 Hz and
-the table catches it only when that refresh falls in the measured frames; with every map forced to refresh in the
-same frame (`rs.shadows.invalidate()`), the worst spot on both tiers is the courtyard: 116 calls (90 main, 18 sun,
-8 lamp) and 277 k triangles on low, 126 calls and 522 k triangles on medium, inside both budgets. What brought it there:
+The first integration pass had gated six spots at 16:9 on an average of a simulated 60 fps run. Measured this way it
+was over: low 135 calls at the chase on a phone, 131 / 138 at the hero alley, 131–147 through the finale; medium
+563 k triangles at the courtyard as the lamp swept (and, once the lanterns' shadows were merged where they hang, 655 k
+at the balcony on a phone). What brought every cell under:
 
 | lever | where | effect |
 |---|---|---|
-| merged characters | `character.js` | the boy: 22 → 6 main draws, 21 → 2 per shadow pass (`rig.shadowMeshes`, one per material side) |
-| static lanterns | `levelkit.staticCaster` | the swaying lanterns cast through the proxies: −24 shadow draws at the courtyard |
+| merged characters | `character.js` | the boy: 22 → 6 main draws, 21 → 2 per shadow pass (`rig.shadowMeshes`, one per material side, authored casters only) |
+| static lanterns | `levelkit.lantern`, `staticCaster` | the swaying lanterns cast through the proxies: −24 shadow draws at the courtyard |
 | depth chunks, box culling | `geom.js` `Batcher` | main-pass triangles −30 to −40 % on every tier for 0–6 more draws |
-| swept-box sun cull | `shadowpolicy.js` | proxy tiles far along the light (rooftops whose shadow never reaches the view) leave the sun's pass |
+| far set (low) | `Batcher` `far`, `mats.farSet` | the skyline's far rows and domes in one palette draw per chunk: −8 to −14 draws (phone) |
+| two depth bands (low) | `LITE_BANDS` | the street and the play plane share 1 × chunk batches: −5 to −18 draws for +11 to +25 k triangles (phone) |
+| sub-tile shadow ranges | `shadowpolicy.js` | a pass draws only the 3 m sub-tiles it needs; wide triangles have tiles of their own |
+| swept-shape sun cull | `shadowpolicy.js` | the swept box tested plane by plane, down to the lowest geometry under it. With the sub-tiles: the balcony's shadow triangles 194 → 109 k on low, its sun pass 210 → 127 k and lamp pass 103 → 90 k on medium (phone) |
 | sway counts as static | `shadowpolicy.js` | the rolled-up rope ladder (16 meshes) stops casting on low and medium |
 | lite geometry (low) | `geom.js` `DETAIL` | half the curve segments, no bevels under 3 cm: low's triangles halve |
 | no cut-out shadows (low) | `QUALITY.low.alphaCasters` | ivy and lattice batches stop casting on low |
 
-High is unchanged on screen: the tour spots at 960 × 540 match the pre-integration tree within grain and the
-flock's random positions, except the crawl tunnel, where the rubble pile now stands over the lintel (its stones had
-been turning about the world origin, 50 m into the sky). Programs: 45 / 51 / 54 on low / medium / high (the skinned
-character variants), stable after warm-up.
+The `shadowProxies` check renders each spot with and without the proxies (high: mean difference ≤ 0.02/255, at most
+0.021 % of pixels differ by more than 16/255; low ≤ 0.055/255): the culling changes nothing on screen. Two bugs of the
+first pass are fixed with it: the lanterns had been merged at the world origin (their world matrices were read before
+the chapter's first render), so they cast no shadow where they hang; and the rubble pile over the crawl tunnel, whose
+stones the first pass had turned about their own centres, stood as huge floating blocks over the tunnel, the hero
+alley and the finale. Its stones and beams had never shown before (they turned about the world origin, 50 m off
+screen), so they are left out and the tunnel looks as reviewed.
+
+High at 960 × 540 (`tex=0.5`, seeded): the tour spots match `4c166b2` within grain, the cloth's wind and the flock's
+random positions (0.31–0.80 % of pixels differ by more than 24/255 at the six spots, the hero alley 0.69 %), and match
+`docs/baselines/souk` as closely as `4c166b2` itself does (0.24–2.82 % against its 0.17–2.94 %); the finale frames
+show the reviewed composition. Low keeps its look: the far set
+changes the distant city's texture detail only, and its tour matches the first pass's within 1.3 % of pixels (thin
+distant railings alias differently). Programs: 47–48 on low (one more for the far set), stable after warm-up.
 
 **Texture memory** (§8.5, the touch classes' `tex=0.5`, 844 × 390 CSS px at DPR 3; unchanged by I0): the baked
 surfaces (34 surfaces × albedo, normal, ORM, with mips) take 13.6 MB on low and 54.3 MB on medium, plus 2.6 MB of
