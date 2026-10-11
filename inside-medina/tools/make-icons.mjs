@@ -22,10 +22,11 @@ function sparkle(x, y, R) {
 // r: the tray's radius as a share of the icon (maskable icons keep it inside the 80 % safe circle)
 function svg(size, r) {
   const c = 50, R = 50 * r;
-  const rays = Array.from({ length: 8 }, (_, i) => {
-    const a = (i * Math.PI) / 4 + Math.PI / 8;
-    return `M${c + Math.cos(a) * R * 0.5} ${c + Math.sin(a) * R * 0.5}L${c + Math.cos(a) * R * 0.78} ${c + Math.sin(a) * R * 0.78}`;
-  }).join('');
+  // the engraving never crosses itself: two parallel stars (the outer one's inner vertices sit at 0.55 R, the inner
+  // one reaches 0.42 R), spokes joining their points, and short rays between the outer points out to the ring
+  const ray = (a, r0, r1) => `M${(c + Math.cos(a) * r0).toFixed(2)} ${(c + Math.sin(a) * r0).toFixed(2)}L${(c + Math.cos(a) * r1).toFixed(2)} ${(c + Math.sin(a) * r1).toFixed(2)}`;
+  const rays = Array.from({ length: 8 }, (_, i) => ray((i * Math.PI) / 4 + Math.PI / 8 - Math.PI / 2, R * 0.6, R * 0.79)).join('');
+  const spokes = Array.from({ length: 8 }, (_, i) => ray((i * Math.PI) / 4 - Math.PI / 2, R * 0.42, R * 0.72)).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 100 100">
   <defs>
     <radialGradient id="bg" cx="50%" cy="44%" r="70%"><stop offset="0" stop-color="#2a1a10"/><stop offset=".62" stop-color="#120c08"/><stop offset="1" stop-color="#0b0806"/></radialGradient>
@@ -40,8 +41,9 @@ function svg(size, r) {
   <g fill="none" stroke="#6b4318" stroke-linejoin="round" opacity=".85">
     <circle cx="${c}" cy="${c}" r="${R * 0.84}" stroke-width="${R * 0.018}"/>
     <path d="${star8(c, c, R * 0.72)}" stroke-width="${R * 0.03}"/>
-    <path d="${star8(c, c, R * 0.48, 22.5)}" stroke-width="${R * 0.026}"/>
-    <circle cx="${c}" cy="${c}" r="${R * 0.18}" stroke-width="${R * 0.026}"/>
+    <path d="${star8(c, c, R * 0.42)}" stroke-width="${R * 0.026}"/>
+    <path d="${spokes}" stroke-width="${R * 0.016}" opacity=".7"/>
+    <circle cx="${c}" cy="${c}" r="${R * 0.17}" stroke-width="${R * 0.026}"/>
     <path d="${rays}" stroke-width="${R * 0.016}" opacity=".6"/>
   </g>
   <circle cx="${c - R * 0.36}" cy="${c - R * 0.4}" r="${R * 0.55}" fill="url(#glint)" opacity=".55"/>
