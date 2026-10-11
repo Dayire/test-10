@@ -315,3 +315,8 @@ the fortress lamp (the heliostat settles on 3.2° and the lab ends). `ux-tests -
 (`souk:0` at the sack pile, `souk:1` by the crate, `souk:2` at the terrace) and, in the lab, tilt at a gripped mirror,
 its end on a tilt, the mouse after it and the crank glyph. Both runners default to port 5173.
 
+Measured on the integration branch (SwiftShader, 4 CPUs shared): `ux-tests` 13 / 13 (the artifact 1.35 MB in its
+sandboxed page, no console error), `mobile-tests` 28 / 28 on the three phones and the touch laptop. Two checks that
+measured a screen while it was still coming in (the settings back glyph under the fading title, the landscape sheet
+still sliding in) now wait for the reveal to finish.
+

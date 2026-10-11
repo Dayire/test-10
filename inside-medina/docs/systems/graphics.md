@@ -395,6 +395,16 @@ in all of these. What is left on the critical path whatever
 the load is serial: the session surface's bake before the first chapter's (requests/I0.md #2) and the menu waiting for
 the chapter (a title-first boot, U's `boot.js`).
 
+### Integration of L and U (I1)
+
+`node tools/perf.mjs --checks` on the merged tree (the Sunwork props in the souk's lamp, U's shell, the ladder and the
+bridge merged in their own constructors): every spot, the finale and the bot's whole path within budget on every
+tier, and all 23 checks pass. Heaviest frames (calls / triangles): low 99 / 292 k at the spots, 101 at the finale, 112 /
+291 k along the path; low as a phone in landscape 110 at the spots, 121 / 323 k along the path (130 allowed); medium
+137 / 458 k, finale 144, path 148 / 479 k; medium as a phone 145, path 161 / 517 k (180 / 550 k allowed); high 142,
+finale 152, path 156 / 482 k. The boot check: pair ratios 0.81–0.90, median 0.82 (the boy's surfaces now bake with
+the first chapter's, requests/I0.md #2; the shell's menu is up before the world exists).
+
 ### Presentation package run (P)
 
 SwiftShader, 640 × 360, `tex=0.1`; "before" is the pre-presentation tree (`0f7b31b`). The flock column counts
