@@ -315,7 +315,7 @@ export class SettingsScreen {
   applyCode(text) {
     const inp = this.el.querySelector('.code input');
     if (inp.readOnly) { this.closeCode(); return; }
-    const d = decodeSave(text);
+    const d = decodeSave(text, this.ui.local?.cps);
     if (!d) { this.msg('that code does not open'); this.ui.sound('back'); return; }
     const save = this.ui.save;
     Object.assign(save.data, d);
@@ -340,7 +340,8 @@ export function encodeSave(d) {
   let h = 0; for (const ch of json) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return `M1${(h % 1296).toString(36).padStart(2, '0')}${b}`;
 }
-export function decodeSave(code) {
+// counts: the checkpoints of each chapter this device has built (ui.local.cps), to bound a code's checkpoints
+export function decodeSave(code, counts = {}) {
   try {
     const s = String(code || '').trim();
     if (!/^M1[0-9a-z]{2}[A-Za-z0-9_-]+$/.test(s)) return null;
@@ -349,10 +350,13 @@ export function decodeSave(code) {
     if ((h % 1296).toString(36).padStart(2, '0') !== s.slice(2, 4)) return null;
     const o = JSON.parse(json), ids = PLAYABLE.map((c) => c.id);
     if (o.v !== 1 || !ids[o.c]) return null;
-    const unlocked = ids.filter((_, i) => o.u[i] === '1');
+    const unlocked = ids.filter((_, i) => String(o.u)[i] === '1');
     if (!unlocked.includes('souk')) unlocked.unshift('souk');
-    const cps = Object.fromEntries(ids.map((id, i) => [id, Math.max(0, o.k[i] | 0)]).filter(([id]) => unlocked.includes(id)));
-    return { chapter: ids[o.c], cp: Math.max(0, o.p | 0), unlocked, cps, completed: !!o.d, stats: { playSec: +o.t || 0, deaths: +o.x || 0, perChapter: {} } };
+    // a hand-made code opens no locked chapter and no checkpoint never reached (nor one past the chapter's last)
+    const top = (id, v) => Math.max(0, Math.min(v | 0, counts?.[id] > 0 ? counts[id] - 1 : Infinity));
+    const cps = Object.fromEntries(ids.map((id, i) => [id, top(id, o.k?.[i])]).filter(([id]) => unlocked.includes(id)));
+    const chapter = unlocked.includes(ids[o.c]) ? ids[o.c] : unlocked[unlocked.length - 1];
+    return { chapter, cp: Math.min(top(chapter, o.p), cps[chapter] ?? 0), unlocked, cps, completed: !!o.d, stats: { playSec: Math.max(0, +o.t || 0), deaths: Math.max(0, o.x | 0), perChapter: {} } };
   } catch { return null; }
 }
 export { ROSETTE };

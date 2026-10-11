@@ -50,6 +50,7 @@ export class HintDirector {
     this.mode = 'first'; this.soundCues = false;
     this.el = ui.root.querySelector('#hints');
     this.zoneT = new Map(); this.ctxT = new Map(); this.active = null; this.cueT = { l: 0, r: 0 };
+    this.devSeen = new Set(); // hints learnt in a dev chapter (the lab): remembered in memory, never saved
     this._v = new THREE.Vector3();
   }
   attach(game) {
@@ -57,7 +58,7 @@ export class HintDirector {
     game.events.on('chapterStart', () => { this.zoneT.clear(); this.ctxT.clear(); this.hide(); });
     game.events.on('death', () => this.hide());
   }
-  seen(id) { return !!this.ui.save?.data?.seenHints?.[id]; }
+  seen(id) { return !!this.ui.save?.data?.seenHints?.[id] || this.devSeen.has(id); }
 
   // game.hooks.hint('controls'): the first steps of a journey
   request(id) {
@@ -104,10 +105,10 @@ export class HintDirector {
   hideAll() { this.hide(); }
   done(h) {
     this.hide();
-    const g = this.game;
-    if (h.id) g.save?.seenHint?.(h.id);
+    const g = this.game, mark = (id) => (g.saving ? g.save?.seenHint?.(id) : this.devSeen.add(id)); // dev chapters never write the save
+    if (h.id) mark(h.id);
     // a verb learnt from a chapter's zone is not taught again from context
-    for (const c of CONTEXT) if (c.glyph === h.glyph && c.id !== h.id) g.save?.seenHint?.(c.id);
+    for (const c of CONTEXT) if (c.glyph === h.glyph && c.id !== h.id) mark(c.id);
   }
 
   update(dt) {

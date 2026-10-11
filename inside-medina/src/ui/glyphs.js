@@ -77,8 +77,8 @@ export const ICONS = {
   shout: P('M30 34c10-10 30-10 40 0M24 50h52M30 66c10 10 30 10 40 0'),
   drum: '<ellipse cx="50" cy="40" rx="26" ry="9"/>' + P('M24 40v24c0 5 12 9 26 9s26-4 26-9V40M30 22l8 10M70 22l-8 10'),
   dart: P('M18 50h56M62 38l14 12-14 12M18 44l8 6-8 6'),
-  // ghost thumb for touch hints
-  thumb: '<ellipse cx="50" cy="50" rx="17" ry="21"/>' + P('M42 44c4-4 12-4 16 0M40 52c6-5 14-5 20 0M42 60c4-3 12-3 16 0'),
+  // ghost thumb for touch hints: the thumb seen from above, its nail and the crease of its joint
+  thumb: P('M30 97V46c0-12 9-21 20-21s20 9 20 21v51') + P('M40 46c0-7 4.5-11 10-11s10 4 10 11v7c-3 2-6.4 3-10 3s-7-1-10-3Z') + P('M37 77c8 3.5 18 3.5 26 0'),
   ring: '<circle cx="50" cy="50" r="30"/>',
   arrowUp: P('M50 78V24M32 42l18-18 18 18'),
   arrowDown: P('M50 22v54M32 58l18 18 18-18'),
@@ -109,7 +109,11 @@ export function padLabel(kind, which) {
   return m[which] || which;
 }
 export const key = (label, wide = false) => `<kbd class="key${wide ? ' wide' : ''}">${label}</kbd>`;
-export const stick = (dir = '') => `<span class="pad stick" data-dir="${dir}"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="30"/><circle class="nub" cx="50" cy="50" r="13"/></svg></span>`;
+// a stick: its ring, the nub pushed the way it goes and brass chevrons outside the ring for that way (‹ › for move,
+// ˄ for climb, ˅ for crawl, both for tilt), so move, climb and crawl read apart at a glance
+const CHEV = { l: 'M11 39L2 50l9 11', r: 'M89 39l9 11-9 11', u: 'M39 11L50 2l11 9', d: 'M39 89l11 9 11-9' };
+const DIRS = { lr: 'lr', up: 'u', down: 'd', ud: 'ud' };
+export const stick = (dir = '') => `<span class="pad stick" data-dir="${dir}"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="30"/><circle class="nub" cx="50" cy="50" r="12"/>${[...(DIRS[dir] || '')].map((k) => `<path class="dir" d="${CHEV[k]}"/>`).join('')}</svg></span>`;
 
 // a zellige lattice as a CSS background (eight-point stars on a square grid, joined by their points)
 export function zelligeTile(stroke = 'rgba(233,196,143,.10)', size = 64) {

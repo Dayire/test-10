@@ -1,14 +1,16 @@
 // The shell's acceptance tests (FULL_GAME §11.4 U): node tools/ux-tests.mjs [--port 5176] [--only name,...]
 //   keyboard   boot → settings → music 4 → back → new journey → play 2 s → Esc → title → continue resumes
 //   gamepad    the same with a stubbed standard pad (d-pad, A, B, RB, Start) and its rumble
-//   storage    localStorage throwing: playable, settings in memory, the save code round-trips
+//   storage    localStorage throwing: playable, settings in memory, the save code round-trips (a hand-made code
+//              opens no locked chapter and no checkpoint never reached)
 //   persist    settings survive a reload (and apply); a save of settings alone shows no continue
 //   autostart  ?autostart=1 skips every menu
 //   menubg     the live title renders at 30 fps and half resolution under the menus (requests/P.md #8), its vignette
 //              deepened once (a resting title's redraws never deepen it again)
 //   chapters   chapter select by keyboard: the card covers the load, the chapter starts at the picked checkpoint
 //   hints      wordless first steps: the jump glyph at the sack pile (none at a wall too high), grab by the crate;
-//              a pause holds the glyph out of sight and lists the play controls
+//              a pause holds the glyph out of sight and lists the play controls; the lab (a dev chapter) learns a
+//              hint without writing the save
 //   crawl      crawl set to toggle: menu navigation never latches it, holding a crate (or a lab mirror) never does,
 //              a down-press in play does
 //   artifact   npm run build:artifact: one page ≤ 3 MB, run in test.html inside a sandboxed iframe, no console
@@ -194,13 +196,17 @@ await scenario('storage', async () => {
     r.code = code; r.len = code.length;
     r.back = `${s.chapter}/${s.cp}/${s.unlocked.join(',')}/${s.cps.sundown}/${s.stats.deaths}`;
     r.bad = decodeSave(code.slice(0, -2) + 'xx') === null && decodeSave('nonsense') === null;
+    // hand-made codes (a valid checksum): a locked chapter falls back to the furthest unlocked one, a checkpoint
+    // never reached (or past the chapter's last) to the furthest reached
+    const forged = (o, n) => { const x = decodeSave(encodeSave({ stats: {}, ...o }), n); return x && `${x.chapter}/${x.cp}/${x.cps.souk}`; };
+    r.forged = [forged({ chapter: 'dawn', cp: 99, unlocked: ['souk', 'sundown'], cps: { souk: 2, sundown: 1 } }), forged({ chapter: 'souk', cp: 40, unlocked: ['souk'], cps: { souk: 50 } }, { souk: 7 })];
     let threw = false; try { localStorage.getItem('x'); } catch { threw = true; }
     r.lsThrows = threw;
     return r;
   });
   await ctx.close();
   const ok = out.available === false && out.glyph && out.settings.grain === 30 && out.settings.invertTilt === true && out.settings.saved === 30 && out.mode === 'play'
-    && out.shown && out.afterReset === 'souk/0' && out.back === 'night/3/souk,sundown,night/10/17' && out.bad && out.lsThrows && out.len <= 160 && !errors.length;
+    && out.shown && out.afterReset === 'souk/0' && out.back === 'night/3/souk,sundown,night/10/17' && out.bad && out.forged[0] === 'sundown/1/2' && out.forged[1] === 'souk/6/6' && out.lsThrows && out.len <= 160 && !errors.length;
   return [ok || `storage ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
 });
 
@@ -380,8 +386,19 @@ await scenario('hints', async () => {
   out.crateStep = await hint();
   await page.keyboard.up('ArrowRight');
   await ctx.close();
+  // a dev chapter (the lab) learns a hint in memory and never writes the save (a fresh player stays without one)
+  const lab = await open({ url: `${BASE}?${Q}&autostart=1&chapter=lab` });
+  await ready(lab.page); await waitFor(lab.page, () => __medina.game.mode === 'play');
+  out.lab = await lab.page.evaluate(async () => {
+    localStorage.removeItem('medina.save.v1');
+    __ui.hints.show({ id: 'ctx:jump', glyph: 'jump', x0: -1e3, x1: 1e3, after: 0 }); __ui.hints.done(__ui.hints.active || { id: 'ctx:jump', glyph: 'jump' });
+    await new Promise((r) => setTimeout(r, 1600));
+    return { saving: __medina.game.saving, seen: __ui.hints.seen('ctx:jump'), stored: localStorage.getItem('medina.save.v1') };
+  });
+  errors.push(...lab.errors);
+  await lab.ctx.close();
   const ok = out.jump?.glyph === 'jump' && out.jump.opacity > 0.5 && out.jump.html > 20 && out.paused.hint?.opacity === 0 && out.paused.ctl === 'move jump grab climb crawl'
-    && out.resumed?.glyph === 'jump' && out.resumed.opacity > 0 && !out.afterJump.hint && out.afterJump.seen && out.grab?.glyph === 'grab' && out.grab.opacity > 0.5 && !out.wall && out.crateStep?.glyph === 'jump' && !errors.length;
+    && out.resumed?.glyph === 'jump' && out.resumed.opacity > 0 && !out.afterJump.hint && out.afterJump.seen && out.grab?.glyph === 'grab' && out.grab.opacity > 0.5 && !out.wall && out.crateStep?.glyph === 'jump' && out.lab.saving === false && out.lab.seen && out.lab.stored === null && !errors.length;
   return [ok || `hints ${JSON.stringify(out)} ${errors.slice(0, 2).join(' | ')}`, out];
 });
 

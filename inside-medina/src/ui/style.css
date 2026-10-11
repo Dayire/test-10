@@ -29,6 +29,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #ui .pad.stick svg { width: 100%; height: 100%; stroke-width: 5; }
 #ui .pad.stick { border: 0; background: none; width: 32px; height: 32px; }
 #ui .pad.stick .nub { fill: rgba(243, 230, 210, .3); }
+#ui .pad.stick .dir { fill: none; stroke: var(--brass-hi); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
 #ui .pad.stick[data-dir="up"] .nub { transform: translateY(-10px); } #ui .pad.stick[data-dir="down"] .nub { transform: translateY(10px); }
 #ui .pad.stick[data-dir="lr"] .nub, #ui .pad.stick[data-dir="ud"] .nub { animation: nub 1.6s var(--ease-io) infinite alternate; }
 #ui .pad.stick[data-dir="lr"] .nub { --nx: 10px; --ny: 0; } #ui .pad.stick[data-dir="ud"] .nub { --nx: 0; --ny: 10px; }
@@ -203,7 +204,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; 
 #chapters.in .ccard.focused { transform: translate3d(0, -10px, 0); transition-delay: 0s; }
 .ccard .arch { position: relative; width: 100%; aspect-ratio: 1 / 1.34; }
 .ccard .thumb { position: absolute; inset: 0; clip-path: url(#arch); -webkit-clip-path: url(#arch); background: center / cover no-repeat; }
-.ccard .thumb.pal { background: radial-gradient(ellipse 70% 50% at 50% 38%, color-mix(in srgb, var(--exit) 55%, transparent), transparent 70%), linear-gradient(180deg, var(--exit) -30%, var(--tone) 55%, color-mix(in srgb, var(--tone) 40%, #0b0806) 100%); }
+.ccard .thumb.pal { background: linear-gradient(180deg, var(--exit) -30%, var(--tone) 55%, #0b0806 120%); background: radial-gradient(ellipse 70% 50% at 50% 38%, color-mix(in srgb, var(--exit) 55%, transparent), transparent 70%), linear-gradient(180deg, var(--exit) -30%, var(--tone) 55%, color-mix(in srgb, var(--tone) 40%, #0b0806) 100%); }
 .ccard .thumb::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(11, 8, 6, 0) 45%, rgba(11, 8, 6, .55) 100%); }
 .ccard .cgl { position: absolute; left: 28%; right: 28%; bottom: 9%; width: 44%; fill: none; stroke: rgba(251, 239, 220, .9); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 6px rgba(0, 0, 0, .4)); }
 .ccard .frame { position: absolute; inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px); overflow: visible; }

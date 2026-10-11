@@ -1,8 +1,8 @@
 // Vendor Cormorant Garamond (SIL Open Font License 1.1, Christian Thalmann) as WOFF2 latin subsets:
 // node tools/fetch-font.mjs  →  src/ui/fonts/*.woff2 and src/ui/fonts.css (the @font-face rules style.css imports).
 // The hosted build serves them with hashed names (the service worker caches them, so the city reads offline);
-// the artifact build inlines them as data URIs. If the fetch fails, fonts.css is left as it was (index.html
-// then falls back to the Google Fonts link, which artifacts allow, and to Georgia).
+// the artifact build inlines them as data URIs. If the fetch fails, the vendored files and fonts.css are left as
+// they were (the page loads no remote font: without the files the type falls back to Georgia).
 import fs from 'fs';
 import path from 'path';
 
@@ -13,7 +13,7 @@ const URL_CSS = 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ita
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 const res = await fetch(URL_CSS, { headers: { 'user-agent': UA } }).catch((e) => ({ ok: false, statusText: e.message }));
-if (!res.ok) { console.log(`fetch-font: could not fetch the stylesheet (${res.status || ''} ${res.statusText}); keeping the Google Fonts link`); process.exit(0); }
+if (!res.ok) { console.log(`fetch-font: could not fetch the stylesheet (${res.status || ''} ${res.statusText}); keeping the vendored files`); process.exit(0); }
 const css = await res.text();
 // the latin block of each face
 const faces = [...css.matchAll(/\/\* latin \*\/\s*@font-face\s*{([^}]*)}/g)].map((m) => {
