@@ -155,6 +155,26 @@ normal is the box's plus the segment's) with 1.5 m to spare, which changes nothi
 within that many metres behind the play plane stops casting into the sun's map: background roofs lose the
 shadows of buildings further back. The sun direction is read every frame, so a low sun keeps its long shadows.
 
+*Settled casters.* Any other plain caster (not a batch, not skinned or instanced, no cut-out) that keeps its place
+within 10 cm at every corner of its box (`SWAY`, a hanging ladder's sway) and its vertices unchanged for two scans
+joins its chapter root's settled proxies: a set of its own, so the root's proxies are never rebuilt for it, merged at
+once (it is small) and checked every frame, so a member that moves again, is hidden or leaves leaves the set in that
+frame and its merged shadow never trails it. Each time a caster leaves, it needs twice as many still scans to settle
+again (up to 16). The unrolled rope ladder and the lowered drawbridge cast in one draw each this way; a crate at rest
+too. A caster the tier culls as small stays culled, and a material that moves its vertices (wind) never settles. While
+a caster is merged its `castShadow` is the policy's (false): hide it with `visible`, or keep it out of the proxies with
+`userData.noProxy`.
+
+*Other casters in the sun's map.* Every caster the policy sees, characters included, culls through
+`intersectsFrustum` after its own test: in the sun's pass its box (a skinned mesh's bounding sphere) swept along the
+light down to its root's geometry must meet the view with 1.5 m to spare, as a proxy's must. Off-screen props stop
+drawing into the sun's map (`stats.sunCulled`); nothing changes on screen.
+
+*Lean maps.* three makes every shadow map an RGBA8 target beside the depth texture it samples, and never reads the
+colour. The policy makes each map first, the way three would, with an R8 colour attachment (a quarter of the bytes), and
+draws it in the frame it is made (a map never drawn must not be sampled). The `leanMaps` check renders the same frame
+with three's own maps: identical.
+
 *Small casters.* On low/medium, other static casters under 0.4 m tall or more than 30 m behind the play plane
 stop casting, as do meshes flagged `userData.smallCaster` (the flock); a caster counts as static once its world
 matrix has been the same over two scans, so moving props and characters are never culled. The policy restores
@@ -257,7 +277,12 @@ prints the §8.5 budget per tier and spot (shadow + main calls, triangles) and f
 when a check fails or is pending). The gate is the heaviest frame: every shadow map refreshed in one frame
 (`P.forced`: the game's own render, so the lamp, the camera and the characters update, while the sim stands still),
 over a full sweep of the courtyard lamp wherever its spot is lit (`P.sweep`, 9 aims), plus every frame of the
-chapter's finale from its last checkpoint (`P.finale`, every 0.5 s); the 60 fps average is printed beside it. It
+chapter's finale from its last checkpoint (`P.finale`, every 0.5 s), plus the real path: the souk bot from its first
+step to its last on a page of its own (`P.path`), the game rendered at 30 fps of game time without drawing (camera,
+entities, director, and the shadow policy's schedule, scans and merges on the game's clock), and every 0.5 s of game
+time a frame with every map refreshed, so the states a player goes through (the ladder unrolled, the bridge lowered,
+the guard chasing) are gated too (`--only path` runs that alone, `--path 0` skips it); the 60 fps average is printed
+beside the spots. It
 runs on any build, so the "before" column comes from the pre-presentation tree. The checks: FXAA on low,
 tier round trip (targets, textures, geometries, programs, post materials), programs stable after warm-up,
 frame cap (10 s of 120/144 Hz timestamps), the light state stable across frames with the soft pass on
@@ -281,20 +306,24 @@ SwiftShader, `tex=0.1`, `node tools/perf.mjs --tiers low,medium,high` (low and m
 landscape, 844 × 390; high at 640 × 360). Each cell is the heaviest frame at the spot, calls (shadow + main) /
 triangles: every shadow map refreshed in the same frame (as on low's own 30 fps frames, on high, and on any tier after
 a camera snap), over a full sweep of the courtyard lamp wherever its spot is lit; the finale cell is the heaviest frame
-of the whole DepthWalk, sampled every 0.5 s. `perf.mjs` fails a run when any cell is over its tier's budget.
+of the whole DepthWalk, sampled every 0.5 s; the path cell the heaviest of the souk bot's run from the first step to the
+last, one frame every 0.5 s of game time (about 170 frames: the ladder unrolled, the bridge lowered, the guard
+chasing). `perf.mjs` fails a run when any cell is over its tier's budget.
 
-| tier | budget | souk | raised | rooftops | courtyard | balcony | chase | hero alley | finale |
-|---|---|---|---|---|---|---|---|---|---|
-| low | 130 / 400 k | 97 / 210 k | 87 / 202 k | 77 / 201 k | 94 / 257 k | 108 / 289 k | 105 / 263 k | 105 / 249 k | 113 / 268 k |
-| low, 844 × 390 | 130 / 400 k | 108 / 239 k | 94 / 207 k | 96 / 252 k | 105 / 287 k | 115 / 296 k | 120 / 280 k | 111 / 254 k | 115 / 270 k |
-| medium | 180 / 550 k | 123 / 290 k | 125 / 284 k | 113 / 347 k | 128 / 453 k | 135 / 459 k | 132 / 396 k | 143 / 407 k | 149 / 413 k |
-| medium, 844 × 390 | 180 / 550 k | 132 / 296 k | 137 / 314 k | 139 / 488 k | 137 / 485 k | 146 / 493 k | 151 / 457 k | 151 / 410 k | 155 / 415 k |
-| high | 240 / 700 k | 126 / 297 k | 127 / 288 k | 118 / 353 k | 155 / 462 k | 173 / 471 k | 141 / 404 k | 146 / 411 k | 156 / 425 k |
+| tier | budget | souk | raised | rooftops | courtyard | balcony | chase | hero alley | finale | path |
+|---|---|---|---|---|---|---|---|---|---|---|
+| low | 130 / 400 k | 86 / 211 k | 75 / 201 k | 72 / 202 k | 87 / 258 k | 99 / 292 k | 97 / 260 k | 95 / 252 k | 101 / 268 k | 113 / 292 k |
+| low, 844 × 390 | 130 / 400 k | 95 / 238 k | 83 / 207 k | 89 / 255 k | 97 / 288 k | 106 / 299 k | 110 / 277 k | 100 / 257 k | 101 / 269 k | 121 / 323 k |
+| medium | 180 / 550 k | 119 / 284 k | 118 / 274 k | 110 / 343 k | 124 / 449 k | 130 / 458 k | 124 / 391 k | 137 / 394 k | 144 / 400 k | 148 / 479 k |
+| medium, 844 × 390 | 180 / 550 k | 128 / 290 k | 132 / 308 k | 136 / 484 k | 134 / 481 k | 144 / 493 k | 143 / 452 k | 145 / 397 k | 148 / 405 k | 163 / 517 k |
+| high | 240 / 700 k | 122 / 291 k | 120 / 278 k | 115 / 349 k | 129 / 458 k | 133 / 468 k | 130 / 403 k | 142 / 401 k | 152 / 415 k | 156 / 483 k |
 
 The first integration pass had gated six spots at 16:9 on an average of a simulated 60 fps run. Measured this way it
 was over: low 135 calls at the chase on a phone, 131 / 138 at the hero alley, 131–147 through the finale; medium
 563 k triangles at the courtyard as the lamp swept (and, once the lanterns' shadows were merged where they hang, 655 k
-at the balcony on a phone). What brought every cell under:
+at the balcony on a phone). Gated along the real path, it was over again where the spots had never looked: 144 calls
+on low on a phone with the ladder unrolled and the bridge lowered, medium at 180 calls. What brought every cell under
+(the last four rows are the second pass):
 
 | lever | where | effect |
 |---|---|---|
@@ -308,6 +337,10 @@ at the balcony on a phone). What brought every cell under:
 | sway counts as static | `shadowpolicy.js` | the rolled-up rope ladder (16 meshes) stops casting on low and medium |
 | lite geometry (low) | `geom.js` `DETAIL` | half the curve segments, no bevels under 3 cm: low's triangles halve |
 | no cut-out shadows (low) | `QUALITY.low.alphaCasters` | ivy and lattice batches stop casting on low |
+| merged moving props | `geom.js` `mergeChildren`, souk level | the rope ladder 16 → 2 meshes, the drawbridge 14 → 2, in the main pass and in every shadow pass |
+| settled casters | `shadowpolicy.js` | a prop at rest (the unrolled ladder, the lowered bridge, a crate) casts through a small proxy set of its own: one draw per tile |
+| other casters in the sun's map | `shadowpolicy.js` `lands` | characters and props whose shadow cannot land in view stop drawing into the sun's map (an off-screen ladder or bridge) |
+| one batch per material (low) | `Batcher` `castMerge` | a material's casting and non-casting pieces share a batch, which casts its casters only: −6 to −11 draws (phone) for a few thousand triangles |
 
 The `shadowProxies` check renders each spot with and without the proxies (high: mean difference ≤ 0.02/255, at most
 0.021 % of pixels differ by more than 16/255; low ≤ 0.055/255): the culling changes nothing on screen. Two bugs of the
@@ -318,17 +351,26 @@ alley and the finale. Its stones and beams had never shown before (they turned a
 screen), so they are left out and the tunnel looks as reviewed.
 
 High at 960 × 540 (`tex=0.5`, seeded): the tour spots match `4c166b2` within grain, the cloth's wind and the flock's
-random positions (0.31–0.80 % of pixels differ by more than 24/255 at the six spots, the hero alley 0.69 %), and match
-`docs/baselines/souk` as closely as `4c166b2` itself does (0.24–2.82 % against its 0.17–2.94 %); the finale frames
-show the reviewed composition. Low keeps its look: the far set
-changes the distant city's texture detail only, and its tour matches the first pass's within 1.3 % of pixels (thin
-distant railings alias differently). Programs: 47–48 on low (one more for the far set), stable after warm-up.
+random positions (0.10–0.62 % of pixels differ by more than 24/255 at the six spots, the hero alley 0.59 %), and match
+`docs/baselines/souk` as closely as `4c166b2` itself does (0.14–2.92 % against its 0.20–2.89 %); the finale frames
+show the reviewed composition. Two corrections show in the hero alley. Its stairs run from x −5.2 to −11.2, so their
+boxes had a negative width: mirrored, wound inward, with the camera-facing side lit as if it faced the sun. Built from
+the sizes' magnitudes they are solid on every tier and lit from the right side, a little less bright than before.
+The podium under the right-hand arcade lay flush with the facade it meets and z-fought it (a flickering lattice of
+light rectangles on that wall, on low since before the integration and at high since the batches' draw order
+changed); it stands 2 cm proud now. Low at 844 × 390 against `4c166b2`: 0.48–1.30 % at the spots, 1.78 % in the hero
+alley (the stairs and the wall); the far set changes the distant city's texture detail only. A foundation negative
+builds the souk lite and at full detail and fails on any inward-wound geometry. Programs: 47 on low, stable after
+warm-up.
 
-**Texture memory** (§8.5, the touch classes' `tex=0.5`, 844 × 390 CSS px at DPR 3; unchanged by I0): the baked
-surfaces (34 surfaces × albedo, normal, ORM, with mips) take 13.6 MB on low and 54.3 MB on medium, plus 2.6 MB of
-LUT, sky and particle textures on medium: 14 / 57 MB against 60 / 80 MB. Counting every render target as well, medium
-reaches 115 MB: the post chain 10 MB and the shadow maps 48 MB, half of which is the RGBA8 colour attachment three
-allocates beside each depth texture and never samples (an R8 attachment would save 18 MB on medium, 9 MB on low).
+**Texture memory** (§8.5, the touch classes' `tex=0.5`, 844 × 390 CSS px at DPR 3). The integration reads the column
+as FULL_GAME's own figures do (217 / 54 MB are surface textures): the textures a tier holds, the baked surfaces (34
+surfaces × albedo, normal, ORM, with mips: 13.6 MB on low, 54.3 MB on medium) plus the LUT, sky and particle textures
+(2.6 MB on medium): 14 / 57 MB against 60 / 80 MB. The render targets are reported beside it. Since the shadow maps
+carry an R8 colour attachment instead of three's RGBA8 one (*Lean maps*), they take 15 MB on low and 30 MB on medium
+(24 / 48 MB before); with the post chain (4 / 10 MB) a low tier holds 33 MB in all and medium 97 MB (115 MB before).
+Medium on a phone is the tier to watch for memory pressure: its next levers are 512² spot maps (−7.5 MB) and a 16-bit
+depth for the spots.
 
 **Boot** (FULL_GAME §8.6). The profile of a boot on SwiftShader was two thirds shader compiles: the 34 surface bakes
 (each program evaluated `surf()` five times for its normals) and the scene's programs at the first frame. A surface's
@@ -340,6 +382,14 @@ is built (`world.prebake` / `world.finishBake`). Boot to `__ready`, each boot fr
 (single boots of 6 to 16 s) was the Google Fonts stylesheet both trees link, fetched over the network before their
 scripts run; the check now answers it with an empty one, and counts only pairs whose two boots shared the machine
 with about the same outside load.
+
+How much faster depends on spare CPU. The gain is compile work overlapped with the build, so it needs a core free for
+the driver: on a quiet machine the pair ratio is about 0.81, with some load 0.90, and with 2.2–2.4 CPUs taken by
+another agent the suite's check measured pairs of 0.91–1.06 (median 1.02), about the pre-foundation tree's time; an
+interleaved run of five rounds with the CPU fully busy gave 0.92 (8.97 s against 9.76 s). The check's 1.1 budget holds
+in all of these. What is left on the critical path whatever
+the load is serial: the session surface's bake before the first chapter's (requests/I0.md #2) and the menu waiting for
+the chapter (a title-first boot, U's `boot.js`).
 
 ### Presentation package run (P)
 

@@ -132,7 +132,9 @@ Loads are queued: each runs after the previous one settles, in call order.
    surface's targets exist at once (its textures are in `world.tex`, so materials can take them) and its program is
    issued without waiting for the driver;
 7. `def.build(game, kit)` (generators yield to the browser every 8 ms; on a tier with `lite` the geometry helpers
-   build lighter, see §7), then the batch merges into the root. Meanwhile the driver compiles the surfaces;
+   build lighter, see §7: `DETAIL.lite` is set around the call and each generator step only, never across an await,
+   so an async build wraps its later slices in `kit.detail(fn)`; `kit.lite` names the detail), then the batch merges
+   into the root. Meanwhile the driver compiles the surfaces;
 8. FX on the root (`Shafts(root, director.sunDir, G)`, its dust, `Dust(root)`, `Flock(root, mats, L.flockSpots)`), glow sprites, pool sources;
 9. camera keys, sorted checkpoints, the initial snapshot, `L.prepare(cp)`, the checkpoint snapshot, spawn;
 10. the scene's programs are issued (hidden objects too), `world.finishBake(jobs)` draws the surfaces (each waits
@@ -301,7 +303,9 @@ material that sampled the old one; returns the old one), `world.bakeEnvironment(
 uniforms stand), `world.rebuildEnvironment()` (both, then disposes the old map), `baker.rebakeAll()`. A surface not listed in
 `needs` is baked on first use with a warning.
 
-**Static batches** (`Batcher` in `src/assets/geom.js`): geometry merges by material, shadow flags and x chunk; the
+**Static batches** (`Batcher` in `src/assets/geom.js`): geometry merges by material, `receive` and x chunk; casting and
+non-casting pieces share a batch, the casters first, and the batch casts only its first `userData.castCount` vertices
+(its own shadow draws through `onBeforeShadow`, the proxies through the policy); the
 chunk width follows depth (`BANDS`: centre z > −4: 0.6 × `chunk`; to −15: `chunk`; beyond: 2 × `chunk`), and the main
 pass culls a batch by its world box. **The low tier** (`QUALITY.low.lite`) builds for its draw budget: `DETAIL.lite`
 (`setDetail`) around the build makes arch outlines, extrusion curves, lathes and tubes take about half their segments
@@ -313,11 +317,18 @@ city keeps its colours, grime, lighting, shadows and fog and loses only texture 
 play is unchanged, and a tier change mid-chapter keeps the geometry the chapter was built with. **Shadow casters**:
 the shadow policy merges static batches into proxies (and any mesh with `userData.staticCaster`, such as the hanging
 lanterns that only sway: `levelkit.staticCaster(obj)`; one that later moves more than 8 cm leaves the proxies and casts
-on its own from the next scan). A proxy is a 12 m tile of x × a depth band, its triangles stored by 3 m sub-tile
+on its own from the next scan). Any other plain caster that keeps its place within 10 cm at every corner of its box for
+two scans (an unrolled rope ladder, a lowered drawbridge, a crate at rest) joins its root's *settled* proxies, a small
+set of its own rebuilt in the frame a member moves again (the set is checked every frame), so its merged shadow never
+trails it; a caster that keeps moving waits twice as long each time. A proxy is a 12 m tile of x × a depth band, its triangles stored by 3 m sub-tile
 (triangles wider than 3 m go to 96 m tiles of their own), so each shadow pass draws only the run of sub-tiles it
 needs: a spot's pass those inside its frustum, the sun's those whose shadow can land in view (the box swept along the
-light down to the lowest geometry under it, tested plane by plane against the camera frustum); on low
-(`alphaCasters: false`) alpha-tested static batches (ivy, lattice) stop casting. **Characters** (`src/assets/character.js`): the rigid parts merge into one `SkinnedMesh` per material
+light down to the lowest geometry under it, tested plane by plane against the camera frustum); every other caster,
+characters included, passes the same test in the sun's pass (through its `intersectsFrustum`, after its own test);
+on low (`alphaCasters: false`) alpha-tested static batches (ivy, lattice) stop casting. A prop whose group moves as a
+whole merges its pieces per material with `mergeChildren(group)` (`geom.js`; the souk does it for the rope ladder and
+the drawbridge). Shadow maps carry an R8 colour attachment beside the depth texture three samples (a quarter of
+three's RGBA8; made by the policy just before three would make one, and drawn in that frame). **Characters** (`src/assets/character.js`): the rigid parts merge into one `SkinnedMesh` per material
 bound to the joints (weight 1 per vertex), so a pose is exactly the jointed one in 5-7 draws, and every casting part
 merges once more into `rig.shadowMeshes` (one per material side), the only ones drawn in the shadow passes; the joints stay
 plain groups (`rig.j`), `rig.meshes` lists the per-material meshes, and the loader disposes a chapter's bone textures.
@@ -364,7 +375,7 @@ counts), ext{}`. `window.__info()` adds the state to `info()`.
 | `node tools/negative.mjs --chapter souk` | `tools/neg/<chapter>.mjs` as assertions (the souk's include restart from checkpoint: not a death, not during the last quarter second of a lamp's alarm, not a second death while one plays); a page or console error fails a scenario (`allowConsole: /re/` for errors it provokes); `--selftest-fail` must exit 1, and so must a filter that matches no scenario |
 | `node tools/negative.mjs --suite foundation [--artifact] [--base-port N \| --absolute] [--rounds 5]` | chain and Continue (with the finale's look and mix left behind), the title over the save's place never writing over it (pause, hidden page, title, play), throwing storage, restart and title mid-finale, title during the chase, lab end, loader queue / failures / scoped subscriptions, a chain whose import fails (retries, then the title), restart chapter equal to a fresh start, the live and harmless title over the courtyard, x-keyed env maps swapped without a bake, the sim waiting through a load's fade, title shadow focus, look round trip, context loss, LUT looks and discontinuities, boot budget; `--artifact` also rebuilds and boots the single-file build. The boot budget is timed against the pre-foundation tree under the same load: by default the suite extracts that commit (`git archive`, cached in the OS temp dir) and serves it on a free port with a config and dependency cache of its own run (removed afterwards, so concurrent suites never share them), `--base-port` names a running server of it instead, `--absolute` uses the recorded baseline (idle machine only); one warm-up boot each, then `--rounds` (default 5) interleaved pairs in ABBA order, each boot from a blank page (tearing the previous game down takes seconds on SwiftShader) with the Google Fonts stylesheet answered locally (over the network it adds seconds at random), judged by the median of the per-pair ratios (≤ 1.1) over the pairs whose two boots saw about the same outside load (within 0.6 CPU, from `/proc`; up to twice the rounds are timed to find them), with four more pairs when that median is within 4 % of the budget |
 | `node tools/cycle.mjs [--cycles 3] [--path souk,lab,souk,sundown,souk]` | memory flat, programs stable, light census constant, no page or console errors |
-| `node tools/perf.mjs [--tiers low,medium,high] [--checks \| --only checks]` | the §8.5 budget at the six Chapter I spots per tier (the heaviest frame: shadow refresh + main pass) and the presentation checks; exits 1 when a spot is over its tier's budget, a check fails or is pending, or the page reports an error |
+| `node tools/perf.mjs [--tiers low,medium,high] [--checks \| --only checks \| --only path] [--path 0]` | the §8.5 budget at the six Chapter I spots and the hero alley per tier, through the finale, and along the souk bot's whole path (a frame every 0.5 s of game time: the ladder unrolled, the bridge lowered, the guard chasing); each the heaviest frame (every shadow map refreshed + main pass); and the presentation checks; exits 1 when a spot or the path is over its tier's budget, the bot fails, a check fails or is pending, or the page reports an error |
 | `node tools/probe.mjs "<query>" "<js>"`, `tools/tour.mjs`, `tools/shot.mjs` | ad hoc evaluation and screenshots; all take `--port`, `BASE=` and `--chapter` |
 | `npm test`, `npm run test:souk`, `npm run test:foundation`, `npm run cycle` | the suites above |
 

@@ -126,6 +126,11 @@ landscape (844 × 390). The table is in `docs/systems/graphics.md` ("Integration
   plane. Medium's heaviest frame (the balcony, phone landscape) went from 655 k to 491 k triangles.
 - The rubble over the crawl tunnel is left out: its stones never showed (they turned about the world origin, which
   also inflated the shadow tiles) and, placed where meant, read as huge floating blocks.
+- Along the real path as well: `perf.mjs` runs the souk bot from the first step to the last with a frame of every
+  shadow map every 0.5 s of game time (the ladder unrolled, the bridge lowered, the guard chasing), where low had
+  reached 144 calls on a phone. The ladder's and the bridge's pieces merge per material (`mergeChildren`), a prop at
+  rest casts through settled proxies, other casters stop drawing into the sun's map when their shadow cannot land in
+  view, and on low a material's casting and non-casting pieces share a batch: 122 on a phone now.
 
 P now merges the level's static batches into shadow-only proxies (12 m tiles × depth bands, 16-bit positions,
 `src/render/shadowpolicy.js`), culls them against the view along the sun, and on low / medium drops the ones
