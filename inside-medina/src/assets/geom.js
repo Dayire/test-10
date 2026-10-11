@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { farEligible } from '../render/materials.js';
 
 export const V3 = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _e = new THREE.Euler();
@@ -248,39 +249,54 @@ export function tube(points, radius, seg = 32, radial = 6, closed = false) {
 const _bx = new THREE.Box3();
 function batchInFrustum(frustum) { return frustum.intersectsBox(_bx.copy(this.geometry.boundingBox).applyMatrix4(this.matrixWorld)); }
 
+export const BANDS = [[-4, 0.6], [-15, 1], [-Infinity, 2]];
+// the low tier spends triangles to save draws: the street and the play plane share 1 × chunk wide batches
+export const LITE_BANDS = [[-15, 1], [-Infinity, 2]];
 // Merges static geometry by material into chunks along x. The chunk width follows depth: pieces near the play
 // plane (centre z > -4) merge in 0.6 × chunk wide strips, the street behind (to -15) in `chunk`, the far city in
 // 2 × chunk. The view is narrow at the play plane and wide in the distance, so this draws what the camera sees with
 // few extra triangles: about 30 % fewer per frame in Chapter I for some ten more draws.
+// far: the low tier's far set. Geometry added with set: 'far' (the distant city) of a plain opaque material joins
+// one palette material (Materials.farSet): one draw per chunk instead of one per material, its own colours kept.
 export class Batcher {
-  constructor(materials, { chunk = 36 } = {}) {
+  // bands: [z limit, chunk width factor] from the play plane back (a piece's band is the first whose limit its
+  // centre lies in front of)
+  constructor(materials, { chunk = 36, far = false, bands = BANDS } = {}) {
     this.mats = materials;
     this.chunk = chunk;
+    this.bands = bands;
+    this.far = far && typeof materials.farSet === 'function';
     this.groups = new Map();
   }
 
-  add(geo, matName, matrix = null, { cast = true, receive = true, chunkX = null } = {}) {
+  add(geo, matName, matrix = null, { cast = true, receive = true, chunkX = null, set = null } = {}) {
     let g = geo.index ? geo.toNonIndexed() : geo.clone();
     if (matrix) g.applyMatrix4(matrix);
     if (!g.attributes.normal) g.computeVertexNormals();
     if (!g.attributes.uv) worldUV(g);
-    if (!g.attributes.color) setColor(g, 0xffffff);
-    const mat = typeof matName === 'string' ? this.mats.get(matName) : matName;
+    let mat = typeof matName === 'string' ? this.mats.get(matName) : matName;
+    if (!g.attributes.color || mat.vertexColors === false) setColor(g, 0xffffff);
+    const pal = set === 'far' && this.far && farEligible(mat) ? this.mats.paletteIndex(mat) : -1;
+    if (pal >= 0) {
+      mat = this.mats.farSet(); cast = false; // the low tier's shadow reach culls the far city's shadows anyway
+      g.setAttribute('pal', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count).fill(pal), 1));
+    }
     const needsSway = mat.defines && mat.defines.USE_WIND !== undefined;
     if (needsSway && !g.attributes.sway) setSway(g, () => 0);
     // strip attributes not shared by all
     for (const k of Object.keys(g.attributes)) {
-      if (!['position', 'normal', 'uv', 'color', 'sway'].includes(k)) g.deleteAttribute(k);
+      if (!['position', 'normal', 'uv', 'color', 'sway', 'pal'].includes(k)) g.deleteAttribute(k);
     }
     if (!needsSway && g.attributes.sway) g.deleteAttribute('sway');
     g.morphAttributes = {};
     g.clearGroups();
     g.computeBoundingBox();
     const cx = chunkX ?? (g.boundingBox.min.x + g.boundingBox.max.x) / 2, cz = (g.boundingBox.min.z + g.boundingBox.max.z) / 2;
-    const band = cz > -4 ? 0 : cz > -15 ? 1 : 2;
-    const ck = Math.floor(cx / (this.chunk * [0.6, 1, 2][band]));
+    let band = 0;
+    while (band < this.bands.length - 1 && cz <= this.bands[band][0]) band++;
+    const ck = Math.floor(cx / (this.chunk * this.bands[band][1]));
     const key = `${mat.uuid}|${cast ? 1 : 0}${receive ? 1 : 0}|${band}|${ck}`;
-    if (!this.groups.has(key)) this.groups.set(key, { mat, cast, receive, geos: [] });
+    if (!this.groups.has(key)) this.groups.set(key, { mat, cast, receive, band, geos: [] });
     this.groups.get(key).geos.push(g);
   }
 
@@ -308,7 +324,7 @@ export class Batcher {
       mesh.castShadow = grp.cast; mesh.receiveShadow = grp.receive;
       mesh.matrixAutoUpdate = false;
       mesh.intersectsFrustum = batchInFrustum;
-      mesh.name = `batch:${grp.mat.name}`;
+      mesh.name = `batch:${grp.mat.name}`; mesh.userData.band = grp.band;
       parent.add(mesh);
       meshes.push(mesh);
     }

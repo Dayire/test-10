@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Batcher, rng, setDetail } from '../assets/geom.js';
+import { Batcher, rng, setDetail, LITE_BANDS } from '../assets/geom.js';
 import { G } from '../render/atmosphere.js';
 import { Shafts } from '../render/shafts.js';
 import { Dust, Flock } from '../render/fx.js';
@@ -178,14 +178,17 @@ export class ChapterLoader {
       g.scene.add(root); g.root = root;
       const L = Object.assign(emptyLevel(), {});
       g.level = L;
-      const batch = new Batcher(g.mats, { chunk: def.chunk ?? 40 });
+      // the low tier builds lighter geometry (its draw and triangle budgets): fewer segments, and the far city in one
+      // palette material per chunk (geom.js DETAIL, Batcher far)
+      const lite = !!g.world.rs.q?.lite;
+      const batch = new Batcher(g.mats, { chunk: def.chunk ?? 40, far: lite, bands: lite ? LITE_BANDS : undefined });
       const K = batch.kit();
       const r = rng(def.seed ?? 42);
       const helpers = createLevelKit(g, { K, root, L, r });
       const kit = { ...helpers, K, root, L, r, batch, mats: g.mats, phys: g.phys, game: g, add: (o) => g.add(o), track: (o) => g.track(o), ...this.scopedKit() };
       prog(0.06, 'raising walls…');
-      // the low tier builds lighter geometry (its triangle budget); set around every slice of a generator's build
-      const lite = !!g.world.rs.q?.lite, step = (f) => { setDetail(lite); try { return f(); } finally { setDetail(false); } };
+      // DETAIL.lite is set around every slice of a generator's build
+      const step = (f) => { setDetail(lite); try { return f(); } finally { setDetail(false); } };
       let out = step(() => def.build(g, kit));
       if (out && typeof out.next === 'function') {
         const it = out;
@@ -215,6 +218,7 @@ export class ChapterLoader {
       this.withHidden(() => { try { g.world.rs.renderer.compile(g.scene, g.camera); } catch (e) { console.warn('compile', e); } });
       this.flushGL();
       if (bakeJobs) await g.world.finishBake(bakeJobs, (p, n) => prog(0.5 + p * 0.36, n));
+      g.mats.paintPalette?.(g.world.rs.renderer); // the far set's colours, read from the maps just drawn
       mark('bake');
       prog(0.88, 'lighting the lanterns…');
       await this.warm(phases);

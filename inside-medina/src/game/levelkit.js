@@ -70,7 +70,10 @@ export function createLevelKit(game, { K, root, L, r = rng(42) }) {
       if (o.dress !== false && h > 2.5) dressFacade(K, { x0, x1, z, y0, top: b.top, openings: b.openings, seed: Math.round(x0 * 3 + 1), floors: Math.max(1, Math.round(h / 3.4)) });
     }
   };
+  // the distant city (FULL_GAME §8.5): on the low tier its plain materials share one palette material per chunk
+  const KF = { ...K, add: (g, m, mm = null, o = {}) => K.add(g, m, mm, { ...o, set: 'far' }) };
   const farBuilding = (x0, x1, z, h, style, o = {}) => {
+    const KK = o.far ? KF : K;
     const mats = { blue: 'plasterBlue', peach: 'plasterPeach', cream: 'plasterCream', ochre: 'plasterOchre', white: 'plasterWhite', stone: 'sandstone' };
     const m = mats[style] || 'plasterCream';
     const d = o.depth ?? 7;
@@ -78,16 +81,16 @@ export function createLevelKit(game, { K, root, L, r = rng(42) }) {
     const tint = new THREE.Color().setHSL(0.08 + rr() * 0.04, 0.15, 0.82 + rr() * 0.16);
     const g = boxMM(x0, 0, z - d, x1, h, z, {});
     shadeByHeight(g, { base: 0, grime: 3, grimeAmt: 0.25, tint });
-    K.add(g, m, null, { cast: o.cast !== false });
+    KK.add(g, m, null, { cast: o.cast !== false });
     // setback upper storey
     if (rr() < 0.35 && x1 - x0 > 5) {
       const w = (x1 - x0) * (0.35 + rr() * 0.3), sx = x0 + rr() * (x1 - x0 - w);
-      const u = boxMM(sx, h, z - d + 1, sx + w, h + 2.6 + rr() * 1.5, z - 1.2, {}); shadeByHeight(u, { base: h, grime: 0.5, grimeAmt: 0.1, tint }); K.add(u, m, null, { cast: o.cast !== false });
+      const u = boxMM(sx, h, z - d + 1, sx + w, h + 2.6 + rr() * 1.5, z - 1.2, {}); shadeByHeight(u, { base: h, grime: 0.5, grimeAmt: 0.1, tint }); KK.add(u, m, null, { cast: o.cast !== false });
     }
     // rooftop clutter: stair house, water tank, laundry
-    if (rr() < 0.5) { const cx = x0 + 1 + rr() * (x1 - x0 - 2); K.add(boxMM(cx - 0.7, h, z - 3.5, cx + 0.7, h + 2.1, z - 2), m, null, { cast: false }); }
-    if (rr() < 0.3) { const cx = x0 + 1 + rr() * (x1 - x0 - 2); const t = new THREE.CylinderGeometry(0.5, 0.5, 1.1, 12); t.translate(cx, h + 0.75, z - 4.5); K.add(worldUV(t), 'iron', null, { cast: false }); }
-    if (o.parapet !== false) merlons(K, { x0: x0 + 0.1, x1: x1 - 0.1, y: h, z: z + 0.01, h: 0.5, mat: 'plasterCream' });
+    if (rr() < 0.5) { const cx = x0 + 1 + rr() * (x1 - x0 - 2); KK.add(boxMM(cx - 0.7, h, z - 3.5, cx + 0.7, h + 2.1, z - 2), m, null, { cast: false }); }
+    if (rr() < 0.3) { const cx = x0 + 1 + rr() * (x1 - x0 - 2); const t = new THREE.CylinderGeometry(0.5, 0.5, 1.1, 12); t.translate(cx, h + 0.75, z - 4.5); KK.add(worldUV(t), 'iron', null, { cast: false }); }
+    if (o.parapet !== false) merlons(KK, { x0: x0 + 0.1, x1: x1 - 0.1, y: h, z: z + 0.01, h: 0.5, mat: 'plasterCream' });
     const n = Math.floor((x1 - x0) / 2.2);
     for (let f = 1; f < h / 3.2; f++) for (let i = 0; i < n; i++) {
       if (rr() < 0.45) continue;
@@ -95,7 +98,7 @@ export function createLevelKit(game, { K, root, L, r = rng(42) }) {
       const pts = archOutline(rr() < 0.5 ? 'pointed' : 'round', 0.62, 0.8, 0.4);
       const sh = new THREE.Shape(); sh.moveTo(-0.31, 0); pts.forEach((v) => sh.lineTo(v.x, v.y)); sh.lineTo(0.31, 0);
       const wg = new THREE.ShapeGeometry(sh, 6); wg.translate(cx, sy, z + 0.02); setColor(wg, 0xffffff);
-      K.add(worldUV(wg), 'darkInterior', null, { cast: false });
+      KK.add(worldUV(wg), 'darkInterior', null, { cast: false });
     }
   };
   const cypress = (x, z, h) => {
@@ -115,19 +118,20 @@ export function createLevelKit(game, { K, root, L, r = rng(42) }) {
     const tr = boxMM(x - 0.1, 0, z - 0.1, x + 0.1, 0.6, z + 0.1); K.add(tr, 'woodDark');
   };
   // far city in three rows plus cypresses and domes; exclusion bands keep
-  // hero views clear (rows: [x0, x1] skipped when a building would overlap)
+  // hero views clear (rows: [x0, x1] skipped when a building would overlap). Rows 3 and 4 and the domes are the far
+  // set (KF)
   const skyline = ({ x0 = -40, x1 = 240, exclude = [], exclude3 = exclude, excludeTrees = exclude, x3 = [-60, 260], x4 = [-100, 320], trees = 26, domes = [[12, -60, 4], [88, -70, 5], [118, -52, 3.5], [212, -58, 4.5], [-22, -66, 4]] } = {}) => {
     const styles = ['cream', 'peach', 'ochre', 'white', 'blue', 'cream', 'peach', 'stone'];
     const skip = (bands, a, b) => { for (const [e0, e1] of bands) if (b > e0 && a < e1) return e1; return null; };
     // row 2 (just behind the street facades)
     for (let x = x0; x < x1;) { const w = 4 + r() * 6; const s = skip(exclude, x, x + w); if (s !== null) { x = s; continue; } farBuilding(x, x + w, -12 - r() * 5, 6 + r() * 5, styles[Math.floor(r() * styles.length)], { depth: 6 }); x += w + (r() < 0.25 ? 1.5 + r() * 3 : 0.2); }
     // row 3
-    for (let x = x3[0]; x < x3[1];) { const w = 5 + r() * 8; const s = skip(exclude3, x, x + w); if (s !== null) { x = s; continue; } farBuilding(x, x + w, -24 - r() * 12, 7 + r() * 7, styles[Math.floor(r() * styles.length)], { depth: 8, cast: false }); x += w + r() * 3; }
+    for (let x = x3[0]; x < x3[1];) { const w = 5 + r() * 8; const s = skip(exclude3, x, x + w); if (s !== null) { x = s; continue; } farBuilding(x, x + w, -24 - r() * 12, 7 + r() * 7, styles[Math.floor(r() * styles.length)], { depth: 8, cast: false, far: true }); x += w + r() * 3; }
     // row 4 (hazy far city)
-    for (let x = x4[0]; x < x4[1];) { const w = 8 + r() * 14; farBuilding(x, x + w, -55 - r() * 40, 9 + r() * 12, styles[Math.floor(r() * styles.length)], { depth: 10, parapet: r() < 0.5, cast: false }); x += w + r() * 4; }
+    for (let x = x4[0]; x < x4[1];) { const w = 8 + r() * 14; farBuilding(x, x + w, -55 - r() * 40, 9 + r() * 12, styles[Math.floor(r() * styles.length)], { depth: 10, parapet: r() < 0.5, cast: false, far: true }); x += w + r() * 4; }
     // cypress and far domes punctuating the skyline
     for (let i = 0; i < trees; i++) { const x = x0 + 10 + i * 10 + r() * 6; if (excludeTrees.some(([e0, e1]) => x > e0 && x < e1)) continue; cypress(x, -20 - r() * 14, 7 + r() * 6); }
-    for (const [dx, dz, dr] of domes) dome(K, { x: dx, y: 9, z: dz, r: dr, drumH: 2.5 });
+    for (const [dx, dz, dr] of domes) dome(KF, { x: dx, y: 9, z: dz, r: dr, drumH: 2.5 });
   };
   // a low tunnel: a lintel before a back wall. The 26 big stones and 5 broken beams it once stacked never showed:
   // they turned about the world origin, up to 50 m off screen (inflating the shadow tiles). Placed where they were

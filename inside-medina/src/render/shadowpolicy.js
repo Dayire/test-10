@@ -17,11 +17,12 @@ import * as THREE from 'three';
 // The policy only ever restores the castShadow values it changed itself: a flag another package changes is
 // taken as the authored value from then on.
 export const SHADOW_PASS = { on: false, sun: null };
-const TX = 12, BANDS = [-10, -20, -35, -60];
-// scratch for the proxy build: world positions, vertex triples, tiles
-let _W = new Float32Array(0), _P = _W, _I = new Uint32Array(0), _K = new Int32Array(0), _side = 1;
+const TX = 12, SUB = 4, WIDE = 8, BANDS = [-10, -20, -35, -60];
+// scratch for the proxy build: world positions, vertex triples, tiles and the sub-tile (TX / SUB wide) of each triangle
+let _W = new Float32Array(0), _P = _W, _I = new Uint32Array(0), _K = new Int32Array(0), _S = new Uint8Array(0), _side = 1;
 const IDENTITY = new THREE.Matrix4();
 const bandOf = (z) => { let i = 0; while (i < BANDS.length && z < BANDS[i]) i++; return i; };
+const box6 = () => [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
 const _b = new THREE.Box3(), _sb = new THREE.Box3(), _fr = new THREE.Frustum(), _pm = new THREE.Matrix4();
 const _d = new THREE.Vector3(), _a = new THREE.Vector3(), _v = new THREE.Vector3(), _e = new THREE.Vector3();
 const SPOT_HZ = 15;
@@ -30,8 +31,21 @@ const PROXY_MAT = new THREE.MeshBasicMaterial({ colorWrite: false });
 PROXY_MAT.name = 'shadowProxy';
 // a proxy is invisible to every pass but the shadow pass (both cull through intersectsFrustum); in the sun's pass
 // (SHADOW_PASS.sun is its frustum) it also needs userData.sun. Tested against its world box: tiles are tall and
-// thin, a bounding sphere would overhang far below the ground into a spot's frustum
-function proxyInFrustum(frustum) { return SHADOW_PASS.on && (frustum !== SHADOW_PASS.sun || this.userData.sun) && frustum.intersectsBox(this.userData.box); }
+// thin, a bounding sphere would overhang far below the ground into a spot's frustum. A tile's triangles are stored
+// by sub-tile along x, so a pass draws only the run of sub-tiles it needs (onBeforeShadow sets the draw range): the
+// sun's from proxyPolicy, a spot's from its own frustum (its narrow cone crosses a corner of most tiles it meets)
+function proxyInFrustum(frustum) {
+  const u = this.userData;
+  if (!SHADOW_PASS.on || (frustum === SHADOW_PASS.sun && !u.sun) || !frustum.intersectsBox(u.box)) return false;
+  if (frustum === SHADOW_PASS.sun) { u.range = u.sunRange; return true; }
+  let a = -1, b = -1;
+  for (let i = 0; i < u.subs.length; i++) if (frustum.intersectsBox(u.subs[i].box)) { if (a < 0) a = i; b = i; }
+  if (a < 0) return false;
+  u.range[0] = a; u.range[1] = b;
+  return true;
+}
+function proxyRange(r, o, c, sc, geo) { const S = o.userData.subs, [a, b] = o.userData.range; geo.drawRange.start = S[a].start; geo.drawRange.count = S[b].start + S[b].count - S[a].start; }
+function proxyRangeEnd(r, o, c, sc, geo) { geo.drawRange.start = 0; geo.drawRange.count = Infinity; }
 
 const NO_RAYCAST = () => {};
 const isStaticBatch = (o) => o.userData.staticCaster === true || (o.matrixAutoUpdate === false && o.name.startsWith('batch:'));
@@ -213,7 +227,7 @@ export class ShadowPolicy {
     R.meshes.length = 0; R.sources.length = 0;
   }
   *buildJob(root, list, sig) {
-    const slots = new Array(2048), used = [], at = new Map();
+    const slots = new Array(4096), used = [], at = new Map();
     // pass 1: world positions and a tile per triangle (x / TX and a depth band), triangle counts and bounds per tile.
     // A source's world matrix is brought up to date first (a root that just arrived has never been rendered) and
     // kept for pass 2, which runs frames later, after a lantern has swayed
@@ -222,17 +236,20 @@ export class ShadowPolicy {
       used.push(o);
       yield;
       o.updateWorldMatrix(true, false); at.set(o, o.matrixWorld.clone());
-      const n = this.prep(o, at.get(o)), W = _P, I = _I, K = _K, step = _side === 2 ? 2 : 1;
+      const n = this.prep(o, at.get(o)), W = _P, I = _I, K = _K, Sb = _S, step = _side === 2 ? 2 : 1;
       for (let t = 0; t < n; t++) {
         let T = slots[K[t]];
-        if (!T) T = slots[K[t]] = { n: 0, b: [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], w: 0, a: null, c: null, s: 1 };
-        T.n += step;
-        const b = T.b;
+        if (!T) T = slots[K[t]] = { n: 0, b: box6(), ns: new Array(SUB).fill(0), sb: [...Array(SUB)].map(box6), wp: null, a: null, c: null, s: 1 };
+        T.n += step; T.ns[Sb[t]] += step;
+        const b = T.b, bs = T.sb[Sb[t]];
         for (let j = t * 3; j < t * 3 + 3; j++) {
           const v = I[j] * 3, x = W[v], y = W[v + 1], z = W[v + 2];
           if (x < b[0]) b[0] = x; if (x > b[3]) b[3] = x;
           if (y < b[1]) b[1] = y; if (y > b[4]) b[4] = y;
           if (z < b[2]) b[2] = z; if (z > b[5]) b[5] = z;
+          if (x < bs[0]) bs[0] = x; if (x > bs[3]) bs[3] = x;
+          if (y < bs[1]) bs[1] = y; if (y > bs[4]) bs[4] = y;
+          if (z < bs[2]) bs[2] = z; if (z > bs[5]) bs[5] = z;
         }
       }
     }
@@ -242,15 +259,17 @@ export class ShadowPolicy {
       T.c = [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2];
       T.s = Math.max(1e-3, b[3] - b[0], b[4] - b[1], b[5] - b[2]) / 2 * 1.0001;
       T.a = new Int16Array(T.n * 9);
+      // sub-tiles one after the other: write pointers (int16 values) at each one's first triangle
+      let o = 0; T.off = T.ns.map((c) => { const at = o; o += c; return at; }); T.wp = T.off.map((t) => t * 9);
       tiles.set(k, T);
     });
     // pass 2: 16-bit positions around each tile's centre (one uniform scale, truncated: under a millimetre)
     for (const o of used) {
       yield;
-      const n = this.prep(o, at.get(o)), side = _side, W = _P, I = _I, K = _K;
+      const n = this.prep(o, at.get(o)), side = _side, W = _P, I = _I, K = _K, Sb = _S;
       for (let t = 0; t < n; t++) {
         const T = slots[K[t]], a = T.a, cx = T.c[0], cy = T.c[1], cz = T.c[2], f = 32767 / T.s;
-        let w = T.w;
+        let w = T.wp[Sb[t]];
         for (let r = 0; r < 2; r++) {
           if (r === 0 ? side === -1 : side === 1) continue;
           for (let k = 0; k < 3; k++) {
@@ -259,7 +278,7 @@ export class ShadowPolicy {
             w += 3;
           }
         }
-        T.w = w;
+        T.wp[Sb[t]] = w;
       }
     }
     const meshes = [];
@@ -271,10 +290,13 @@ export class ShadowPolicy {
       g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) / 2 / T.s);
       g.boundingBox = new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1));
       const p = new THREE.Mesh(g, PROXY_MAT);
-      p.name = `shadowProxy:${(k >> 3) - 128}|${k & 7}`;
+      p.name = `shadowProxy:${k & 2048 ? 'w' : ''}${((k & 2047) >> 3) - 128}|${k & 7}`;
       p.userData.shadowProxy = true; p.userData.tris = T.n; p.userData.root = root;
       p.userData.box = new THREE.Box3(new THREE.Vector3(b[0], b[1], b[2]), new THREE.Vector3(b[3], b[4], b[5]));
       p.userData.front = b[5]; p.userData.top = b[4]; p.userData.radius = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) / 2; p.userData.sun = true;
+      p.userData.subs = T.ns.map((c, i) => (c ? { start: T.off[i] * 3, count: c * 3, box: new THREE.Box3(new THREE.Vector3(T.sb[i][0], T.sb[i][1], T.sb[i][2]), new THREE.Vector3(T.sb[i][3], T.sb[i][4], T.sb[i][5])) } : null)).filter(Boolean);
+      p.userData.sunRange = [0, p.userData.subs.length - 1]; p.userData.range = [0, p.userData.subs.length - 1];
+      p.onBeforeShadow = proxyRange; p.onAfterShadow = proxyRangeEnd;
       p.position.set(T.c[0], T.c[1], T.c[2]); p.scale.setScalar(T.s);
       p.castShadow = true; p.receiveShadow = false;
       p.intersectsFrustum = proxyInFrustum; p.raycast = NO_RAYCAST;
@@ -288,9 +310,13 @@ export class ShadowPolicy {
       if (o.userData.staticCaster === true) m.pin = [e[12], e[13], e[14]]; // where its merged shadow was cast from
     }
     this.force = true;
-    // the lowest static geometry: no shadow of this root lands below it
-    let floor = Infinity; for (const T of tiles.values()) floor = Math.min(floor, T.b[1]);
-    return { sig, sources: used, meshes, floor: Number.isFinite(floor) ? floor : -10 };
+    // the lowest static geometry: no shadow of this root lands below it; and per TX-wide column of x
+    let floor = Infinity; const cols = new Map();
+    for (const T of tiles.values()) {
+      floor = Math.min(floor, T.b[1]);
+      for (let c = Math.floor(T.b[0] / TX); c <= Math.floor(T.b[3] / TX); c++) cols.set(c, Math.min(cols.get(c) ?? Infinity, T.b[1]));
+    }
+    return { sig, sources: used, meshes, floor: Number.isFinite(floor) ? floor : -10, cols };
   }
   // a source's world-space vertices (_P: its own array, or _W), the vertex triple of each triangle (_I) and its tile
   // (_K); _side: 1 front faces as authored, -1 reversed, 2 both. Returns the triangle count.
@@ -314,13 +340,18 @@ export class ShadowPolicy {
     const W = _P;
     const total = idx ? idx.count : nv, dr = g.drawRange, s0 = Math.max(0, dr.start), s1 = Math.min(total, dr.start + dr.count);
     const n = Math.max(0, Math.floor((s1 - s0) / 3));
-    if (_K.length < n) { _K = new Int32Array(Math.ceil(n * 1.25)); _I = new Uint32Array(_K.length * 3); }
+    if (_K.length < n) { _K = new Int32Array(Math.ceil(n * 1.25)); _S = new Uint8Array(_K.length); _I = new Uint32Array(_K.length * 3); }
     const ia = idx ? idx.array : null;
     for (let t = 0; t < n; t++) {
       const i = s0 + t * 3, v0 = ia ? ia[i] : i, v1 = ia ? ia[i + 1] : i + 1, v2 = ia ? ia[i + 2] : i + 2;
       _I[t * 3] = v0; _I[t * 3 + 1] = v1; _I[t * 3 + 2] = v2;
-      const cx = (W[v0 * 3] + W[v1 * 3] + W[v2 * 3]) / 3, cz = (W[v0 * 3 + 2] + W[v1 * 3 + 2] + W[v2 * 3 + 2]) / 3;
-      _K[t] = (Math.min(255, Math.max(0, Math.floor(cx / TX) + 128)) << 3) | bandOf(cz);
+      const x0 = W[v0 * 3], x1 = W[v1 * 3], x2 = W[v2 * 3], cx = (x0 + x1 + x2) / 3, cz = (W[v0 * 3 + 2] + W[v1 * 3 + 2] + W[v2 * 3 + 2]) / 3;
+      // a triangle wider than a sub-tile (a long wall face, a cornice) would stretch its tile's box over its whole
+      // length: wide ones go to tiles of their own, WIDE tiles across and every depth (they are few)
+      const wide = Math.max(x0, x1, x2) - Math.min(x0, x1, x2) > TX / SUB, w = wide ? TX * WIDE : TX;
+      const fx = cx / w, tx = Math.floor(fx);
+      _K[t] = wide ? 2048 | (Math.min(255, Math.max(0, tx + 128)) << 3) : (Math.min(255, Math.max(0, tx + 128)) << 3) | bandOf(cz);
+      _S[t] = Math.min(SUB - 1, Math.floor((fx - tx) * SUB));
     }
     return n;
   }
@@ -334,7 +365,7 @@ export class ShadowPolicy {
     const L = this.suns[0];
     SHADOW_PASS.sun = L ? L.shadow.getFrustum() : null;
     if (!this.roots.size) return;
-    let k = 0, len = 0;
+    let k = 0;
     if (L) {
       _d.subVectors(L.position, L.target.position).normalize();
       k = _d.z < 0 ? -_d.z / Math.max(_d.y, 0.05) : 0;
@@ -344,24 +375,57 @@ export class ShadowPolicy {
       for (const p of R.meshes) {
         const root = p.userData.root, shown = root === scene || (root.visible && root.parent === scene);
         if (p.visible !== shown) { p.visible = shown; this.force = true; }
+        const u = p.userData;
         let sun = shown;
-        if (sun && this.reach < Infinity && p.userData.front + Math.max(0, p.userData.top) * k < -this.reach) { sun = false; reachCulled++; }
+        if (sun && this.reach < Infinity && u.front + Math.max(0, u.top) * k < -this.reach) { sun = false; reachCulled++; }
         if (sun && L) {
-          const b = p.userData.box;
           if (_d.y > 0.02) {
-            len = Math.min(400, (b.max.y - R.floor) / _d.y);
-            _sb.copy(b).expandByPoint(_v.copy(b.min).addScaledVector(_d, -len)).expandByPoint(_v.copy(b.max).addScaledVector(_d, -len)).expandByScalar(1.5);
-            if (!_fr.intersectsBox(_sb)) { sun = false; viewCulled++; }
+            if (!this.sweptInView(u.box, this.floorUnder(R, u.box), k)) { sun = false; viewCulled++; }
           } else {
-            const c = _v.setFromMatrixPosition(p.matrixWorld), r = p.userData.radius + 3;
+            const c = _v.setFromMatrixPosition(p.matrixWorld), r = u.radius + 3;
             _e.copy(c).addScaledVector(_d, -400);
             for (const pl of _fr.planes) if (pl.distanceToPoint(c) < -r && pl.distanceToPoint(_e) < -r) { sun = false; viewCulled++; break; }
           }
         }
-        if (p.userData.sun !== sun) { p.userData.sun = sun; this.force = true; }
+        // the same per sub-tile: the run of them the sun's pass draws
+        let a = 0, b = u.subs.length - 1;
+        if (sun && L && _d.y > 0.02) {
+          a = -1;
+          const fl = this.floorUnder(R, u.box);
+          for (let i = 0; i < u.subs.length; i++) if (this.sweptInView(u.subs[i].box, fl, k)) { if (a < 0) a = i; b = i; }
+          if (a < 0) { sun = false; viewCulled++; a = 0; b = u.subs.length - 1; }
+        }
+        if (u.sunRange[0] !== a || u.sunRange[1] !== b) { u.sunRange[0] = a; u.sunRange[1] = b; this.force = true; }
+        if (u.sun !== sun) { u.sun = sun; this.force = true; }
       }
     }
     this.stats.reachCulled = reachCulled; this.stats.viewCulled = viewCulled;
+  }
+
+  // the lowest geometry a box's shadow can reach: over the columns of x the light can carry it across on its way
+  // down to the root's lowest geometry (a deep gap lowers the floor only where its shadow could fall into it)
+  floorUnder(R, b) {
+    if (!R.cols || _d.y <= 0.02) return R.floor;
+    const span = (b.max.y - R.floor) * Math.abs(_d.x) / _d.y + 2;
+    const x0 = _d.x > 0 ? b.min.x - span : b.min.x, x1 = _d.x > 0 ? b.max.x : b.max.x + span;
+    let f = Infinity;
+    for (let c = Math.floor(x0 / TX); c <= Math.floor(x1 / TX); c++) { const v = R.cols.get(c); if (v !== undefined && v < f) f = v; }
+    return Number.isFinite(f) ? Math.min(f, b.min.y) : R.floor;
+  }
+  // a box's shadow can land in view: the box swept along the light (_d, from the sun) down to the lowest geometry
+  // under it (floor) meets the camera's frustum (_fr), with 1.5 m to spare for the frames a 30 Hz map is reused. The
+  // swept box is the box plus a segment, so its reach along a plane's normal is the box's plus the segment's: tested
+  // plane by plane, as tight as the swept shape itself (its bounding box reached far over the view). On low / medium
+  // its front top edge must also shade within `reach` metres behind the play plane (k: depth per metre of height)
+  sweptInView(b, floor, k) {
+    if (this.reach < Infinity && b.max.z + Math.max(0, b.max.y) * k < -this.reach) return false;
+    const len = Math.min(400, (b.max.y - floor) / _d.y);
+    for (const pl of _fr.planes) {
+      const n = pl.normal;
+      const h = n.x * (n.x > 0 ? b.max.x : b.min.x) + n.y * (n.y > 0 ? b.max.y : b.min.y) + n.z * (n.z > 0 ? b.max.z : b.min.z) + pl.constant;
+      if (h + Math.max(0, -len * n.dot(_d)) < -1.5) return false;
+    }
+    return true;
   }
 
   // per frame, before rendering the scene

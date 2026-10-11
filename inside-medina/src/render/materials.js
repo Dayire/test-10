@@ -1,6 +1,25 @@
 import * as THREE from 'three';
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { patchMaterial } from './atmosphere.js';
 import { SURFACES } from './textures.js';
+
+// The low tier's far set (FULL_GAME §8.5): distant static geometry of every plain opaque material merges into one
+// material per chunk. Each vertex names its source material in a palette (a PAL_N × 1 texture: the material's mean
+// albedo, read from the smallest mip of its baked map, times its colour), so the far city keeps its colours, its
+// vertex grime, its lighting, shadows and fog and loses only texture detail, in one draw instead of one per material.
+// The palette's alpha is the material's metalness
+const PAL_N = 64;
+const PAINT = new THREE.ShaderMaterial({
+  uniforms: { map: { value: null }, color: { value: new THREE.Color() }, useMap: { value: 0 }, metal: { value: 0 } },
+  vertexShader: 'void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+  fragmentShader: 'uniform sampler2D map; uniform vec3 color; uniform float useMap, metal;\nvoid main() { vec3 c = useMap > .5 ? texture2D(map, vec2(.5), 16.).rgb : vec3(1.); gl_FragColor = vec4(c * color, metal); }',
+  depthTest: false, depthWrite: false,
+});
+// a material the far set can stand in for: lit, opaque, one-sided, not emissive, cut out, swaying or translucent
+export function farEligible(m) {
+  return !!m && m.isMeshStandardMaterial && !m.isMeshPhysicalMaterial && !m.transparent && !(m.alphaTest > 0) && m.side === THREE.FrontSide &&
+    !(m.emissive && m.emissiveIntensity > 0 && m.emissive.getHex() !== 0) && m.defines?.USE_WIND === undefined && m.defines?.USE_TRANSLUCENCY === undefined;
+}
 
 // Material library. Geometry UVs are authored in metres; each material maps
 // one texture tile to `tile` metres through a per-material UV scale.
@@ -13,6 +32,54 @@ export class Materials {
     this.envMap = envMap;
     this.baker = baker;
     this.cache = new Map();
+    this.palette = []; // far-set entries: { mat, painted }
+  }
+
+  // ---- the far set (see PAL_N above)
+  paletteIndex(mat) {
+    let i = this.palette.findIndex((e) => e.mat === mat);
+    if (i < 0 && this.palette.length < PAL_N) { i = this.palette.length; this.palette.push({ mat, painted: false }); }
+    return i;
+  }
+  farSet() {
+    if (this.cache.has('farSet')) return this.cache.get('farSet');
+    this.palRT = new THREE.WebGLRenderTarget(PAL_N, 1, { type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false, depthBuffer: false });
+    this.palRT.texture.name = 'farPalette';
+    const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, vertexColors: true, envMap: this.envMap, envMapIntensity: Materials.envScale });
+    patchMaterial(m, {});
+    const base = m.onBeforeCompile, key = m.customProgramCacheKey, pal = { value: this.palRT.texture };
+    m.customProgramCacheKey = () => `${key()}-far`;
+    m.onBeforeCompile = (shader, r) => {
+      base(shader, r);
+      shader.uniforms.uPalette = pal;
+      shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nattribute float pal; varying float vPal;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vPal = pal;');
+      shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D uPalette; varying float vPal;')
+        .replace('#include <color_fragment>', `#include <color_fragment>\n  vec4 palC = texture2D(uPalette, vec2((vPal + .5) / ${PAL_N}., .5));\n  diffuseColor.rgb *= palC.rgb;`)
+        .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = palC.a;');
+    };
+    m.name = 'farSet';
+    m.userData.envInt = 1;
+    this.cache.set('farSet', m);
+    return m;
+  }
+  // paint the entries not painted yet (after the bake that drew their maps; all of them again after a re-bake)
+  paintPalette(renderer) {
+    if (!this.palRT) return 0;
+    const gen = this.baker?.generation ?? 0;
+    if (this._palGen !== gen) { this._palGen = gen; for (const e of this.palette) e.painted = false; }
+    const todo = this.palette.map((e, i) => [e, i]).filter(([e]) => !e.painted);
+    if (!todo.length) return 0;
+    const q = this._palQuad || (this._palQuad = new FullScreenQuad(PAINT)), prev = renderer.getRenderTarget(), rt = this.palRT, U = PAINT.uniforms;
+    for (const [e, i] of todo) {
+      U.map.value = e.mat.map; U.useMap.value = e.mat.map ? 1 : 0; U.color.value.copy(e.mat.color); U.metal.value = e.mat.metalness;
+      rt.viewport.set(i, 0, 1, 1); rt.scissor.set(i, 0, 1, 1); rt.scissorTest = true;
+      renderer.setRenderTarget(rt); q.render(renderer);
+      e.painted = true;
+    }
+    rt.viewport.set(0, 0, PAL_N, 1); rt.scissorTest = false; U.map.value = null;
+    renderer.setRenderTarget(prev);
+    return todo.length;
   }
 
   // baked texture set for a surface, baking it now if a chapter forgot to list it
