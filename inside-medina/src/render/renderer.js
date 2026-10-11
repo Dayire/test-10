@@ -232,7 +232,7 @@ export class RenderSystem {
     // the tier's budget too
     const step = this.auto.update(cost, now, D.displayLimited ? D.budget(base) : base, {
       dynAtMin: D.atMin || D.limited > 0, dynAtMax: D.atMax, work,
-      canUp: !this.coarse && !D.limited && TIERS.indexOf(this.tier) < TIERS.indexOf(this.autoMax),
+      canUp: !this.coarse && !D.limited && TIERS.indexOf(this.tier) < TIERS.indexOf(this.autoMax), canDown: TIERS.indexOf(this.tier) > 0,
     });
     if (step) {
       const idx = TIERS.indexOf(this.tier) + step;

@@ -118,7 +118,9 @@ change clears it.
 dynamic scale at its floor or limited; steps up (desktop only, never while limited) after 30 s of headroom at
 full scale; at most one change per 30 s, and an upgrade that does not hold doubles the wait before the next one.
 A step down whose next window is not faster (median) is undone 30 s later, also on touch devices (an undo, not
-an upgrade), and is not tried again at that frame time.
+an upgrade), and is not tried again at that frame time. On the lowest tier an overload asks for nothing
+(`canDown`): a step that could not happen once counted as a change, came back as an "undo" to medium 30 s later,
+and the tiers swung low ↔ medium every minute under a sustained overload.
 `?slowgpu=N` replaces the frame cost with a synthetic GPU (4 ms + N·2.4 ms·scale²·tier, the tier factor 0.55 on
 low, 1 on medium, 1.35 on high, 1.8 on ultra) for tests.
 
@@ -290,9 +292,11 @@ frame cap (10 s of 120/144 Hz timestamps), the light state stable across frames 
 (`settingsNoauto`), paused and hidden frames ignored, the night sky with the LookDirector's values (stars, a
 dark sky, a moon disc of the expected size), pigeons in view far from the boy (`flockView`), the LUT, the
 soft-layer / particles / shafts / dispose / particle-clearing / particle-warm-up contracts, `?slowgpu=8&dynres=1` (drop within
-2 s, recovery after 5 s, ≤ 1 tier change), sustained overload (one step down, ≥ 30 s apart), the LDR
+2 s, recovery after 5 s, ≤ 1 tier change), sustained overload (one step down, ≥ 30 s apart, over 120 s; both are
+driven by 60 Hz frames handed to `trackFrame` synchronously, so the machine's load never changes their outcome), the LDR
 fallback, the real boot loop under a 120 Hz `requestAnimationFrame` stub installed before boot
-(`capLoop`; reported as pending on a tree whose loop does not call `beginFrame`) and context loss. Added with
+(`capLoop`; reported as pending on a tree whose loop does not call `beginFrame`) and context loss (counted in
+frames: the shadow policy brought to rest by a scan every frame before each count, ten frames after the restore). Added with
 the frame-clock work: `moonFlare` (no sun halo on the moon, the full one on the golden-hour sun),
 `shadowProxies` (the frame with and without merged casters at the six spots on high and low: pixels and
 shadow draws), `dynSignal` (`trackFrame` fed a minute or more of frames from a device without a GPU timer: a

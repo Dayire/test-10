@@ -451,31 +451,34 @@ if (checks || only === 'checks') {
     // ?slowgpu=8: dynamic resolution drops within 2 s, recovers after 5 s of headroom, <= 1 tier change per 30 s
     // ?noauto keeps the resolution fixed unless ?dynres=1 asks for dynamic resolution (the settings cannot)
     const p2 = await open('tier=medium&slowgpu=8&dynres=1');
-    if (want('slowgpu')) result.checks.slowgpu = await p2.evaluate(async () => {
+    // driven by 60 Hz frames handed to the renderer synchronously (the controllers' clock is the sum of the tracked
+    // frames, and the synthetic GPU's cost a formula), so the outcome never depends on the machine's load
+    if (want('slowgpu')) result.checks.slowgpu = await p2.evaluate(() => {
       const rs = window.__medina.game.world.rs; rs.autoQuality = true; rs.applySettings({ dynres: true, fpsCap: 60 });
-      // the URL turned the synthetic slow GPU on; hold it until frames flow so the timing starts at its onset
-      const param = rs.slowGpu; rs.slowGpu = 1; rs.dyn.reset(1);
-      await new Promise((res) => { const n = window.__frames; const f = () => (window.__frames >= n + 10 ? res() : setTimeout(f, 50)); f(); });
-      rs.dyn.reset(1); rs.slowGpu = param;
-      const log = []; const t0 = performance.now(); let tierChanges = 0, tier = rs.tier;
-      const sample = () => { if (rs.tier !== tier) { tierChanges++; tier = rs.tier; } log.push([+((performance.now() - t0) / 1000).toFixed(2), +rs.dyn.scale.toFixed(3), rs.tier]); };
-      const wait = (ms) => new Promise((res) => { const end = performance.now() + ms; const f = () => { sample(); if (performance.now() < end) setTimeout(f, 50); else res(); }; f(); });
+      const param = rs.slowGpu; rs.dyn.reset(1); rs.cap.skipped = false;
+      const log = []; const t0 = rs.clock; let tierChanges = 0, tier = rs.tier;
+      const frame = () => { rs.trackFrame(1000 / 60); if (rs.tier !== tier) { tierChanges++; tier = rs.tier; } log.push([+((rs.clock - t0) / 1000).toFixed(2), +rs.dyn.scale.toFixed(3), rs.tier]); };
+      const run = (ms) => { const end = rs.clock + ms; for (let i = 0; i < ms / 8 && rs.clock < end; i++) frame(); };
       const start = rs.dyn.scale;
-      await wait(2000);
+      run(2000);
       const dropT = log.find((e) => e[1] < start - 0.01)?.[0] ?? null;
       const low = rs.dyn.scale;
       rs.slowGpu = 1; // headroom from here on
-      const t1 = performance.now();
-      await new Promise((res) => { const f = () => { sample(); if (rs.dyn.scale >= start - 0.001 || performance.now() - t1 > 15000) res(); else setTimeout(f, 50); }; f(); });
-      const recoverT = +((performance.now() - t1) / 1000).toFixed(2);
-      await wait(1000);
-      return { param, start, dropT, low, recoverT, recovered: rs.dyn.scale, tierChanges, tier: rs.tier, ok: param === 8 && dropT !== null && dropT <= 2 && rs.dyn.scale >= start - 0.001 && recoverT >= 5 && tierChanges <= 1, trace: log.filter((e, i) => i % 10 === 0) };
+      const t1 = rs.clock;
+      for (let i = 0; i < 2000 && rs.dyn.scale < start - 0.001 && rs.clock - t1 <= 15000; i++) frame();
+      const recoverT = +((rs.clock - t1) / 1000).toFixed(2);
+      run(1000);
+      return { param, start, dropT, low, recoverT, recovered: rs.dyn.scale, tierChanges, tier: rs.tier, ok: param === 8 && dropT !== null && dropT <= 2 && rs.dyn.scale >= start - 0.001 && recoverT >= 5 && tierChanges <= 1, trace: log.filter((e, i) => i % 30 === 0) };
     });
     // sustained overload with auto quality: at most one tier change per 30 s, and it steps down
-    if (want('autoTier')) result.checks.autoTier = await p2.evaluate(async () => {
-      const rs = window.__medina.game.world.rs; rs.slowGpu = 40; rs.autoQuality = true;
-      const t0 = performance.now(), changes = []; let tier = rs.tier;
-      await new Promise((res) => { const f = () => { if (rs.tier !== tier) { changes.push([+((performance.now() - t0) / 1000).toFixed(1), tier, rs.tier]); tier = rs.tier; } if (performance.now() - t0 < 40000) setTimeout(f, 100); else res(); }; f(); });
+    // 120 s of 60 Hz frames handed to the renderer in one synchronous run (the synthetic GPU's cost is a formula of the
+    // tier and the resolution, and the controllers' clock is the sum of the tracked frames): the machine's own load
+    // never changes the outcome, as it did with the real loop on a shared machine. Long enough to see the lowest
+    // tier hold: a step down asked for there once came back 30 s later as an "undo" to medium, and so on
+    if (want('autoTier')) result.checks.autoTier = await p2.evaluate(() => {
+      const rs = window.__medina.game.world.rs; rs.slowGpu = 40; rs.autoQuality = true; rs.cap.skipped = false;
+      const t0 = rs.clock, changes = []; let tier = rs.tier;
+      for (let i = 0; i < 120 * 60; i++) { rs.trackFrame(1000 / 60); if (rs.tier !== tier) { changes.push([+((rs.clock - t0) / 1000).toFixed(1), tier, rs.tier]); tier = rs.tier; } }
       rs.slowGpu = 0;
       const gaps = changes.slice(1).map((c, i) => c[0] - changes[i][0]);
       return { changes, ok: changes.length >= 1 && changes.length <= 2 && gaps.every((g) => g >= 30) && changes.every((c) => ['low', 'medium', 'high', 'ultra'].indexOf(c[2]) < ['low', 'medium', 'high', 'ultra'].indexOf(c[1])) };
@@ -881,6 +884,16 @@ async function contextLoss() {
     const ev = { lost: 0, restored: 0 };
     rs.onContextLost(() => ev.lost++); const off = rs.onContextRestored(() => ev.restored++);
     const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+    // frames rendered and the shadow proxies built (a few milliseconds a frame): counted in frames, never in wall time,
+    // so a loaded machine only takes longer
+    const frames = (n, max = 60000) => new Promise((res) => { const f0 = window.__frames, t0 = performance.now(); const f = () => (window.__frames >= f0 + n || performance.now() - t0 > max ? res(window.__frames - f0) : setTimeout(f, 20)); f(); });
+    // the shadow policy at rest: a scan every frame (it scans once a second on its own) until the proxied and settled
+    // casters stay the same for six scans with nothing left to build
+    const settle = async () => {
+      const S = rs.shadows; let same = 0, last = null;
+      for (let i = 0; i < 900 && same < 6; i++) { S.nextScan = 0; await frames(1); const k = `${S.stats?.proxied}|${S.stats?.settled}|${S.stats?.proxies}`; same = !S.building && k === last ? same + 1 : 0; last = k; }
+      return frames(5);
+    };
     // draws of merged static casters in the sun's map in one forced refresh (through whatever shadowMap the
     // renderer has then: a restore replaces it, and the proxies must still reach the new one)
     // the same view both times: the photo's camera snap rendered by the game itself before counting
@@ -891,7 +904,7 @@ async function contextLoss() {
       try { rs.shadows.invalidate(); rs.render(M.game.scene, M.game.camera, M.game.time); } finally { r.renderBufferDirect = rbd; }
       return n;
     };
-    M.photo(97, 0, 1, 0.2); await wait(600);
+    M.photo(97, 0, 1, 0.2); await settle();
     const drawsBefore = shadowDraws(), proxiesBefore = rs.shadows.stats?.proxies;
     const f0 = window.__frames;
     ext.loseContext(); await wait(300);
@@ -900,14 +913,14 @@ async function contextLoss() {
     // the foundation reloads the chapter at its checkpoint after a restore: wait for it
     const reload = M.game.events?.next ? M.game.events.next('chapterStart') : null;
     ext.restoreContext(); await wait(800);
-    if (reload) { await reload; await new Promise((res) => { const f = () => (M.game.mode !== 'loading' ? res() : setTimeout(f, 100)); f(); }); M.photo(97, 0, 1, 0.2); await wait(600); }
-    const f1 = window.__frames; await wait(1500);
+    if (reload) { await reload; await new Promise((res) => { const f = () => (M.game.mode !== 'loading' ? res() : setTimeout(f, 100)); f(); }); M.photo(97, 0, 1, 0.2); await settle(); }
+    const framesAfter = await frames(10);
     off();
     const drawsAfter = shadowDraws();
-    return { ev, whileLost, renderError, afterRestore: { lost: rs.lost, contextLost: gl.isContextLost(), framesIn1500ms: window.__frames - f1 }, shadowDraws: [drawsBefore, drawsAfter], proxies: [proxiesBefore, rs.shadows.stats?.proxies], hasProxies: typeof rs.shadows.setProxies === 'function' };
+    return { ev, whileLost, renderError, afterRestore: { lost: rs.lost, contextLost: gl.isContextLost(), frames: framesAfter }, shadowDraws: [drawsBefore, drawsAfter], proxies: [proxiesBefore, rs.shadows.stats?.proxies], hasProxies: typeof rs.shadows.setProxies === 'function' };
   });
   await page.context().close();
-  return { ...r, ok: !!r.skipped || (r.ev.lost === 1 && r.ev.restored === 1 && r.whileLost.lost && r.whileLost.begin === false && !r.renderError && !r.afterRestore.lost && !r.afterRestore.contextLost && r.afterRestore.framesIn1500ms > 0 && (!r.hasProxies || (r.shadowDraws[0] > 0 && r.shadowDraws[1] > 0 && Math.abs(r.shadowDraws[1] - r.shadowDraws[0]) <= 0.2 * r.shadowDraws[0]))) };
+  return { ...r, ok: !!r.skipped || (r.ev.lost === 1 && r.ev.restored === 1 && r.whileLost.lost && r.whileLost.begin === false && !r.renderError && !r.afterRestore.lost && !r.afterRestore.contextLost && r.afterRestore.frames >= 10 && (!r.hasProxies || (r.shadowDraws[0] > 0 && r.shadowDraws[1] > 0 && Math.abs(r.shadowDraws[1] - r.shadowDraws[0]) <= 0.2 * r.shadowDraws[0]))) };
 }
 
 if (out) fs.writeFileSync(out, JSON.stringify(result, null, 1));

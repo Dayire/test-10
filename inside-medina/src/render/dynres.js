@@ -132,10 +132,11 @@ export class AutoQuality {
   }
   restart(now) { this.win.length = 0; this.winStart = now + 2000; this.headroomSince = -1; }
   // → -1 step down, +1 step up, 0 stay. dynAtMin: the resolution can give no more (at its floor, or shown not to
-  // change the frame period). A step down that does not make frames faster (the next window's median) is undone
+  // change the frame period). canDown false: already on the lowest tier, so an overload asks for nothing (a step
+  // that cannot happen must never be undone by a step up). A step down that does not make frames faster (the next window's median) is undone
   // once 30 s have passed, also where upgrades are off (an undo, not an upgrade), and is not tried again at that
   // frame time: a throttled display, for one, gets nothing from a lower tier.
-  update(ms, now, budget, { dynAtMin, dynAtMax, canUp, work }) {
+  update(ms, now, budget, { dynAtMin, dynAtMax, canUp, canDown = true, work }) {
     if (now < this.winStart) return 0;
     if (this.winStart < 0) this.winStart = now;
     this.win.push(Math.min(ms, 250));
@@ -154,7 +155,7 @@ export class AutoQuality {
     if (this.ineffective && p90 < this.ineffective * 0.8) this.ineffective = 0;
     if (p90 > budget * 1.3 && dynAtMin && !(this.ineffective && p90 <= this.ineffective * 1.1)) {
       this.headroomSince = -1;
-      if (now - this.lastChange < 30000 || this.pending) return 0;
+      if (!canDown || now - this.lastChange < 30000 || this.pending) return 0;
       if (now - this.lastUp < 45000) this.upWait = Math.min(240000, this.upWait * 2); // the last upgrade did not hold
       this.lastChange = now; this.pending = { p90, p50 };
       return -1;
