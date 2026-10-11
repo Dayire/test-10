@@ -32,8 +32,7 @@ WebGL work in the same GPU process: a turning splash rosette doubled the bake (6
 `#ui.soft-gl` holds the endless decorative motions still (spins, the card's drifting lattice, hint pulses);
 transitions still play. Real GPUs keep every motion.
 While the main menu shows, `world.rs.setMenuBackground(true)` renders the title at 30 fps and half resolution
-(requests/P.md #8); a new tier (the quality setting, or auto quality) resets the renderer's resolution range, so the
-shell asks again when `rs.tier` changes under the menu. Desktop pointers add ±0.6 m of parallax to the title shot (the
+(requests/P.md #8); the renderer keeps it through a new tier (the quality setting, or auto quality: requests/U.md #8). Desktop pointers add ±0.6 m of parallax to the title shot (the
 override function is wrapped). Beside the settings sheet the live scene steps back under a plain dark scrim.
 
 ## Flow (FULL_GAME §7.1)
@@ -163,8 +162,8 @@ and in reach. The save code field is 16 px (iOS zooms the page when a smaller fi
   pad buttons, or the touch glyphs), bottom right on a desktop, under the chapter on phones.
 - **Chapters**: four arches (an SVG clip path), each with a 320 × 180 JPEG (q 0.7) captured from the canvas ~1.6 s
   into play the first time a chapter is reached (never from the dimmed half-resolution title; `medina.v1.thumb.<id>`),
-  else the chapter's palette; the glyph; checkpoint pips (the
-  counts of FULL_GAME §2–5, replaced by the counts seen when a chapter loads). Locked chapters are dark arches with a
+  else the chapter's palette; the glyph; checkpoint pips (the registry's `cps`, FULL_GAME §2–5, replaced by the
+  counts seen when a chapter loads). Locked chapters are dark arches with a
   closed door. Confirm (or a tap) on a chapter with reached checkpoints opens a stepper over the foot of its arch
   (‹ n/total ›, 44 px arrows; ← → or the d-pad on keys and pads, the legend says so); confirm or a tap on the card
   starts there. The pips stay on one row (they shrink for long chapters); a mouse may click a reached pip, on touch
@@ -186,10 +185,14 @@ and in reach. The save code field is 16 px (iOS zooms the page when a smaller fi
 
 The save rosette (top right, while a write happens), hint glyphs, sound cues, the rotate glyph. **HintDirector**
 (`hints.js`): `L.hints = [{x0, x1, y0?, y1?, after, glyph, unless(game)}]` with glyphs `jump grab up down tilt crank aim
-crawl`; the first steps of a journey get `move` (`game.hooks.hint('controls')`). Every chapter also teaches from
-context (`CONTEXT`): up at a vine's foot or when hanging from a ledge, grab beside a crate or a lever, jump when the
-boy walks into something a jump clears (a hop ≤ 0.92 m, or a ledge ≤ 2.54 m; never a wall too high: puzzle-honest).
-A chapter's zones come first, and a verb learnt from a zone is not taught again from context. A pause or a menu
+crawl turn`; the first steps of a journey get `move` (`game.hooks.hint('controls')`). The souk declares its own zones
+at the first use of each verb (the sack pile, crate A, the terrace once the crate stands there, the lever, the ivy
+wall, the rubble tunnel). Every chapter also teaches from context (`CONTEXT`): up at a vine's foot or when hanging from
+a ledge, grab beside a crate, a lever or a Sunwork prop, jump when the boy walks into something a jump clears (a hop ≤
+0.92 m, or a ledge ≤ 2.54 m; never a wall too high: puzzle-honest); L's verbs: tilt on a gripped mirror (↑ ↓, the
+stick, or the finger aiming on touch), crank at a crank, turn (← →) at the capstan, and the mouse (aim) once a desktop
+player has tilted with the keys. A chapter's zones come first: a context hint for a verb waits while a zone for it
+counts down, and a verb learnt from a zone is not taught again from context. A pause or a menu
 holds the glyph out of sight; it comes back on resume. The glyph follows the device in hand
 (keycaps with the player's own layout letters, pad buttons of the pad's family, a ghost thumb on touch that also
 pulses the control) above the boy's projected head, and fades when the action happens; done hints are written to
@@ -290,7 +293,7 @@ SwiftShader container (4 CPUs, shared with another agent), dev server.
 | stick | the base spawns under the thumb; 0.5 R → x 0.5, walking at 1.43 m/s; 1.0 R → x 1, running at 4.1 m/s; release → 0 |
 | grab | stick and grab held together (two touches) grip and push the souk's first crate 1.36 m |
 | lens | the boy's projection inside the play rect, near its centre (portrait: 441 in 47–607 above the band) |
-| aim | the touch reaches `pin.aimTarget` at the world point under the finger (error 0, pointer kind `touch`) |
+| aim | (the lab stub, before the integration) the touch reaches `pin.aimTarget` at the world point under the finger; since L merged, the real props: see "Integration" below |
 | hybrid (touch laptop) | the layer away and transparent to hits (canvas under the zone, jump and ⏸); a mouse drag on the left is the scene pointer (kind `mouse`), no stick, the boy does not move, no lens shift, the device stays keyboard; a click on the ⏸ corner does not pause; the first touch brings the layer back with the stick under the thumb (300, 450), the boy walks 1.98 m and the scene pointer stays free; a mouse move sends it away again; a jump tap whose press and lift land in one frame jumps (0.89 m) |
 
 With L's Sunwork files laid over this branch in a scratch tree (not committed here), `mobile-tests --only aim`
@@ -301,3 +304,14 @@ The foundation suite (the engine's own, frozen; `--artifact`) passes 18 / 18 wit
 budget against the pre-foundation tree (median 16.1 s against a budget of 16.4 s, base medians 15.0 s, under another
 agent's load; 24 painted loading values) and the artifact boot; the souk bot (85.37 s, no death, hash `7bd4df65`)
 and the 13 souk negatives pass.
+
+### Integration (L and U merged)
+
+On the integration branch the checks run against the Sunwork lab: `mobile-tests --only aim` on the three phones taps
+grab beside `M2` (latched on touch, the layer switches to its aiming layout), touches the lock `L4` (the tray settles on
+−45° and the notch buzzes: one vibration, `haptics.last === 'notch'`), taps again (the grip lets go, the layer leaves
+the aiming layout), takes the crank `K2` and touches `L7` (`F2` turns to 45°), and turns the capstan by a finger toward
+the fortress lamp (the heliostat settles on 3.2° and the lab ends). `ux-tests --only hints` checks the souk's zones
+(`souk:0` at the sack pile, `souk:1` by the crate, `souk:2` at the terrace) and, in the lab, tilt at a gripped mirror,
+its end on a tilt, the mouse after it and the crank glyph. Both runners default to port 5173.
+

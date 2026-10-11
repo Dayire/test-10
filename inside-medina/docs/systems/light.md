@@ -98,11 +98,9 @@ above it, which would otherwise shut the ray that holds a sun-bolt.
   With `settings.aimSnap` (default on), if that notch lights no target but a neighbour does (a probe trace), the
   neighbour wins.
 - A grip survives a step down of up to 0.26 m (a kerb), so pushing a stand off a rail kerb keeps the hands on it.
-- `L.deathColor(kind)` (a chapter hook): the colour the screen dims to on that death; the dead boy holds it on
-  `game.fadeColor` once the fade begins (the lab: indigo `#0b1026` for `sunset`; requests/L.md #2 moves it engine-side).
-  While the final pass mixes the fade colour raw in display space (requests/L.md #8) it is handed over
-  display-encoded, so the screen ends on the colour's own hex (11, 16, 38); the stopgap switches itself off when the
-  shader line changes.
+- `L.deathColor(kind)` (a chapter hook): the colour the screen dims to on that death (the lab: indigo `#0b1026` for
+  `sunset`). The engine's `updateDying` fades to it (requests/L.md #2, applied at the integration), and the final pass
+  display-encodes the fade colour (#8), so the screen ends on the colour's own hex (11, 16, 38).
 - `player.reachable()` → `'mirror' | 'crank' | 'capstan' | 'crate' | 'lever' | null`: what grab holds or would take
   now (the touch grab button's icon, requests/L.md #5). `player.shoulders()` (world, as last drawn) and
   `player.armReach()` (0.43 m: arm and palm) let props choose holds he can reach.
