@@ -414,18 +414,16 @@ export function* buildLab(game, kit) {
   frame(346, 353.8, 353.5, { dist: 18, distPortrait: 16.8, height: 3.6, lookY: 5.0, fov: 40 }); // LD1 347.5 … the ray 362
   cam(358, { dist: 15, height: 2.4, lookY: 2.8, fov: 38, ahead: 2.2 });
   cam(456, { dist: 15, height: 2.4, lookY: 2.8, fov: 38, ahead: 1.6 });
-  // the heliostat's tower: from its foot a level shot holds the boy and the mirror on the roof (y −1 … 16 at 16:9),
-  // and the same lift keeps him in frame at the ladder's top (the camera follows the ground he climbs: y 11 … 28)
   // the heliostat's tower: on the way to it the boy in the lower third and the tower to the roof; at its foot and on
-  // the ladder a held shot of the whole tower (heliostatShots below); on the roof the room's frame holds x 476: the ladder's head, the
-  // boy at the capstan, the heliostat and the sunrise coming in from the right
+  // the ladder a held shot of the whole tower (heliostatShots below); on the roof the room's frame holds x 476: the
+  // ladder's head, the boy at the capstan, the heliostat and the sunrise coming in from the right
   cam(462, { dist: 20, distPortrait: 17, height: 4.2, lookY: 4.8, fov: 40, ahead: 0.6, focusBias: 2 });
   cam(467.8, { dist: 20, distPortrait: 17, height: 4.2, lookY: 4.8, fov: 40, ahead: 0.6, focusBias: 2 });
   frame(468.6, 484, 476, { dist: 16, distPortrait: 15, height: 2.6, lookY: 2.2, fov: 40 });
   // IV-E's held shots (camera overrides; the chapter needs the same, FULL_GAME §5.2 P4): the whole tower and its
-  // heliostat while he is at its foot or on its ladder (the frame stays, he climbs through it), and while he works the capstan the line from the heliostat to
-  // the fortress lamp, so the target is in sight when the magnet snaps: side-on on a landscape screen (x 414 … 483),
-  // down the beam from behind the mirror on an upright phone
+  // heliostat while he is at its foot or on its ladder (the frame stays, he climbs through it), and while he works
+  // the capstan the line from the heliostat to the fortress lamp, so the target is in sight when the magnet snaps:
+  // side-on on a landscape screen (x 414 … 483), down the beam from behind the mirror on an upright phone
   const rigC = game.camRig, D2R = Math.PI / 180;
   const minFov = (a) => Math.max(40, 2 * Math.atan(Math.tan((a < 1 ? 26 : 23) * D2R) / a) / D2R);
   const side = (o, a, x0, x1, y0, y1, lift) => {

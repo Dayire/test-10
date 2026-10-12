@@ -334,7 +334,11 @@ the fortress lamp (the heliostat settles on 3.2° and the lab ends). `ux-tests -
 its end on a tilt, the mouse after it and the crank glyph. Both runners default to port 5173.
 
 Measured on the integration branch (SwiftShader, 4 CPUs shared): `ux-tests` 13 / 13 (the artifact 1.35 MB in its
-sandboxed page, no console error), `mobile-tests` 28 / 28 on the three phones and the touch laptop. Two checks that
+sandboxed page, no console error), `mobile-tests` 28 / 28 on the three phones and the touch laptop. After the
+integration's fixes: `ux-tests` 14 / 14 (one focus mark after a second pause and on the title after play; `textsize`
+clean at 100 / 125 / 150 % on a desktop; the artifact 1.30 MB), `mobile-tests` 31 / 31 (`text` clean on the iPhone 13
+both ways and an iPhone SE; the boy inside the play rect from 0.18 s of play; a finger on the fortress lamp turns the
+heliostat within the magnet's reach, 2.32° upright and 2.6° in landscape, which settles it on 3.2°). Two checks that
 measured a screen while it was still coming in (the settings back glyph under the fading title, the landscape sheet
 still sliding in) now wait for the reveal to finish.
 

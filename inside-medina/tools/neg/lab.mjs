@@ -609,6 +609,25 @@ export const scenarios = [
     },
   },
   {
+    // a hidden guard is back home as built: after a chase, every checkpoint snapshots the guards as a fresh load
+    // does (restart equals a clean start; snapshot and hash checks hold)
+    name: 'a hidden guard snapshots as built', cp: 0,
+    run: async ({ page }) => { await prep(page); return page.evaluate(() => {
+      const { M, G, get, sim } = __neg;
+      const ids = ['guard11', 'captain'], snap = () => ids.map((id) => JSON.stringify(get(id).getState()));
+      const out = { n: G.checkpoints.length, differ: [] };
+      for (let i = 0; i < out.n; i++) {
+        M.checkpoint(i); const fresh = snap();
+        for (const id of ids) get(id).activate();
+        sim(0.8, { x: 0 }); // both run, and may catch him
+        M.checkpoint(i); const again = snap();
+        if (fresh.join() !== again.join()) out.differ.push({ i, fresh, again });
+      }
+      return out;
+    }); },
+    check: (r) => (r.n < 13 ? `only ${r.n} checkpoints` : r.differ.length ? `checkpoint ${r.differ[0].i} after a chase ${JSON.stringify(r.differ[0])}` : true),
+  },
+  {
     // the light census is the fixed rig's, here as in the souk (FULL_GAME §9.1)
     name: 'light census unchanged', cp: 0,
     run: async ({ page }) => page.evaluate(async () => { const lab = __medina.lights(); await __medina.loadChapter('souk', 0); const souk = __medina.lights(); await __medina.loadChapter('lab', 10); return { lab, souk, again: __medina.lights() }; }),

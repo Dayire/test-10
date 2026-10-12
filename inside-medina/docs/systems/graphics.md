@@ -406,6 +406,10 @@ tier, and all 23 checks pass. Heaviest frames (calls / triangles): low 99 / 292 
 finale 152, path 156 / 482 k. The boot check: pair ratios 0.81–0.90, median 0.82 (the boy's surfaces now bake with
 the first chapter's, requests/I0.md #2; the shell's menu is up before the world exists).
 
+After the integration's fixes `--checks` gates ultra too (280 calls / 900 k allowed): its heaviest frames are high's
+(alley 142 / 401 k, finale 152 / 415 k, path 156 / 482 k); low, medium and high unchanged, all 23 checks pass. The
+lab's night street gained three cobble strips and a kerb line in existing batches (no new draw call).
+
 ### Presentation package run (P)
 
 SwiftShader, 640 × 360, `tex=0.1`; "before" is the pre-presentation tree (`0f7b31b`). The flock column counts
